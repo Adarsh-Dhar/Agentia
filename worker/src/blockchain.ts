@@ -1,5 +1,5 @@
 import { Agent, TradeAction, TradeResult } from "./types.js";
-import { Wallet, RESTClient, MsgSend, Key } from "@initia/initia.js";
+import { Wallet, RESTClient, MsgSend, RawKey } from "@initia/initia.js";
 
 const INITIA_REST_URL =
   process.env.INITIA_REST_URL ?? "https://rest.testnet.initia.xyz";
@@ -13,10 +13,19 @@ export async function executeTrade(
     `⛓  Preparing ${action} tx for agent "${agent.name}" on pair ${agent.targetPair} @ $${price.toFixed(4)}`
   );
 
-  try {
+  // Check for missing private key
+  if (!agent.sessionKeyPriv) {
+    const msg = `No private key found for agent ${agent.id}`;
+    console.error(`❌ ${msg}`);
+    return { txHash: "", success: false, error: msg };
+  }
 
-    const rest    = new RESTClient(INITIA_REST_URL);
-    const wallet  = new Wallet(rest, agent.sessionKeyPriv as any as Key);
+  try {
+    const rest = new RESTClient(INITIA_REST_URL);
+    // Trim and convert the hex string to Buffer
+    const hexKey = agent.sessionKeyPriv.trim();
+    const key = new RawKey(Buffer.from(hexKey, "hex"));
+    const wallet = new Wallet(rest, key);
 
     const msg = new MsgSend(
       wallet.key.accAddress,
@@ -27,7 +36,6 @@ export async function executeTrade(
     const tx = await wallet.createAndSignTx({ msgs: [msg] });
     const result = await rest.tx.broadcast(tx);
     return { txHash: result.txhash, success: true };
-    // ─────────────────────────────────────────────────────────────────────
 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

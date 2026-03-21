@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
       spendAllowance,
       sessionExpiresAt,
       sessionKeyPub,
+      sessionKeyPriv,
     } = body;
 
     // Guard: validate required fields
@@ -84,6 +85,7 @@ export async function POST(req: NextRequest) {
           spendAllowance: Number(spendAllowance),
           sessionExpiresAt: new Date(sessionExpiresAt),
           sessionKeyPub: sessionKeyPub ?? null,
+          sessionKeyPriv: sessionKeyPriv ?? null,
         },
       });
 

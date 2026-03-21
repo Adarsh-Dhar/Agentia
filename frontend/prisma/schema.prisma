@@ -58,6 +58,7 @@ model Agent {
   spendAllowance Float        // The max USDC the bot is allowed to use
   sessionExpiresAt DateTime   // When the Initia session key mathematically expires
   sessionKeyPub  String?      // The public key of the AI's temporary session wallet
+  sessionKeyPriv String?      // The private key of the AI's temporary session wallet (hex encoded, MVP only)
   
   // Performance Tracking
   currentPnl     Float        @default(0.0)

@@ -92,6 +92,7 @@ export const AgentScalarFieldEnum = {
   spendAllowance: 'spendAllowance',
   sessionExpiresAt: 'sessionExpiresAt',
   sessionKeyPub: 'sessionKeyPub',
+  sessionKeyPriv: 'sessionKeyPriv',
   currentPnl: 'currentPnl',
   userId: 'userId',
   createdAt: 'createdAt',

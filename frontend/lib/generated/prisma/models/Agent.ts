@@ -45,6 +45,7 @@ export type AgentMinAggregateOutputType = {
   spendAllowance: number | null
   sessionExpiresAt: Date | null
   sessionKeyPub: string | null
+  sessionKeyPriv: string | null
   currentPnl: number | null
   userId: string | null
   createdAt: Date | null
@@ -60,6 +61,7 @@ export type AgentMaxAggregateOutputType = {
   spendAllowance: number | null
   sessionExpiresAt: Date | null
   sessionKeyPub: string | null
+  sessionKeyPriv: string | null
   currentPnl: number | null
   userId: string | null
   createdAt: Date | null
@@ -75,6 +77,7 @@ export type AgentCountAggregateOutputType = {
   spendAllowance: number
   sessionExpiresAt: number
   sessionKeyPub: number
+  sessionKeyPriv: number
   currentPnl: number
   userId: number
   createdAt: number
@@ -102,6 +105,7 @@ export type AgentMinAggregateInputType = {
   spendAllowance?: true
   sessionExpiresAt?: true
   sessionKeyPub?: true
+  sessionKeyPriv?: true
   currentPnl?: true
   userId?: true
   createdAt?: true
@@ -117,6 +121,7 @@ export type AgentMaxAggregateInputType = {
   spendAllowance?: true
   sessionExpiresAt?: true
   sessionKeyPub?: true
+  sessionKeyPriv?: true
   currentPnl?: true
   userId?: true
   createdAt?: true
@@ -132,6 +137,7 @@ export type AgentCountAggregateInputType = {
   spendAllowance?: true
   sessionExpiresAt?: true
   sessionKeyPub?: true
+  sessionKeyPriv?: true
   currentPnl?: true
   userId?: true
   createdAt?: true
@@ -234,6 +240,7 @@ export type AgentGroupByOutputType = {
   spendAllowance: number
   sessionExpiresAt: Date
   sessionKeyPub: string | null
+  sessionKeyPriv: string | null
   currentPnl: number
   userId: string
   createdAt: Date
@@ -272,6 +279,7 @@ export type AgentWhereInput = {
   spendAllowance?: Prisma.FloatFilter<"Agent"> | number
   sessionExpiresAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   sessionKeyPub?: Prisma.StringNullableFilter<"Agent"> | string | null
+  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   currentPnl?: Prisma.FloatFilter<"Agent"> | number
   userId?: Prisma.StringFilter<"Agent"> | string
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
@@ -289,6 +297,7 @@ export type AgentOrderByWithRelationInput = {
   spendAllowance?: Prisma.SortOrder
   sessionExpiresAt?: Prisma.SortOrder
   sessionKeyPub?: Prisma.SortOrderInput | Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
   currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -309,6 +318,7 @@ export type AgentWhereUniqueInput = Prisma.AtLeast<{
   spendAllowance?: Prisma.FloatFilter<"Agent"> | number
   sessionExpiresAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   sessionKeyPub?: Prisma.StringNullableFilter<"Agent"> | string | null
+  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   currentPnl?: Prisma.FloatFilter<"Agent"> | number
   userId?: Prisma.StringFilter<"Agent"> | string
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
@@ -326,6 +336,7 @@ export type AgentOrderByWithAggregationInput = {
   spendAllowance?: Prisma.SortOrder
   sessionExpiresAt?: Prisma.SortOrder
   sessionKeyPub?: Prisma.SortOrderInput | Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
   currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -349,6 +360,7 @@ export type AgentScalarWhereWithAggregatesInput = {
   spendAllowance?: Prisma.FloatWithAggregatesFilter<"Agent"> | number
   sessionExpiresAt?: Prisma.DateTimeWithAggregatesFilter<"Agent"> | Date | string
   sessionKeyPub?: Prisma.StringNullableWithAggregatesFilter<"Agent"> | string | null
+  sessionKeyPriv?: Prisma.StringNullableWithAggregatesFilter<"Agent"> | string | null
   currentPnl?: Prisma.FloatWithAggregatesFilter<"Agent"> | number
   userId?: Prisma.StringWithAggregatesFilter<"Agent"> | string
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Agent"> | Date | string
@@ -364,6 +376,7 @@ export type AgentCreateInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -380,6 +393,7 @@ export type AgentUncheckedCreateInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   userId: string
   createdAt?: Date | string
@@ -396,6 +410,7 @@ export type AgentUpdateInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -412,6 +427,7 @@ export type AgentUncheckedUpdateInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   userId?: Prisma.StringFieldUpdateOperationsInput | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -428,6 +444,7 @@ export type AgentCreateManyInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   userId: string
   createdAt?: Date | string
@@ -443,6 +460,7 @@ export type AgentUpdateManyMutationInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -457,6 +475,7 @@ export type AgentUncheckedUpdateManyInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   userId?: Prisma.StringFieldUpdateOperationsInput | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -482,6 +501,7 @@ export type AgentCountOrderByAggregateInput = {
   spendAllowance?: Prisma.SortOrder
   sessionExpiresAt?: Prisma.SortOrder
   sessionKeyPub?: Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrder
   currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -502,6 +522,7 @@ export type AgentMaxOrderByAggregateInput = {
   spendAllowance?: Prisma.SortOrder
   sessionExpiresAt?: Prisma.SortOrder
   sessionKeyPub?: Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrder
   currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -517,6 +538,7 @@ export type AgentMinOrderByAggregateInput = {
   spendAllowance?: Prisma.SortOrder
   sessionExpiresAt?: Prisma.SortOrder
   sessionKeyPub?: Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrder
   currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
@@ -614,6 +636,7 @@ export type AgentCreateWithoutUserInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -629,6 +652,7 @@ export type AgentUncheckedCreateWithoutUserInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -673,6 +697,7 @@ export type AgentScalarWhereInput = {
   spendAllowance?: Prisma.FloatFilter<"Agent"> | number
   sessionExpiresAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   sessionKeyPub?: Prisma.StringNullableFilter<"Agent"> | string | null
+  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   currentPnl?: Prisma.FloatFilter<"Agent"> | number
   userId?: Prisma.StringFilter<"Agent"> | string
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
@@ -688,6 +713,7 @@ export type AgentCreateWithoutLogsInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -703,6 +729,7 @@ export type AgentUncheckedCreateWithoutLogsInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   userId: string
   createdAt?: Date | string
@@ -734,6 +761,7 @@ export type AgentUpdateWithoutLogsInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -749,6 +777,7 @@ export type AgentUncheckedUpdateWithoutLogsInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   userId?: Prisma.StringFieldUpdateOperationsInput | string
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -764,6 +793,7 @@ export type AgentCreateManyUserInput = {
   spendAllowance: number
   sessionExpiresAt: Date | string
   sessionKeyPub?: string | null
+  sessionKeyPriv?: string | null
   currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -778,6 +808,7 @@ export type AgentUpdateWithoutUserInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -793,6 +824,7 @@ export type AgentUncheckedUpdateWithoutUserInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -808,6 +840,7 @@ export type AgentUncheckedUpdateManyWithoutUserInput = {
   spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
   sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -853,6 +886,7 @@ export type AgentSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   spendAllowance?: boolean
   sessionExpiresAt?: boolean
   sessionKeyPub?: boolean
+  sessionKeyPriv?: boolean
   currentPnl?: boolean
   userId?: boolean
   createdAt?: boolean
@@ -871,6 +905,7 @@ export type AgentSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensi
   spendAllowance?: boolean
   sessionExpiresAt?: boolean
   sessionKeyPub?: boolean
+  sessionKeyPriv?: boolean
   currentPnl?: boolean
   userId?: boolean
   createdAt?: boolean
@@ -887,6 +922,7 @@ export type AgentSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensi
   spendAllowance?: boolean
   sessionExpiresAt?: boolean
   sessionKeyPub?: boolean
+  sessionKeyPriv?: boolean
   currentPnl?: boolean
   userId?: boolean
   createdAt?: boolean
@@ -903,13 +939,14 @@ export type AgentSelectScalar = {
   spendAllowance?: boolean
   sessionExpiresAt?: boolean
   sessionKeyPub?: boolean
+  sessionKeyPriv?: boolean
   currentPnl?: boolean
   userId?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type AgentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "strategy" | "status" | "targetPair" | "spendAllowance" | "sessionExpiresAt" | "sessionKeyPub" | "currentPnl" | "userId" | "createdAt" | "updatedAt", ExtArgs["result"]["agent"]>
+export type AgentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "strategy" | "status" | "targetPair" | "spendAllowance" | "sessionExpiresAt" | "sessionKeyPub" | "sessionKeyPriv" | "currentPnl" | "userId" | "createdAt" | "updatedAt", ExtArgs["result"]["agent"]>
 export type AgentInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   logs?: boolean | Prisma.Agent$logsArgs<ExtArgs>
@@ -937,6 +974,7 @@ export type $AgentPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs 
     spendAllowance: number
     sessionExpiresAt: Date
     sessionKeyPub: string | null
+    sessionKeyPriv: string | null
     currentPnl: number
     userId: string
     createdAt: Date
@@ -1374,6 +1412,7 @@ export interface AgentFieldRefs {
   readonly spendAllowance: Prisma.FieldRef<"Agent", 'Float'>
   readonly sessionExpiresAt: Prisma.FieldRef<"Agent", 'DateTime'>
   readonly sessionKeyPub: Prisma.FieldRef<"Agent", 'String'>
+  readonly sessionKeyPriv: Prisma.FieldRef<"Agent", 'String'>
   readonly currentPnl: Prisma.FieldRef<"Agent", 'Float'>
   readonly userId: Prisma.FieldRef<"Agent", 'String'>
   readonly createdAt: Prisma.FieldRef<"Agent", 'DateTime'>

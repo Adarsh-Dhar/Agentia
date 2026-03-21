@@ -9,6 +9,7 @@ export interface Agent {
   spendAllowance: number
   sessionExpiresAt: string
   sessionKeyPub: string | null
+  sessionKeyPriv?: string | null // Only for worker, not exposed to frontend users
   currentPnl: number
   userId: string
   createdAt: string
@@ -35,6 +36,7 @@ export interface DeployAgentPayload {
   spendAllowance: number
   sessionExpiresAt: string
   sessionKeyPub?: string
+  sessionKeyPriv?: string
 }
 
 // ─── Agent API ────────────────────────────────────────────────────────────────

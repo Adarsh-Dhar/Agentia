@@ -1,5 +1,7 @@
+import "dotenv/config";
 import { runTradingEngine } from "./engine.js";
 import prisma from "./lib/prisma.js";
+import type { Agent } from "./types.js";
 
 
 const POLLING_INTERVAL = parseInt(process.env.POLLING_INTERVAL_MS ?? "5000", 10);
@@ -36,7 +38,7 @@ async function tick(): Promise<void> {
   console.log(`\n🔍 Running engine for ${activeAgents.length} agent(s)...`);
 
   // Run all agents concurrently (capped by MAX_CONCURRENT_AGENTS)
-  await Promise.allSettled(activeAgents.map((agent) => runTradingEngine(agent as any)));
+  await Promise.allSettled(activeAgents.map((agent: Agent) => runTradingEngine(agent)));
 }
 
 async function startWorker(): Promise<void> {

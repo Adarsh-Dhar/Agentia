@@ -10,7 +10,10 @@
 	},
 	"packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8",
 	"dependencies": {
+		"autoprefixer": "^10.4.27",
+		"postcss": "^8.5.8",
 		"react": "^19.2.4",
-		"react-dom": "^19.2.4"
+		"react-dom": "^19.2.4",
+		"tailwindcss": "^4.2.2"
 	}
 }

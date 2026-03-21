@@ -9,9 +9,8 @@ import { Zap, HelpCircle, ArrowRight, CheckCircle, ShieldCheck, ShieldOff } from
 import { useUser } from '@/lib/user-context'
 import { deployAgent } from '@/lib/api'
 import { useRouter } from 'next/navigation'
-import { useInterwovenKit } from '@initia/interwovenkit-react'
+import { useInterwovenKit, TESTNET } from '@initia/interwovenkit-react'
 import { useMutation } from '@tanstack/react-query'
-import { TESTNET } from '@initia/interwovenkit-react'
 
 const AI_MODELS = [
   { id: 'MEME_SNIPER',       name: 'Meme Token Sniper',       description: 'Identify and trade emerging meme tokens' },
@@ -47,6 +46,20 @@ export default function DeployPage() {
     setIsDeploying(true)
     setError(null)
     try {
+      // Generate a new Initia RawKey (session key pair)
+      const { RawKey } = await import('@initia/initia.js')
+      let privHex = ''
+      if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+        const randomBytes = window.crypto.getRandomValues(new Uint8Array(32))
+        privHex = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('')
+      } else {
+        throw new Error('Secure random generation not available')
+      }
+      const sessionKey = RawKey.fromHex(privHex)
+      if (!sessionKey.publicKey) throw new Error('Failed to derive public key from RawKey')
+      const sessionKeyPub = (sessionKey.publicKey as { key: string }).key
+      const sessionKeyPriv = sessionKey.privateKey.toString('hex')
+
       const expiresAt = new Date(Date.now() + parseFloat(sessionHours) * 3_600_000).toISOString()
       await deployAgent({
         userId: user.id,
@@ -55,6 +68,8 @@ export default function DeployPage() {
         targetPair: tradingPair,
         spendAllowance: parseFloat(maxSpend),
         sessionExpiresAt: expiresAt,
+        sessionKeyPub,
+        sessionKeyPriv,
       })
       setDeployed(true)
       setTimeout(() => router.push('/dashboard'), 1500)
