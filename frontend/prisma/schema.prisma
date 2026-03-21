@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Enums to keep your data strictly typed
+enum AgentStatus {
+  RUNNING
+  PAUSED
+  REVOKED
+  EXPIRED
+}
+
+enum StrategyType {
+  MEME_SNIPER
+  ARBITRAGE
+  SENTIMENT_TRADER
+}
+
+enum LogType {
+  INFO
+  EXECUTION_BUY
+  EXECUTION_SELL
+  PROFIT_SECURED
+  ERROR
+}
+
+// 1. The User Table
+model User {
+  id            String   @id @default(uuid())
+  email         String?  @unique // Captured via InterwovenKit social login
+  walletAddress String   @unique // The primary Initia wallet address
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // A user can deploy multiple AI agents
+  agents        Agent[]
+}
+
+// 2. The Agent Table (The "Corporate Credit Card" configs)
+model Agent {
+  id             String       @id @default(uuid())
+  name           String       // e.g., "INIT Sniffer"
+  strategy       StrategyType
+  status         AgentStatus  @default(RUNNING)
+  targetPair     String       // e.g., "INIT/USDC"
+  
+  // Session Key Parameters
+  spendAllowance Float        // The max USDC the bot is allowed to use
+  sessionExpiresAt DateTime   // When the Initia session key mathematically expires
+  sessionKeyPub  String?      // The public key of the AI's temporary session wallet
+  
+  // Performance Tracking
+  currentPnl     Float        @default(0.0)
+
+  // Relations
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs           TradeLog[]
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+// 3. The Live Logs Table (For the Terminal UI)
+model TradeLog {
+  id          String   @id @default(uuid())
+  type        LogType
+  message     String   // e.g., "AI identified arbitrage on INIT/USDC"
+  
+  // Optional execution details
+  txHash      String?  // The Initia transaction hash (if a trade occurred)
+  price       Float?   // Price at execution
+  amount      Float?   // Amount of tokens traded
+  
+  // Relations
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  timestamp   DateTime @default(now())
+}
