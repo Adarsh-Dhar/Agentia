@@ -1,22 +1,39 @@
-'use client'
+"use client"
 
+import React from 'react'
 import { Button } from '@/components/ui/button'
 import { LandingHeader } from '@/components/landing-header'
 import { FeatureCard } from '@/components/feature-card'
 import Link from 'next/link'
 import { ArrowRight, Zap, Lock, GitBranch } from 'lucide-react'
+import { useInterwovenKit } from '@initia/interwovenkit-react'
+import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
 
 export default function Home() {
-  const handleConnect = () => {
-    // This would trigger the InterwovenKit login modal
-    // For now, redirect to dashboard
-    window.location.href = '/dashboard'
+  const { address, initiaAddress, openConnect } = useInterwovenKit()
+  const router = useRouter()
+  const connected = !!(address || initiaAddress)
+
+  // Auto-redirect if already connected
+  useEffect(() => {
+    if (connected) {
+      // Don't auto-redirect on landing — let the user choose
+    }
+  }, [connected])
+
+  const handleConnect = async () => {
+    if (connected) {
+      router.push('/dashboard')
+    } else {
+      await openConnect()
+    }
   }
 
   return (
     <>
       <LandingHeader />
-      
+
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto text-center">
@@ -37,23 +54,25 @@ export default function Home() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
-            <Button 
+            <Button
               size="lg"
               onClick={handleConnect}
               className="bg-primary hover:bg-primary/90 text-primary-foreground px-8 gap-2"
             >
-              Connect to App
+              {connected ? 'Open Dashboard' : 'Connect Wallet'}
               <ArrowRight className="w-5 h-5" />
             </Button>
-            <Link href="/dashboard">
-              <Button 
-                size="lg"
-                variant="outline"
-                className="border-border hover:border-primary/50 hover:bg-primary/5 w-full"
-              >
-                View Dashboard
-              </Button>
-            </Link>
+            {connected && (
+              <Link href="/dashboard">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="border-border hover:border-primary/50 hover:bg-primary/5 w-full"
+                >
+                  View Dashboard
+                </Button>
+              </Link>
+            )}
           </div>
 
           {/* Stats */}
@@ -94,7 +113,7 @@ export default function Home() {
             <FeatureCard
               icon="🔐"
               title="Mathematically Secure"
-              description="Session keys with cryptographic guarantees. Set spending limits and time windows. Your funds remain in your complete control."
+              description="Session keys with cryptographic guarantees powered by Initia's native autosign. Set spending limits and time windows — your funds stay safe."
               gradient={true}
             />
             <FeatureCard
@@ -124,15 +143,15 @@ export default function Home() {
                 <div className="flex gap-4">
                   <Zap className="w-6 h-6 text-primary flex-shrink-0 mt-1" />
                   <div>
-                    <h3 className="font-semibold mb-1">Session Key Limits</h3>
-                    <p className="text-foreground/70">Set maximum spending amounts and expiration times for added security.</p>
+                    <h3 className="font-semibold mb-1">Initia Autosign</h3>
+                    <p className="text-foreground/70">Native session keys with spending caps and time-based expiration — sign once, trade forever within limits.</p>
                   </div>
                 </div>
                 <div className="flex gap-4">
                   <GitBranch className="w-6 h-6 text-primary flex-shrink-0 mt-1" />
                   <div>
                     <h3 className="font-semibold mb-1">Blockchain Verified</h3>
-                    <p className="text-foreground/70">All trades are cryptographically verified on-chain.</p>
+                    <p className="text-foreground/70">All trades are cryptographically verified on Initia&apos;s interwoven rollup network.</p>
                   </div>
                 </div>
               </div>
@@ -158,19 +177,19 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* CTA */}
       <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-primary/10 via-transparent to-secondary/10 border-y border-border">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-4xl font-bold mb-4">Ready to Trade Autonomously?</h2>
           <p className="text-lg text-foreground/70 mb-8">
             Join hundreds of traders using Agentia for intelligent, hands-free trading on Initia.
           </p>
-          <Button 
+          <Button
             size="lg"
             onClick={handleConnect}
             className="bg-primary hover:bg-primary/90 text-primary-foreground px-8"
           >
-            Connect to App Now
+            {connected ? 'Open Dashboard' : 'Connect Wallet Now'}
           </Button>
         </div>
       </section>
@@ -179,45 +198,28 @@ export default function Home() {
       <footer className="border-t border-border py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <h3 className="font-semibold mb-4">Product</h3>
-              <ul className="space-y-2 text-sm text-foreground/70">
-                <li><a href="#" className="hover:text-foreground transition-colors">Features</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Pricing</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Docs</a></li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Company</h3>
-              <ul className="space-y-2 text-sm text-foreground/70">
-                <li><a href="#" className="hover:text-foreground transition-colors">About</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Blog</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Careers</a></li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Legal</h3>
-              <ul className="space-y-2 text-sm text-foreground/70">
-                <li><a href="#" className="hover:text-foreground transition-colors">Privacy</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Terms</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Security</a></li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Community</h3>
-              <ul className="space-y-2 text-sm text-foreground/70">
-                <li><a href="#" className="hover:text-foreground transition-colors">Twitter</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Discord</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">GitHub</a></li>
-              </ul>
-            </div>
+            {[
+              { title: 'Product', links: ['Features', 'Pricing', 'Docs'] },
+              { title: 'Company', links: ['About', 'Blog', 'Careers'] },
+              { title: 'Legal', links: ['Privacy', 'Terms', 'Security'] },
+              { title: 'Community', links: ['Twitter', 'Discord', 'GitHub'] },
+            ].map((col) => (
+              <div key={col.title}>
+                <h3 className="font-semibold mb-4">{col.title}</h3>
+                <ul className="space-y-2 text-sm text-foreground/70">
+                  {col.links.map((l) => (
+                    <li key={l}><a href="#" className="hover:text-foreground transition-colors">{l}</a></li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
           <div className="border-t border-border pt-8 flex flex-col md:flex-row justify-between items-center text-sm text-foreground/60">
             <div>&copy; 2024 Agentia. All rights reserved.</div>
             <div className="flex gap-6 mt-4 md:mt-0">
-              <a href="#" className="hover:text-foreground transition-colors">Security</a>
-              <a href="#" className="hover:text-foreground transition-colors">Status</a>
-              <a href="#" className="hover:text-foreground transition-colors">Contact</a>
+              {['Security', 'Status', 'Contact'].map((l) => (
+                <a key={l} href="#" className="hover:text-foreground transition-colors">{l}</a>
+              ))}
             </div>
           </div>
         </div>

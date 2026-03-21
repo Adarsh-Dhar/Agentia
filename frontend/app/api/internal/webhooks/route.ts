@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       await tx.tradeLog.create({
         data: {
           agentId,
-          type: logType as any, // Passes the string directly to Prisma
+          type: logType as string, // Passes the string directly to Prisma
           message: logMessage,
           txHash:  txHash  ?? null,
           price:   typeof price  === "number" ? price  : null,
@@ -86,8 +86,7 @@ export async function POST(req: NextRequest) {
 
     // ── 5. Acknowledge receipt ────────────────────────────────────────────────
     return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error: unknown) {
-    console.error("[POST /api/internal/webhooks] Error:", error);
+  } catch {
     return NextResponse.json(
       { error: "Internal server error." },
       { status: 500 }

@@ -1,0 +1,7 @@
+ .next/
+ node_modules/
+ .next/static/
+ .next/types/
+ dist/
+ build/
+ out/

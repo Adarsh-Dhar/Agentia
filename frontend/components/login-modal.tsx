@@ -1,8 +1,8 @@
-'use client'
+"use client"
 
+import React, { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { useState } from 'react'
 
 interface LoginModalProps {
   open: boolean

@@ -28,7 +28,7 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
     }
 
     return NextResponse.json(agent, { status: 200 });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }
@@ -50,7 +50,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteContext) {
     await prisma.agent.delete({ where: { id: agentId } });
 
     return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }

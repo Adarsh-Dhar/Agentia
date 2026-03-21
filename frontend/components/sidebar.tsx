@@ -1,36 +1,51 @@
-'use client'
+"use client"
 
+import React, { useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { Bot, BarChart3, Zap, Wallet, Menu, X } from 'lucide-react'
-import { useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
+import { Bot, BarChart3, Zap, Wallet, Menu, X, LogOut, ShieldCheck, ShieldOff } from 'lucide-react'
+
 import { cn } from '@/lib/utils'
+import { useInterwovenKit } from '@initia/interwovenkit-react'
+import { useMutation } from '@tanstack/react-query'
+import { CHAIN_ID } from '@/lib/providers'
 
 export function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
 
+  const { address, initiaAddress, disconnect, autoSign } = useInterwovenKit()
+
+  const connected = !!(address || initiaAddress)
+  const displayAddr = initiaAddress ?? address
+  const shortAddr = displayAddr
+    ? `${displayAddr.slice(0, 8)}...${displayAddr.slice(-4)}`
+    : null
+
+  const autosignEnabled = autoSign?.isEnabledByChain?.[CHAIN_ID] ?? false
+  const autosignExpiry = autoSign?.expiredAtByChain?.[CHAIN_ID]
+
+  const enableAutosign = useMutation({
+    mutationFn: () => autoSign.enable(CHAIN_ID),
+    onError: (e) => console.error('Enable autosign failed', e),
+  })
+
+  const disableAutosign = useMutation({
+    mutationFn: () => autoSign.disable(CHAIN_ID),
+    onError: (e) => console.error('Disable autosign failed', e),
+  })
+
+  const handleDisconnect = () => {
+    disconnect()
+    router.push('/')
+  }
+
   const navItems = [
-    {
-      href: '/dashboard',
-      label: 'Dashboard',
-      icon: BarChart3,
-    },
-    {
-      href: '/dashboard/deploy',
-      label: 'Deploy Agent',
-      icon: Zap,
-    },
-    {
-      href: '/dashboard/agents',
-      label: 'Active Agents',
-      icon: Bot,
-    },
-    {
-      href: '/dashboard/bridge',
-      label: 'Bridge/Wallet',
-      icon: Wallet,
-    },
+    { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
+    { href: '/dashboard/deploy', label: 'Deploy Agent', icon: Zap },
+    { href: '/dashboard/agents', label: 'Active Agents', icon: Bot },
+    { href: '/dashboard/bridge', label: 'Bridge/Wallet', icon: Wallet },
   ]
 
   return (
@@ -89,9 +104,63 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-sidebar-border">
-          <button className="w-full px-4 py-2.5 rounded-lg bg-gradient-to-r from-primary to-secondary text-primary-foreground font-semibold hover:opacity-90 transition-opacity">
-            Connect Wallet
+        <div className="p-4 border-t border-sidebar-border space-y-3">
+          {/* Wallet info */}
+          {connected && shortAddr && (
+            <div className="px-3 py-2.5 rounded-lg bg-muted/20 border border-border/50">
+              <p className="text-xs text-muted-foreground mb-0.5">Connected Wallet</p>
+              <p className="text-sm font-mono text-foreground truncate">{shortAddr}</p>
+            </div>
+          )}
+
+          {/* Autosign toggle */}
+          {connected && autoSign && (
+            <button
+              onClick={() =>
+                autosignEnabled
+                  ? disableAutosign.mutate()
+                  : enableAutosign.mutate()
+              }
+              disabled={
+                autoSign.isLoading ||
+                enableAutosign.isPending ||
+                disableAutosign.isPending
+              }
+              className={cn(
+                'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors border',
+                autosignEnabled
+                  ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
+                  : 'bg-muted/20 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/40'
+              )}
+            >
+              {autosignEnabled ? (
+                <ShieldCheck size={16} className="flex-shrink-0" />
+              ) : (
+                <ShieldOff size={16} className="flex-shrink-0" />
+              )}
+              <div className="text-left min-w-0">
+                <div className="font-medium leading-none mb-0.5">
+                  {autosignEnabled ? 'Autosign Active' : 'Enable Autosign'}
+                </div>
+                {autosignEnabled && autosignExpiry && (
+                  <div className="text-xs opacity-70 truncate">
+                    Expires {autosignExpiry.toLocaleDateString()}
+                  </div>
+                )}
+                {!autosignEnabled && (
+                  <div className="text-xs opacity-60">Sign once, trade freely</div>
+                )}
+              </div>
+            </button>
+          )}
+
+          {/* Disconnect */}
+          <button
+            onClick={handleDisconnect}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors text-sm"
+          >
+            <LogOut size={16} />
+            <span>Disconnect</span>
           </button>
         </div>
       </aside>

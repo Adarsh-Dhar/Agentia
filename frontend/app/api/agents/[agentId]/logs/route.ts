@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     });
 
     return NextResponse.json(logs, { status: 200, headers: { "Cache-Control": "no-store" } });
-  } catch (error: unknown) {
+  } catch {
     return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }
