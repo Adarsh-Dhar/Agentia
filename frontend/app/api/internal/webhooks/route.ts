@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { LogType } from "@prisma/client";
+
+// Map incoming action strings to the correct string representation of the Enum
+const ACTION_LOG_TYPE_MAP: Record<string, string> = {
+  BUY:            "EXECUTION_BUY",
+  SELL:           "EXECUTION_SELL",
+  PROFIT_SECURED: "PROFIT_SECURED",
+  ERROR:          "ERROR",
+  INFO:           "INFO",
+};
 
 // Map incoming action strings to the correct LogType enum
-const ACTION_LOG_TYPE_MAP: Record<string, LogType> = {
-  BUY:            LogType.EXECUTION_BUY,
-  SELL:           LogType.EXECUTION_SELL,
-  PROFIT_SECURED: LogType.PROFIT_SECURED,
-  ERROR:          LogType.ERROR,
-  INFO:           LogType.INFO,
-};
+// (see above)
 
 // ─── POST: Receive trade reports from the off-chain AI worker ─────────────────
 // This route is NEVER called by the frontend. It is the private channel
@@ -43,12 +45,7 @@ export async function POST(req: NextRequest) {
 
     const logType = ACTION_LOG_TYPE_MAP[action.toUpperCase()];
     if (!logType) {
-      return NextResponse.json(
-        {
-          error: `Invalid action "${action}". Must be one of: ${Object.keys(ACTION_LOG_TYPE_MAP).join(", ")}`,
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Invalid action "${action}".` }, { status: 400 });
     }
 
     // Confirm the agent exists before writing anything
@@ -66,7 +63,6 @@ export async function POST(req: NextRequest) {
 
     // ── 3 & 4. Update PnL and write the trade log atomically ─────────────────
     await prisma.$transaction(async (tx) => {
-      // Only adjust PnL when a real profit/loss figure is reported
       if (typeof profit === "number" && profit !== 0) {
         await tx.agent.update({
           where: { id: agentId },
@@ -74,15 +70,12 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Build a human-readable log message if the worker didn't supply one
-      const logMessage =
-        message ??
-        buildDefaultMessage(action.toUpperCase(), txHash, profit);
+      const logMessage = message ?? buildDefaultMessage(action.toUpperCase(), txHash, profit);
 
       await tx.tradeLog.create({
         data: {
           agentId,
-          type: logType,
+          type: logType as any, // Passes the string directly to Prisma
           message: logMessage,
           txHash:  txHash  ?? null,
           price:   typeof price  === "number" ? price  : null,
@@ -92,10 +85,7 @@ export async function POST(req: NextRequest) {
     });
 
     // ── 5. Acknowledge receipt ────────────────────────────────────────────────
-    return NextResponse.json(
-      { success: true, message: "Trade report received and logged." },
-      { status: 200 }
-    );
+    return NextResponse.json({ success: true }, { status: 200 });
   } catch (error: unknown) {
     console.error("[POST /api/internal/webhooks] Error:", error);
     return NextResponse.json(
@@ -107,30 +97,16 @@ export async function POST(req: NextRequest) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildDefaultMessage(
-  action: string,
-  txHash?: string,
-  profit?: number
-): string {
-  const txPart = txHash
-    ? ` | TX: ${txHash}`
-    : "";
-
-  const profitPart =
-    typeof profit === "number" && profit !== 0
-      ? ` | PnL Δ: ${profit >= 0 ? "+" : ""}${profit.toFixed(4)} USDC`
-      : "";
+function buildDefaultMessage(action: string, txHash?: string, profit?: number): string {
+  const txPart = txHash ? ` | TX: ${txHash}` : "";
+  const profitPart = typeof profit === "number" && profit !== 0 
+    ? ` | PnL Δ: ${profit >= 0 ? "+" : ""}${profit.toFixed(4)} USDC` : "";
 
   switch (action) {
-    case "BUY":
-      return `Execution: BUY order placed on Initia.${txPart}${profitPart}`;
-    case "SELL":
-      return `Execution: SELL order placed on Initia.${txPart}${profitPart}`;
-    case "PROFIT_SECURED":
-      return `Profit secured on Initia.${txPart}${profitPart}`;
-    case "ERROR":
-      return `Worker reported an error.${txPart}`;
-    default:
-      return `Worker update: ${action}.${txPart}${profitPart}`;
+    case "BUY": return `Execution: BUY order placed on Initia.${txPart}${profitPart}`;
+    case "SELL": return `Execution: SELL order placed on Initia.${txPart}${profitPart}`;
+    case "PROFIT_SECURED": return `Profit secured on Initia.${txPart}${profitPart}`;
+    case "ERROR": return `Worker reported an error.${txPart}`;
+    default: return `Worker update: ${action}.${txPart}${profitPart}`;
   }
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { AgentStatus, LogType, StrategyType } from "@prisma/client";
+
+// Use an array instead of the Prisma Enum to bypass Turbopack bug
+const VALID_STRATEGIES = ["MEME_SNIPER", "ARBITRAGE", "SENTIMENT_TRADER"];
 
 // ─── GET: List all agents for a user ─────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -63,10 +65,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate strategy is a known enum value
-    if (!Object.values(StrategyType).includes(strategy)) {
+    if (!VALID_STRATEGIES.includes(strategy)) {
       return NextResponse.json(
-        { error: `Invalid strategy. Must be one of: ${Object.values(StrategyType).join(", ")}` },
+        { error: `Invalid strategy. Must be one of: ${VALID_STRATEGIES.join(", ")}` },
         { status: 400 }
       );
     }
@@ -77,8 +78,8 @@ export async function POST(req: NextRequest) {
         data: {
           userId,
           name,
-          strategy: strategy as StrategyType,
-          status: AgentStatus.RUNNING, // 3. Initial status is RUNNING
+          strategy, // Prisma accepts the string literal directly
+          status: "RUNNING", 
           targetPair,
           spendAllowance: Number(spendAllowance),
           sessionExpiresAt: new Date(sessionExpiresAt),
@@ -86,11 +87,10 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // 4. Seed the terminal UI with a boot message so it's never empty
       await tx.tradeLog.create({
         data: {
           agentId: newAgent.id,
-          type: LogType.INFO,
+          type: "INFO",
           message: `System Boot: Agent "${newAgent.name}" deployed securely on Initia. Session key active. Awaiting first market signal.`,
         },
       });
