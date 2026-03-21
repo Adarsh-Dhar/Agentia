@@ -8,7 +8,7 @@ import { Bot, BarChart3, Zap, Wallet, Menu, X, LogOut, ShieldCheck, ShieldOff } 
 import { cn } from '@/lib/utils'
 import { useInterwovenKit } from '@initia/interwovenkit-react'
 import { useMutation } from '@tanstack/react-query'
-import { CHAIN_ID } from '@/lib/providers'
+import { TESTNET } from '@initia/interwovenkit-react'
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -23,16 +23,16 @@ export function Sidebar() {
     ? `${displayAddr.slice(0, 8)}...${displayAddr.slice(-4)}`
     : null
 
-  const autosignEnabled = autoSign?.isEnabledByChain?.[CHAIN_ID] ?? false
-  const autosignExpiry = autoSign?.expiredAtByChain?.[CHAIN_ID]
+  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
+  const autosignExpiry = autoSign?.expiredAtByChain?.[TESTNET.defaultChainId]
 
   const enableAutosign = useMutation({
-    mutationFn: () => autoSign.enable(CHAIN_ID),
+    mutationFn: () => autoSign.enable(TESTNET.defaultChainId),
     onError: (e) => console.error('Enable autosign failed', e),
   })
 
   const disableAutosign = useMutation({
-    mutationFn: () => autoSign.disable(CHAIN_ID),
+    mutationFn: () => autoSign.disable(TESTNET.defaultChainId),
     onError: (e) => console.error('Disable autosign failed', e),
   })
 

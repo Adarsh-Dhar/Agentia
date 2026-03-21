@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       await tx.tradeLog.create({
         data: {
           agentId,
-          type: logType as string, // Passes the string directly to Prisma
+          type: logType as any, // Passes the string directly to Prisma
           message: logMessage,
           txHash:  txHash  ?? null,
           price:   typeof price  === "number" ? price  : null,

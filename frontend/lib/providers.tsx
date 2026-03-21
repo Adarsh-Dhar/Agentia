@@ -8,6 +8,7 @@ import {
   initiaPrivyWalletConnector,
   injectStyles,
   InterwovenKitProvider,
+  TESTNET
 } from '@initia/interwovenkit-react'
 import interwovenKitStyles from '@initia/interwovenkit-react/styles.js'
 import { UserProvider } from '@/lib/user-context'
@@ -24,8 +25,6 @@ const queryClient = new QueryClient({
   },
 })
 
-// Use "initiation-2" for testnet, "interwoven-1" for mainnet
-export const CHAIN_ID = process.env.NEXT_PUBLIC_CHAIN_ID ?? 'initiation-2'
 
 export default function Providers({ children }: PropsWithChildren) {
   useEffect(() => {
@@ -35,7 +34,7 @@ export default function Providers({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>
       <WagmiProvider config={wagmiConfig}>
-        <InterwovenKitProvider defaultChainId={CHAIN_ID}>
+        <InterwovenKitProvider {... TESTNET}>
           <UserProvider>
             {children}
           </UserProvider>

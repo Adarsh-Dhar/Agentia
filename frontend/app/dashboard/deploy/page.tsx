@@ -11,7 +11,7 @@ import { deployAgent } from '@/lib/api'
 import { useRouter } from 'next/navigation'
 import { useInterwovenKit } from '@initia/interwovenkit-react'
 import { useMutation } from '@tanstack/react-query'
-import { CHAIN_ID } from '@/lib/providers'
+import { TESTNET } from '@initia/interwovenkit-react'
 
 const AI_MODELS = [
   { id: 'MEME_SNIPER',       name: 'Meme Token Sniper',       description: 'Identify and trade emerging meme tokens' },
@@ -33,10 +33,10 @@ export default function DeployPage() {
   const [error,           setError]            = useState<string | null>(null)
   const [deployed,        setDeployed]         = useState(false)
 
-  const autosignEnabled = autoSign?.isEnabledByChain?.[CHAIN_ID] ?? false
+  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
 
   const enableAutosign = useMutation({
-    mutationFn: () => autoSign.enable(CHAIN_ID),
+    mutationFn: () => autoSign.enable(TESTNET.defaultChainId),
     onError: (e) => console.error('Autosign enable failed', e),
   })
 

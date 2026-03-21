@@ -15,19 +15,18 @@ import {
   fetchAgent, fetchAgentLogs, updateAgentStatus, deleteAgent,
   formatSessionExpiry, strategyLabel, Agent, TradeLog,
 } from '@/lib/api'
-import { useInterwovenKit } from '@initia/interwovenkit-react'
+import { useInterwovenKit, TESTNET } from '@initia/interwovenkit-react'
 import { useMutation } from '@tanstack/react-query'
-import { CHAIN_ID } from '@/lib/providers'
 
 export default function AgentDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter()
   const agentId = params.id
 
   const { autoSign } = useInterwovenKit()
-  const autosignEnabled = autoSign?.isEnabledByChain?.[CHAIN_ID] ?? false
+  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
 
   const enableAutosign = useMutation({
-    mutationFn: () => autoSign.enable(CHAIN_ID),
+    mutationFn: () => autoSign.enable(TESTNET.defaultChainId),
   })
 
   const [agent,              setAgent]              = useState<Agent | null>(null)

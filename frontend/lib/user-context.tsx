@@ -1,7 +1,7 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
-import { useInterwovenKit } from '@initia/interwovenkit-react'
+import { useInterwovenKit, TESTNET } from '@initia/interwovenkit-react'
 
 interface User {
   id: string
