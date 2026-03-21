@@ -18,9 +18,9 @@ import {
 import { useInterwovenKit, TESTNET } from '@initia/interwovenkit-react'
 import { useMutation } from '@tanstack/react-query'
 
-export default function AgentDetailPage({ params }: { params: { id: string } }) {
+export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter()
-  const agentId = params.id
+  const { id: agentId } = React.use(params)
 
   const { autoSign } = useInterwovenKit()
   const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
