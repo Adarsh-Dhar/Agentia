@@ -34,7 +34,14 @@ export default function Providers({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>
       <WagmiProvider config={wagmiConfig}>
-        <InterwovenKitProvider {... TESTNET}>
+        <InterwovenKitProvider
+          {...TESTNET}
+          enableAutoSign={{
+            [TESTNET.defaultChainId]: [
+              "/initia.move.v1.MsgExecute",
+            ],
+          }}
+        >
           <UserProvider>
             {children}
           </UserProvider>
