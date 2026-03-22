@@ -20,44 +20,51 @@ export async function executeTrade(
     return { txHash: "", success: false, error: msg };
   }
 
-  try {
-
-    const rest = new RESTClient(INITIA_REST_URL, {
-      chainId: "initiation-2",
-      gasPrices: "0.15uinit",
-      gasAdjustment: "2.0",
-    });
-
-    // Trim and convert the hex string to Buffer
-    const hexKey = agent.sessionKeyPriv.trim();
-    const key = new RawKey(Buffer.from(hexKey, "hex"));
-    const wallet = new Wallet(rest, key);
-
-    // Debug: log the address and check if account exists
-    console.log("Sender address:", wallet.key.accAddress);
     try {
-      const [balance] = await rest.bank.balance(wallet.key.accAddress);
-      console.log("Balance:", balance);
-    } catch (err) {
-      console.error("Error fetching balance (account may not exist):", err);
+      const rest = new RESTClient(INITIA_REST_URL, {
+        chainId: "initiation-2",
+        gasPrices: "0.15uinit",
+        gasAdjustment: "2.0",
+      });
+
+      // Trim and convert the hex string to Buffer
+      const hexKey = agent.sessionKeyPriv.trim();
+      const key = new RawKey(Buffer.from(hexKey, "hex"));
+      const wallet = new Wallet(rest, key);
+
+      // Debug: log the address and check if account exists
+      console.log("Sender address:", wallet.key.accAddress);
+      let balanceUinit = 0;
+      try {
+        const [balance] = await rest.bank.balance(wallet.key.accAddress);
+        console.log("Balance:", balance);
+        balanceUinit = parseInt(balance.get("uinit")?.amount ?? "0");
+      } catch (err) {
+        console.error("Error fetching balance (account may not exist):", err);
+        return { txHash: "", success: false, error: "Could not fetch balance" };
+      }
+
+      const GAS_RESERVE = 300_000; // 0.3 INIT for gas
+      if (balanceUinit <= GAS_RESERVE) {
+        return { txHash: "", success: false, error: "Insufficient balance for gas" };
+      }
+
+      const sendAmount = String(balanceUinit - GAS_RESERVE);
+      const msg = new MsgSend(
+        wallet.key.accAddress,
+        "init1hp2ja3qu676kjaryvqkjfkwpwnm0hp3u8sthw2",
+        `${sendAmount}uinit`
+      );
+
+      const tx = await wallet.createAndSignTx({
+        msgs: [msg],
+        // chain_id: "initiation-2"
+      });
+      const result = await rest.tx.broadcast(tx);
+      return { txHash: result.txhash, success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Trade execution failed for agent ${agent.id}: ${message}`);
+      return { txHash: "", success: false, error: message };
     }
-
-    const msg = new MsgSend(
-      wallet.key.accAddress,
-      "init1hp2ja3qu676kjaryvqkjfkwpwnm0hp3u8sthw2",
-      "1000000uinit"
-    );
-
-    const tx = await wallet.createAndSignTx({
-      msgs: [msg],
-      // chain_id: "initiation-2"
-    });
-    const result = await rest.tx.broadcast(tx);
-    return { txHash: result.txhash, success: true };
-
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Trade execution failed for agent ${agent.id}: ${message}`);
-    return { txHash: "", success: false, error: message };
-  }
 }

@@ -21,8 +21,11 @@ export async function POST(req: NextRequest) {
     // ── 1. Security Gate ──────────────────────────────────────────────────────
     // The worker must send the shared secret in the Authorization header.
     // Without this check, anyone could forge profitable trades on the dashboard.
+
     const authHeader = req.headers.get("authorization");
     const expectedToken = `Bearer ${process.env.INTERNAL_WEBHOOK_SECRET}`;
+    console.log("Expected:", expectedToken);
+    console.log("Received:", authHeader);
 
     if (!authHeader || authHeader !== expectedToken) {
       console.warn("[/api/internal/webhooks] Unauthorized attempt blocked.");

@@ -1,6 +1,7 @@
 import { WebhookPayload } from "./types.js";
 
 const SECRET = process.env.INTERNAL_WEBHOOK_SECRET ?? "dev-secret";
+console.log("Sending with secret:", SECRET);
 const NEXT_APP_URL = process.env.NEXT_APP_URL ?? "http://localhost:3000";
 const WEBHOOK_URL = `${NEXT_APP_URL}/api/internal/webhooks`;
 
