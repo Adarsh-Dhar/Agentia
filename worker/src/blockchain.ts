@@ -46,7 +46,8 @@ export async function executeTrade(
 
       const GAS_RESERVE = 300_000; // 0.3 INIT for gas
       if (balanceUinit <= GAS_RESERVE) {
-        return { txHash: "", success: false, error: "Insufficient balance for gas" };
+        console.warn(`⚠️ Insufficient balance for gas: ${balanceUinit} uinit (required > ${GAS_RESERVE} uinit)`);
+        return { txHash: "", success: false, error: `Insufficient balance for gas: ${balanceUinit} uinit (required > ${GAS_RESERVE} uinit)` };
       }
 
       const sendAmount = String(balanceUinit - GAS_RESERVE);
@@ -61,7 +62,9 @@ export async function executeTrade(
         // chain_id: "initiation-2"
       });
       const result = await rest.tx.broadcast(tx);
-      return { txHash: result.txhash, success: true };
+      const txHash = result.txhash;
+      console.log(`✅ Transaction Success! Hash: ${txHash}`);
+      return { txHash, success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`❌ Trade execution failed for agent ${agent.id}: ${message}`);
