@@ -70,6 +70,7 @@
     "input-otp": "1.4.2",
     "lucide-react": "^0.564.0",
     "nanoid": ">=5.0.0",
+    "navigation": "link:@types/next/navigation",
     "next": "16.2.1",
     "next-themes": "^0.4.6",
     "prisma": "^7.5.0",

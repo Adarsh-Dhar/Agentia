@@ -185,6 +185,9 @@ importers:
       nanoid:
         specifier: '>=5.0.0'
         version: 5.1.7
+      navigation:
+        specifier: link:@types/next/navigation
+        version: link:@types/next/navigation
       next:
         specifier: 16.2.1
         version: 16.2.1(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

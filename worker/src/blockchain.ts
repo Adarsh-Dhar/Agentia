@@ -2,7 +2,7 @@ import { Agent, TradeAction, TradeResult } from "./types.js";
 import { Wallet, RESTClient, MsgSend, RawKey} from "@initia/initia.js";
 
 const INITIA_REST_URL =
-  process.env.INITIA_REST_URL ?? "https://rest.testnet.initia.xyz"; // Changed to requested testnet endpoint
+  process.env.INITIA_REST_URL ?? "https://rest.initiation-2.initia.xyz"; // Updated to active Initia Initiation-2 endpoint
 
 export async function executeTrade(
   agent: Agent,
@@ -24,7 +24,7 @@ export async function executeTrade(
 
     const rest = new RESTClient(INITIA_REST_URL, {
       chainId: "initiation-2",
-      gasPrices: "0.015uinit",
+      gasPrices: "0.15uinit",
       gasAdjustment: "2.0",
     });
 
@@ -50,6 +50,7 @@ export async function executeTrade(
 
     const tx = await wallet.createAndSignTx({
       msgs: [msg],
+      // chain_id: "initiation-2"
     });
     const result = await rest.tx.broadcast(tx);
     return { txHash: result.txhash, success: true };
