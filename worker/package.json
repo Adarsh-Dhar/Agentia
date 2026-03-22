@@ -12,6 +12,8 @@
   "type": "module",
   "devDependencies": {
     "@types/express": "4.17.1",
+    "@types/node": "^25.5.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "dependencies": {
@@ -27,5 +29,6 @@
     "pg": "^8.20.0",
     "tailwind-merge": "^3.5.0",
     "wagmi": "^3.5.0"
-  }
+  },
+  "packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8"
 }

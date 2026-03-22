@@ -2,7 +2,7 @@ import { Agent, TradeAction, TradeResult } from "./types.js";
 import { Wallet, RESTClient, MsgSend, RawKey } from "@initia/initia.js";
 
 const INITIA_REST_URL =
-  process.env.INITIA_REST_URL ?? "https://rest.testnet.initia.xyz";
+  process.env.INITIA_REST_URL ?? "https://rest.testnet.initia.xyz"; // Ensure this matches a valid REST endpoint
 
 export async function executeTrade(
   agent: Agent,
@@ -27,10 +27,13 @@ export async function executeTrade(
     const key = new RawKey(Buffer.from(hexKey, "hex"));
     const wallet = new Wallet(rest, key);
 
+    // The 3rd argument of MsgSend is the "amount", which expects a Coin[] 
+    // or a string that can be parsed as a Coin.
+    // The recipient address must be a valid Initia address (not a contract unless supported by MsgSend)
     const msg = new MsgSend(
       wallet.key.accAddress,
-      "<dex_contract_address>",
-      `{"swap":{"offer_asset":{"info":{"native_token":{"denom":"uinit"}},"amount":"1000000"}}}`,
+      "init1hp2ja3qu676kjaryvqkjfkwpwnm0hp3u8sthw2", // Replace with a valid recipient Initia address
+      "1000000uinit" // Amount must be "number" + "denom"
     );
 
     const tx = await wallet.createAndSignTx({ msgs: [msg] });

@@ -4,7 +4,7 @@ import prisma from "./lib/prisma.js";
 import type { Agent } from "./types.js";
 
 
-const POLLING_INTERVAL = parseInt(process.env.POLLING_INTERVAL_MS ?? "5000", 10);
+const POLLING_INTERVAL = parseInt(process.env.POLLING_INTERVAL ?? process.env.POLLING_INTERVAL_MS ?? "5000", 10);
 const MAX_CONCURRENT_AGENTS = parseInt(process.env.MAX_CONCURRENT_AGENTS ?? "10", 10);
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
@@ -25,20 +25,31 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 // ─── Main loop ────────────────────────────────────────────────────────────────
 
 async function tick(): Promise<void> {
-  const activeAgents = await prisma.agent.findMany({
+  const dbAgents = await prisma.agent.findMany({
     where: { status: "RUNNING" },
     take: MAX_CONCURRENT_AGENTS, // safety cap
+    select: {
+      id: true,
+      name: true,
+      strategy: true,
+      targetPair: true,
+      sessionKeyPriv: true,
+      status: true,
+      userId: true,
+      createdAt: true,
+      updatedAt: true
+    }
   });
 
-  if (activeAgents.length === 0) {
+  if (dbAgents.length === 0) {
     console.log("💤 No active agents — waiting...");
     return;
   }
 
-  console.log(`\n🔍 Running engine for ${activeAgents.length} agent(s)...`);
+  console.log(`\n🔍 Running engine for ${dbAgents.length} agent(s)...`);
 
-  // Run all agents concurrently (capped by MAX_CONCURRENT_AGENTS)
-  await Promise.allSettled(activeAgents.map((agent: Agent) => runTradingEngine(agent)));
+  // Map DB agents to full Agent type
+  await Promise.allSettled(dbAgents.map((agent) => runTradingEngine(agent as Agent)));
 }
 
 async function startWorker(): Promise<void> {
