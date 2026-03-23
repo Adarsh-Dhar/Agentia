@@ -11,6 +11,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+      "ox": "0.14.8",
     "@cosmjs/amino": "0.36.x",
     "@cosmjs/crypto": "0.36.x",
     "@cosmjs/encoding": "0.36.x",

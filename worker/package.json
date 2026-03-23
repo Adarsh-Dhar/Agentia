@@ -17,6 +17,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+      "ox": "0.14.8",
     "@initia/initia.js": "^1.0.21",
     "@initia/interwovenkit-react": "^2.4.6",
     "@prisma/adapter-pg": "^7.5.0",
