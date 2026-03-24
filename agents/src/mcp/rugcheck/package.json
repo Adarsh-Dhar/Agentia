@@ -1,0 +1,20 @@
+{
+  "name": "@flash-loan/mcp-rugcheck",
+  "version": "1.0.0",
+  "description": "MCP Server: Rugcheck token safety and validation code generator",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node --esm src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0"
+  }
+}

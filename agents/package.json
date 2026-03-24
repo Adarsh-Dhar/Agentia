@@ -1,21 +1,25 @@
 {
-	"dependencies": {
-		"@biconomy/abstractjs": "^1.2.3",
-		"@biconomy/account": "^4.5.7",
-		"@biconomy/modules": "^3.1.4",
-		"@types/dotenv": "^8.2.3",
-		"@venusprotocol/chains": "^0.24.0",
-		"config": "link:@types/dotenv/config",
-		"dotenv": "^17.3.1",
-		"express": "^5.2.1",
-		"ox": "0.14.8",
-		"viem": "2.47.6"
-	},
-	"packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8",
-	"devDependencies": {
-		"@types/express": "^5.0.6",
-		"@types/node": "^25.5.0",
-		"ts-node": "^10.9.2",
-		"typescript": "6.0.2"
-	}
+  "name": "flash-loan-arbitrageur-system",
+  "version": "1.0.0",
+  "description": "Meta-Agent + MCP Server system for building Flash Loan Arbitrageur bots",
+  "private": true,
+  "workspaces": [
+    "mcp-servers/*",
+    "meta-agent"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "start:all-mcp": "concurrently \"npm run start -w mcp-servers/goat-solana\" \"npm run start -w mcp-servers/jupiter-api\" \"npm run start -w mcp-servers/aave-flashloan\" \"npm run start -w mcp-servers/dexscreener\" \"npm run start -w mcp-servers/rugcheck\" \"npm run start -w mcp-servers/quicknode\" \"npm run start -w mcp-servers/biconomy\" \"npm run start -w mcp-servers/oneinch\"",
+    "start:meta-agent": "npm run start -w meta-agent"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "concurrently": "^8.2.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.0"
+  },
+  "packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1"
+  }
 }
