@@ -245,7 +245,7 @@ export function createAgentNode<S extends GraphState>(
     const toolList = config.tools?.map((t) => `• ${t.name}: ${t.description}`).join("\n") ?? "none";
 
     // ── Replace with real LLM call, e.g.: ──────────────────────────────────
-    // const llm = new ChatOpenAI({ model: config.model ?? "gpt-4o", temperature: config.temperature });
+    // const llm = new ChatOpenAI({ model: config.model ?? "gpt-4o-mini", temperature: config.temperature });
     // const response = await llm.invoke([new SystemMessage(config.systemPrompt), ...state.messages]);
     // const content = response.content as string;
     // ───────────────────────────────────────────────────────────────────────

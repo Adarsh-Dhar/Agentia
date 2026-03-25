@@ -4,7 +4,7 @@ import OpenAI from "openai";
 // Reuse your Universal LLM logic here
 const apiKey = process.env.GITHUB_TOKEN || process.env.OPENAI_API_KEY;
 const baseURL = process.env.GITHUB_TOKEN ? "https://models.inference.ai.azure.com" : undefined;
-const model = process.env.GITHUB_TOKEN ? "gpt-4o" : "gpt-4o-mini";
+const model = process.env.GITHUB_TOKEN ? "gpt-4o-mini" : "gpt-4o-mini";
 
 const openai = new OpenAI({ apiKey, baseURL });
 

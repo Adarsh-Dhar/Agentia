@@ -76,7 +76,7 @@ export class AutoGenAgent {
 
     // ── Replace with real LLM call ──────────────────────────────────────────
     // const response = await openai.chat.completions.create({
-    //   model: this.config.model ?? "gpt-4o",
+    //   model: this.config.model ?? "gpt-4o-mini",
     //   messages: [
     //     { role: "system", content: this.systemPrompt },
     //     ...conversationHistory.map(t => ({ role: "user" as const, content: `${t.speaker}: ${t.message}` })),

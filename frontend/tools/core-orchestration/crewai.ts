@@ -88,7 +88,7 @@ export class CrewAgent {
     this.goal = options.goal;
     this.backstory = options.backstory;
     this.tools = options.tools ?? [];
-    this.model = options.model ?? "gpt-4o";
+    this.model = options.model ?? "gpt-4o-mini";
     this.allowDelegation = options.allowDelegation ?? false;
     this.verbose = options.verbose ?? false;
     this.maxIterations = options.maxIterations ?? 5;
