@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { FileCode, Terminal as TerminalIcon, Folder, Play } from "lucide-react";
+import { FileCode, Terminal as TerminalIcon, Play } from "lucide-react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css"; // Required for proper terminal styling
 
 // Helper: Converts flat [{filepath, content}] into WebContainer's nested tree format
 function parseFilesToTree(files: { filepath: string; content: string }[]): any {
@@ -25,20 +28,58 @@ function parseFilesToTree(files: { filepath: string; content: string }[]): any {
 
 export function WebContainerRunner() {
   const [status, setStatus] = useState("Idle");
-  const [logs, setLogs] = useState<string[]>([]);
   const [generatedFiles, setGeneratedFiles] = useState<{ filepath: string; content: string }[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  
   const webcontainerInstanceRef = useRef<any>(null);
-  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const terminalElementRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
 
-  // Auto-scroll terminal
+  // Initialize xterm.js on mount
   useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+    if (!terminalElementRef.current || terminalRef.current) return;
+
+    const term = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      disableStdin: true, // Read-only for this execution view
+      theme: {
+        background: '#020617', // match tailwind slate-950
+        foreground: '#22c55e', // text-green-500
+      },
+      fontSize: 12,
+      fontFamily: 'Menlo, courier-new, courier, monospace',
+    });
+
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(terminalElementRef.current);
+    fitAddon.fit();
+
+    terminalRef.current = term;
+    fitAddonRef.current = fitAddon;
+
+    term.writeln("\x1b[1;34m[System]\x1b[0m Terminal initialized. Ready.");
+
+    // Handle resize
+    const resizeObserver = new ResizeObserver(() => fitAddon.fit());
+    resizeObserver.observe(terminalElementRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+      term.dispose();
+      terminalRef.current = null;
+    };
+  }, []);
 
   const generateAndRun = async () => {
+    const term = terminalRef.current;
+    if (!term) return;
+
+    term.clear();
     setStatus("Generating code via AI...");
-    setLogs(["[System] Requesting code generation...\n"]);
+    term.writeln("\x1b[1;34m[System]\x1b[0m Requesting code generation...");
 
     try {
       const res = await fetch("/api/get-code", {
@@ -52,15 +93,16 @@ export function WebContainerRunner() {
 
       if (!data.files) throw new Error("No files received.");
 
-      // Inject strict network rules into pnpm config
+      // Add a resilient .npmrc (npm works much better in WebContainers than pnpm)
       data.files.push({
-        filepath: ".pnpmrc",
-        content: "maxsockets=3\nfetch-retries=5\nfetch-retry-mintimeout=20000\nfetch-retry-maxtimeout=120000\nfund=false\naudit=false\n"
+        filepath: ".npmrc",
+        content: "registry=https://registry.yarnpkg.com/\nmaxsockets=2\nfetch-retries=5\nfetch-retry-mintimeout=20000\nfetch-retry-maxtimeout=120000\nfund=false\naudit=false\n"
       });
 
       setGeneratedFiles(data.files);
       setSelectedFile(data.files[0].filepath);
       setStatus("Booting Sandbox...");
+      term.writeln("\x1b[1;34m[System]\x1b[0m Booting WebContainer...");
 
       const { WebContainer } = await import("@webcontainer/api");
       if (!webcontainerInstanceRef.current) {
@@ -71,51 +113,60 @@ export function WebContainerRunner() {
       const fileSystemTree = parseFilesToTree(data.files);
       await instance.mount(fileSystemTree);
 
-      // --- PROGRAMMATIC SPAWN: pnpm install ---
+      // --- THE BOLT.NEW WAY: Spawn jsh with npm_config_yes ---
       setStatus("Installing dependencies...");
-      setLogs((prev) => [...prev, "\n[System] Running 'pnpm install'...\n"]);
-      const installProcess = await instance.spawn('pnpm', ['install', '--no-audit', '--no-fund']);
+      term.writeln("\x1b[1;34m[System]\x1b[0m Executing: npm install");
+      
+      const installProcess = await instance.spawn('jsh', ['-c', 'npm install --loglevel=info --ignore-scripts --legacy-peer-deps --no-fund'], {
+        env: { npm_config_yes: "true" } // Auto-answer yes to any interactive prompts
+      });
+
+      // Pipe directly to xterm
       installProcess.output.pipeTo(
         new WritableStream({
-          write(data) {
-            setLogs(prev => [...prev, data.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "")]);
+          write(chunk) {
+            term.write(chunk);
           }
         })
       );
+
       const installExitCode = await installProcess.exit;
       if (installExitCode !== 0) {
         setStatus("Install failed");
-        setLogs(prev => [...prev, `\n[Error] pnpm install failed with exit code ${installExitCode}\n`]);
+        term.writeln(`\n\x1b[1;31m[Error]\x1b[0m npm install failed with exit code ${installExitCode}`);
         return;
       }
 
       // --- Listen for server-ready event ---
       instance.on && instance.on('server-ready', (port: number, url: string) => {
-        setLogs(prev => [...prev, `\n🚀 Agent Dashboard Live at: ${url}\n`]);
+        term.writeln(`\n\x1b[1;32m🚀 Agent Dashboard Live at: ${url}\x1b[0m\n`);
       });
 
-      // --- PROGRAMMATIC SPAWN: pnpm start ---
+      // --- THE BOLT.NEW WAY: Spawn start command via jsh ---
       setStatus("Running agent...");
-      setLogs(prev => [...prev, "\n[System] Running 'pnpm start'...\n"]);
-      const startProcess = await instance.spawn('pnpm', ['start']);
+      term.writeln("\n\x1b[1;34m[System]\x1b[0m Executing: npm start\n");
+      
+      const startProcess = await instance.spawn('jsh', ['-c', 'npm start'], {
+        env: { npm_config_yes: "true" }
+      });
+
       startProcess.output.pipeTo(
         new WritableStream({
-          write(data) {
-            setLogs(prev => [...prev, data.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "")]);
+          write(chunk) {
+            term.write(chunk);
           }
         })
       );
-      // Optionally, you can await startProcess.exit if you want to know when it stops
 
       setStatus("Agent running");
 
     } catch (err: any) {
       setStatus("Error");
-      setLogs((prev) => [...prev, `\n[Error] ${err.message}\n`]);
+      if (terminalRef.current) {
+        terminalRef.current.writeln(`\n\x1b[1;31m[Error]\x1b[0m ${err.message}`);
+      }
     }
   };
-
-  // Manual terminal input is not used in deployment pipeline mode
 
   return (
     <div className="flex flex-col h-[700px] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden font-mono shadow-2xl text-slate-200">
@@ -168,24 +219,19 @@ export function WebContainerRunner() {
             </pre>
           </div>
 
-          {/* Terminal Output Only (no manual input) */}
-          <div className="h-72 border-t border-slate-800 bg-black/50 flex flex-col">
-            {/* Terminal Header with Clear Button */}
+          {/* Terminal Output UI using xterm.js */}
+          <div className="h-72 border-t border-slate-800 bg-[#020617] flex flex-col">
             <div className="flex items-center justify-between px-4 py-2 bg-slate-900/30 border-b border-slate-800">
               <span className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Terminal Output</span>
               <button 
-                onClick={() => setLogs([])}
+                onClick={() => terminalRef.current?.clear()}
                 className="text-[9px] text-slate-600 hover:text-slate-400 uppercase font-bold"
               >
                 Clear Logs
               </button>
             </div>
-            <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-green-500/90 custom-scrollbar" style={{ minHeight: 0 }}>
-              {logs.map((log: string, i: number) => (
-                <span key={i} className="block whitespace-pre-wrap mb-0.5">{log}</span>
-              ))}
-              <div ref={terminalEndRef} />
-            </div>
+            {/* This is where xterm attaches */}
+            <div className="flex-1 p-2 overflow-hidden" ref={terminalElementRef} />
           </div>
         </div>
       </div>
