@@ -161,9 +161,9 @@ const MCP_SERVERS: MCPServerConfig[] = [
     args: ["../mcp-servers/biconomy/dist/index.js"],
   },
   {
-    name: "oneinch",
+    name: "1inch",
     command: "node",
-    args: ["../mcp-servers/oneinch/dist/index.js"],
+    args: ["../mcp-servers/1inch/dist/index.js"],
   },
 ];
 
@@ -324,7 +324,7 @@ export class MetaAgent {
 
       // Swap execution
       isEVM
-        ? this.callTool("oneinch", "get_swap_code", {
+        ? this.callTool("1inch", "get_swap_code", {
             chainId: config.network === "arbitrum" ? 42161 : 1,
             includeApproval: true,
           })

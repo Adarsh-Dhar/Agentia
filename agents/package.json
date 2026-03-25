@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "start:all-mcp": "concurrently \"npm run start -w mcp-servers/goat-solana\" \"npm run start -w mcp-servers/jupiter-api\" \"npm run start -w mcp-servers/aave-flashloan\" \"npm run start -w mcp-servers/dexscreener\" \"npm run start -w mcp-servers/rugcheck\" \"npm run start -w mcp-servers/quicknode\" \"npm run start -w mcp-servers/biconomy\" \"npm run start -w mcp-servers/oneinch\"",
+    "start:all-mcp": "concurrently \"npm run start -w mcp-servers/goat-solana\" \"npm run start -w mcp-servers/jupiter-api\" \"npm run start -w mcp-servers/aave-flashloan\" \"npm run start -w mcp-servers/dexscreener\" \"npm run start -w mcp-servers/rugcheck\" \"npm run start -w mcp-servers/quicknode\" \"npm run start -w mcp-servers/biconomy\" \"npm run start -w mcp-servers/1inch\"",
     "start:meta-agent": "npm run start -w meta-agent"
   },
   "devDependencies": {
