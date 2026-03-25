@@ -67,7 +67,7 @@ Agentia is a comprehensive platform for deploying and managing autonomous AI tra
 
 ### Prerequisites
 - Node.js 18 or higher
-- pnpm (or npm/yarn)
+- pnpm (or pnpm/yarn)
 
 ### Installation
 

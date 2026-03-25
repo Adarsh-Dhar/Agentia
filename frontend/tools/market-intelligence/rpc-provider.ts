@@ -14,7 +14,7 @@
 //
 // Install:
 //   QuickNode Streams: https://www.quicknode.com/docs/streams
-//   Alchemy SDK:       npm install alchemy-sdk
+//   Alchemy SDK:       pnpm install alchemy-sdk
 // ============================================================
 
 import type { ChainId, Address } from "../types";

@@ -80,7 +80,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "get_dependencies",
-    description: "Returns npm install command for Aave flash loan integration.",
+    description: "Returns pnpm install command for Aave flash loan integration.",
     inputSchema: { type: "object", properties: {} },
   },
 ];
@@ -576,17 +576,17 @@ export const AAVE_FLASH_LOAN_FEE_PERCENT = 0.0009;
 # Aave Flash Loan Dependencies
 
 # Solidity contract compilation (Hardhat):
-npm install -D hardhat @nomiclabs/hardhat-ethers
-npm install @aave/core-v3 @openzeppelin/contracts
+pnpm install -D hardhat @nomiclabs/hardhat-ethers
+pnpm install @aave/core-v3 @openzeppelin/contracts
 
 # TypeScript agent executor:
-npm install ethers dotenv
+pnpm install ethers dotenv
 
 # Contract deployment:
-npm install -D @nomicfoundation/hardhat-toolbox
+pnpm install -D @nomicfoundation/hardhat-toolbox
 
 # Verification on Etherscan:
-npm install -D @nomiclabs/hardhat-etherscan
+pnpm install -D @nomiclabs/hardhat-etherscan
             `,
           },
         ],

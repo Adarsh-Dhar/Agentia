@@ -5,8 +5,8 @@
 // Flash loans let an agent borrow millions without collateral,
 // provided the full amount + fee is repaid in the same transaction.
 //
-// Install: npm install ethers viem  (for ABI encoding)
-//          npm install @aave/core-v3  (for Aave ABIs)
+// Install: pnpm install ethers viem  (for ABI encoding)
+//          pnpm install @aave/core-v3  (for Aave ABIs)
 // Docs:
 //   Aave:    https://docs.aave.com/developers/guides/flash-loans
 //   Compound: https://docs.compound.finance/

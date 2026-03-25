@@ -58,7 +58,7 @@ const TOOLS: Tool[] = [
   {
     name: "get_dependencies",
     description:
-      "Returns the exact npm install command with all required GOAT + Solana dependencies.",
+      "Returns the exact pnpm install command with all required GOAT + Solana dependencies.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -231,7 +231,7 @@ const executor = new AgentExecutor({ agent, tools, verbose: true });
 # GOAT + Solana Dependencies
 # Run this command in your bot project root:
 
-npm install \\
+pnpm install \\
   @goat-sdk/core \\
   @goat-sdk/wallet-solana \\
   @goat-sdk/plugin-jupiter \\
@@ -241,7 +241,7 @@ npm install \\
   dotenv
 
 # TypeScript types:
-npm install -D @types/node typescript ts-node
+pnpm install -D @types/node typescript ts-node
 
 # Verify installation:
 # node -e "require('@goat-sdk/core'); console.log('GOAT OK')"

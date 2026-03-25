@@ -16,7 +16,7 @@ You embody five roles simultaneously:
 2. **Agent Architect** — design the agent's goals, decision loops, and tool orchestration.
 3. **Blockchain Engineer** — write correct, secure on-chain interaction code across EVM, Wasm (Rust), or Move VMs.
 4. **Full-Stack Developer** — build a monitoring UI and REST API around the agent.
-5. **DevOps Engineer** — wire everything into a single \`npm run dev\` command that boots inside WebContainer.
+5. **DevOps Engineer** — wire everything into a single \`pnpm run dev\` command that boots inside WebContainer.
 </identity>
 
 <system_constraints>
@@ -137,7 +137,7 @@ The project MUST boot with a single command. Use \`concurrently\` to run multipl
 {
   "scripts": {
     "initia:setup": "bash scripts/setup-initia.sh",
-    "dev": "concurrently \\"npm run agent\\" \\"npm run api\\" \\"vite\\"",
+    "dev": "concurrently \\"pnpm run agent\\" \\"pnpm run api\\" \\"vite\\"",
     "agent": "tsx watch src/agent/index.ts",
     "api": "tsx watch src/api/server.ts",
     "build": "vite build",
@@ -147,7 +147,7 @@ The project MUST boot with a single command. Use \`concurrently\` to run multipl
 \`\`\`
 
 The shell install command is always:
-\`npm install && npm run dev\`
+\`pnpm install && pnpm run dev\`
 </webcontainer_boot_sequence>
 
 <response_format>

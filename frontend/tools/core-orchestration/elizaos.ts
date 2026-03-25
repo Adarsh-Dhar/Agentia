@@ -5,7 +5,7 @@
 // ElizaOS is the leading TypeScript framework for autonomous agents
 // with modular plugins, social media integration, and on-chain actions.
 //
-// Install: npm install @elizaos/core @elizaos/plugin-bootstrap
+// Install: pnpm install @elizaos/core @elizaos/plugin-bootstrap
 // Docs: https://elizaos.github.io/eliza/
 // ============================================================
 

@@ -17,6 +17,11 @@ export async function POST(req: Request) {
       USER INTENT: "${intent}"
       MCP SNIPPETS: ${JSON.stringify(mcpSnippets)}
 
+      You must use these EXACT dependency versions in the package.json (do NOT use ^ or ~):
+      - @solana/web3.js: 1.95.0
+      - @jup-ag/api: 6.0.21
+      - dotenv: 16.4.5
+
       Respond STRICTLY in JSON matching this schema:
       {
         "thoughts": "String explaining architecture",

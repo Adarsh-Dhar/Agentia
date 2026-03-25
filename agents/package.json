@@ -9,9 +9,9 @@
     "meta-agent"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "start:all-mcp": "concurrently \"npm run start -w mcp-servers/goat-solana\" \"npm run start -w mcp-servers/jupiter-api\" \"npm run start -w mcp-servers/aave-flashloan\" \"npm run start -w mcp-servers/dexscreener\" \"npm run start -w mcp-servers/rugcheck\" \"npm run start -w mcp-servers/quicknode\" \"npm run start -w mcp-servers/biconomy\" \"npm run start -w mcp-servers/1inch\"",
-    "start:meta-agent": "npm run start -w meta-agent"
+    "build": "pnpm run build --workspaces",
+    "start:all-mcp": "concurrently \"pnpm run start -w mcp-servers/goat-solana\" \"pnpm run start -w mcp-servers/jupiter-api\" \"pnpm run start -w mcp-servers/aave-flashloan\" \"pnpm run start -w mcp-servers/dexscreener\" \"pnpm run start -w mcp-servers/rugcheck\" \"pnpm run start -w mcp-servers/quicknode\" \"pnpm run start -w mcp-servers/biconomy\" \"pnpm run start -w mcp-servers/1inch\"",
+    "start:meta-agent": "pnpm run start -w meta-agent"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -6,8 +6,8 @@
 // ANY on-chain protocol (Aave, Uniswap, Jupiter, etc.) without
 // writing bespoke integration code for each one.
 //
-// Install: npm install @goat-sdk/core @goat-sdk/adapter-vercel-ai
-//          npm install @goat-sdk/plugin-uniswap @goat-sdk/plugin-aave
+// Install: pnpm install @goat-sdk/core @goat-sdk/adapter-vercel-ai
+//          pnpm install @goat-sdk/plugin-uniswap @goat-sdk/plugin-aave
 // Docs: https://ohmygoat.dev/
 // ============================================================
 
@@ -168,7 +168,7 @@ export class GoatToolkit {
 
 /**
  * Create a Uniswap v3 plugin stub.
- * Real impl: npm install @goat-sdk/plugin-uniswap
+ * Real impl: pnpm install @goat-sdk/plugin-uniswap
  */
 export function createUniswapPlugin(): GoatPlugin {
   return {
@@ -223,7 +223,7 @@ export function createUniswapPlugin(): GoatPlugin {
 
 /**
  * Create an Aave v3 plugin stub.
- * Real impl: npm install @goat-sdk/plugin-aave
+ * Real impl: pnpm install @goat-sdk/plugin-aave
  */
 export function createAavePlugin(): GoatPlugin {
   return {

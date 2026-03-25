@@ -5,7 +5,7 @@
 // LangGraph is best for complex, stateful workflows where agents must
 // follow specific logical paths with conditional branching and cycles.
 //
-// Install: npm install @langchain/langgraph @langchain/core @langchain/openai
+// Install: pnpm install @langchain/langgraph @langchain/core @langchain/openai
 // Docs: https://langchain-ai.github.io/langgraphjs/
 // ============================================================
 

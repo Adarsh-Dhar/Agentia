@@ -23,14 +23,14 @@ Profit     → stays in your wallet 🎉
 cp .env.template .env
 # Edit .env with your settings
 
-npm install
-npm run build
+pnpm install
+pnpm run build
 
 # Test without real money first:
-npm run dry-run
+pnpm run dry-run
 
 # Go live (only after thorough testing):
-npm start
+pnpm start
 ```
 
 ## Safety Checklist
