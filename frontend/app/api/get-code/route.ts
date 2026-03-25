@@ -34,7 +34,10 @@ export async function POST(req: Request) {
       temperature: 0.2,
     });
 
+    // console.log("[get-code] Raw LLM response:", response);
+
     const rawContent = response.choices[0].message.content || "{}";
+    console.log("[get-code] Raw content:", rawContent);
     const parsedData = JSON.parse(rawContent);
 
     return NextResponse.json(parsedData);
