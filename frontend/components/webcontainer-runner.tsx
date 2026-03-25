@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { WebContainer, FileSystemTree } from "@webcontainer/api";
+
 
 // Helper: Converts flat [{filepath, content}] into WebContainer's nested tree format
-function parseFilesToTree(files: { filepath: string; content: string }[]): FileSystemTree {
-  const tree: FileSystemTree = {};
+// Helper: Converts flat [{filepath, content}] into WebContainer's nested tree format
+function parseFilesToTree(files: { filepath: string; content: string }[]): any {
+  const tree: any = {};
 
   for (const file of files) {
     const parts = file.filepath.split("/");
@@ -31,11 +32,20 @@ function parseFilesToTree(files: { filepath: string; content: string }[]): FileS
 export function WebContainerRunner() {
   const [status, setStatus] = useState("Idle");
   const [logs, setLogs] = useState<string[]>([]);
-  const containerRef = useRef<WebContainer | null>(null);
+  const containerRef = useRef<any>(null);
 
   const generateAndRun = async () => {
     setStatus("Generating code via AI...");
-    
+
+    // Dynamically import @webcontainer/api only in the browser
+    let WebContainer;
+    if (typeof window !== "undefined") {
+      WebContainer = (await import("@webcontainer/api")).WebContainer;
+    } else {
+      setStatus("WebContainer can only run in the browser.");
+      return;
+    }
+
     // 1. Fetch the code from our new API route
     const res = await fetch("/api/get-code", {
       method: "POST",
@@ -45,7 +55,7 @@ export function WebContainerRunner() {
       }),
     });
     const data = await res.json();
-    
+
     if (!data.files) {
       setStatus("Error: Failed to generate files.");
       return;
