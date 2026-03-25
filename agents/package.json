@@ -23,6 +23,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@octokit/rest": "^22.0.1",
+    "@webcontainer/api": "^1.6.1",
     "dotenv": "^17.3.1",
     "openai": "^6.32.0"
   }

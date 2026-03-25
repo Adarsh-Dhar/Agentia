@@ -45,7 +45,8 @@ export interface MetaAgentResponse {
  * @param userRequest The user's natural language request for the agent.
  * @param mcpSnippets Array of MCP tool code snippets to inject.
  */
-export async function generateAgentProject(userRequest: string, mcpSnippets: string[]): Promise<GeneratedFile[]> {
+
+export async function generateAgentProject(userRequest: string, mcpSnippets: string[]): Promise<MetaAgentResponse> {
   console.log("🧠 Meta-Agent: Starting code generation...");
 
   const SYSTEM_PROMPT = getSystemPrompt("meta-agent");
@@ -63,7 +64,6 @@ export async function generateAgentProject(userRequest: string, mcpSnippets: str
     INSTRUCTIONS:
     Generate the full project codebase. You must return a JSON object with a "files" array and a "thoughts" string.
   `;
-
 
   // 2. Call the shared LLM (Using JSON mode to ensure valid output)
   let response, rawContent;
@@ -87,33 +87,8 @@ export async function generateAgentProject(userRequest: string, mcpSnippets: str
 
   console.log("💡 Meta-Agent Thoughts:", parsedResponse.thoughts);
 
-  // 4. Log and Write files locally for inspection
-  await writeFilesLocally(parsedResponse.files);
-  
-  return parsedResponse.files;
-}
-
-/**
- * Writes generated files to a local .generated-bot-test directory for inspection.
- */
-async function writeFilesLocally(files: GeneratedFile[]) {
-  const outputDir = path.join(process.cwd(), '.generated-bot-test');
-  // Clean up previous runs
-  await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
-  await fs.mkdir(outputDir, { recursive: true });
-
-  console.log(`\n📂 Writing ${files.length} files to ${outputDir}...`);
-
-  for (const file of files) {
-    // Handle nested directories (e.g., 'src/index.ts')
-    const fullPath = path.join(outputDir, file.filepath);
-    const dirName = path.dirname(fullPath);
-    await fs.mkdir(dirName, { recursive: true });
-    await fs.writeFile(fullPath, file.content, 'utf-8');
-    console.log(`  ✅ Created: ${file.filepath}`);
-  }
-
-  console.log("\n🚀 Done! Open .generated-bot-test/ to inspect the code.");
+  // 4. Return the parsed response directly to the caller (Next.js API route)
+  return parsedResponse;
 }
 
 // ─── MCP Server Registry ──────────────────────────────────────────────────────
@@ -240,15 +215,14 @@ export class MetaAgent {
     maxLoanUSD: number;
     minProfitUSD: number;
     dryRun: boolean;
-  }): Promise<void> {
+  }): Promise<GeneratedFile[]> {
     console.log("═══════════════════════════════════════════════════════════════");
     console.log("  META-AGENT: Building Flash Loan Arbitrageur Bot");
     console.log(`  Chain: ${config.chain} | Network: ${config.network}`);
     console.log(`  Strategy: ${config.strategy} | Max Loan: $${config.maxLoanUSD}`);
     console.log("═══════════════════════════════════════════════════════════════\n");
 
-    // Create output directory structure
-    await this.setupProjectStructure();
+
 
     // ── Phase 1: Query all MCP servers for code snippets ─────────────────────
     console.log("[MetaAgent] Phase 1: Querying MCP servers for code...\n");
@@ -372,28 +346,14 @@ export class MetaAgent {
           ]),
     ];
 
-    for (const file of files) {
-      await this.writeFile(file.path, file.content);
-    }
+    // Map the internal file structure to the GeneratedFile interface and return it
+    const generatedFiles: GeneratedFile[] = files.map(f => ({
+      filepath: f.path,
+      content: f.content
+    }));
 
-    console.log(`\n[MetaAgent] ✓ Bot project generated at: ${this.outputDir}`);
-    console.log("\n[MetaAgent] Phase 4: Validation summary");
-    console.log("  ✓ LangGraph state machine: workflow.ts");
-    console.log("  ✓ Price monitoring: price-monitor.ts (DexScreener)");
-    console.log("  ✓ Security validation: token-validator.ts (Rugcheck)");
-    console.log("  ✓ RPC subscription: rpc-listener.ts (QuickNode)");
-    console.log("  ✓ Profit calculator: profit-calculator.ts");
-    if (isEVM) {
-      console.log("  ✓ Flash loan contract: contracts/FlashLoanArbitrageur.sol");
-      console.log("  ✓ Flash loan executor: flashloan-executor.ts");
-      console.log("  ✓ Swap router: swap-executor.ts (1inch)");
-      console.log("  ✓ Session keys: session-keys.ts (Biconomy)");
-    } else {
-      console.log("  ✓ Wallet init: wallet.ts (GOAT + Solana)");
-      console.log("  ✓ Swap router: swap-executor.ts (Jupiter)");
-    }
-
-    this.printDeploymentGuide(config, isEVM);
+    console.log(`\n[MetaAgent] ✓ Generated ${generatedFiles.length} files in memory.`);
+    return generatedFiles;
   }
 
   // ─── Code Generators ─────────────────────────────────────────────────────────
@@ -892,68 +852,7 @@ npm start
 `;
   }
 
-  // ─── File System Helpers ──────────────────────────────────────────────────────
 
-  private async setupProjectStructure(): Promise<void> {
-    const dirs = [
-      this.outputDir,
-      path.join(this.outputDir, "src"),
-      path.join(this.outputDir, "contracts"),
-    ];
-    for (const dir of dirs) {
-      await fs.mkdir(dir, { recursive: true });
-    }
-  }
-
-  private async writeFile(relativePath: string, content: string): Promise<void> {
-    const fullPath = path.join(this.outputDir, relativePath);
-    await fs.mkdir(path.dirname(fullPath), { recursive: true });
-    await fs.writeFile(fullPath, content.trim(), "utf-8");
-    console.log(`  ✓ Written: ${relativePath}`);
-  }
-
-  private printDeploymentGuide(config: any, isEVM: boolean): void {
-    console.log(`
-\n══════════════════════════════════════════════════════════════
-  NEXT STEPS — Deploy Your Bot
-══════════════════════════════════════════════════════════════
-
-1. SETUP ENVIRONMENT
-   cd ${this.outputDir}
-   cp .env.template .env
-   # Fill in your RPC URLs, private key, API keys
-
-2. INSTALL DEPENDENCIES
-   npm install
-
-${
-  isEVM
-    ? `3. DEPLOY SMART CONTRACT
-   npx hardhat compile
-   npx hardhat run scripts/deploy.ts --network ${config.network}
-   # Copy the contract address to .env -> ARBITRAGEUR_CONTRACT_ADDRESS
-
-4. TEST DRY RUN (no real money)
-   npm run build && npm run dry-run
-
-5. GO LIVE (carefully!)
-   # Set DRY_RUN=false in .env
-   npm start`
-    : `3. TEST DRY RUN (no real money)
-   npm run build && npm run dry-run
-
-4. GO LIVE (carefully!)
-   # Set DRY_RUN=false in .env
-   npm start`
-}
-
-⚠️  IMPORTANT WARNINGS:
-   - Flash loan arbitrage is highly competitive
-   - Gas costs can erase profits on small gaps
-   - Test thoroughly on testnet before mainnet
-   - Never use more capital than you can afford to lose
-══════════════════════════════════════════════════════════════`);
-  }
 
   /**
    * Disconnects all MCP server connections.
@@ -965,26 +864,3 @@ ${
     }
   }
 }
-
-// ─── CLI Entry Point ──────────────────────────────────────────────────────────
-
-async function main() {
-  const agent = new MetaAgent("./generated-bot");
-
-  try {
-    await agent.connectToMCPServers();
-
-    await agent.buildFlashLoanBot({
-      chain: "evm_arbitrum",
-      strategy: "multi_hop",
-      network: "arbitrum",
-      maxLoanUSD: 50000,
-      minProfitUSD: 100,
-      dryRun: true,
-    });
-  } finally {
-    await agent.disconnect();
-  }
-}
-
-main().catch(console.error);
