@@ -1,0 +1,17 @@
+# Ignore build outputs and dependencies for all MCP server subprojects
+1inch/dist/
+1inch/node_modules/
+aave-flashloan/dist/
+aave-flashloan/node_modules/
+biconomy/dist/
+biconomy/node_modules/
+dexscreener/dist/
+dexscreener/node_modules/
+goat-solana/dist/
+goat-solana/node_modules/
+jupiter-api/dist/
+jupiter-api/node_modules/
+quicknode/dist/
+quicknode/node_modules/
+rugcheck/dist/
+rugcheck/node_modules/

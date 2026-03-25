@@ -15,6 +15,106 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { getSystemPrompt } from "../prompts/prompt";
+import { stripIndents } from "../prompts/stripindents";
+import { llm } from "./llm";
+
+// --- LLM Output Schema ---
+export interface GeneratedFile {
+  filepath: string;
+  content: string;
+}
+
+export interface MetaAgentResponse {
+  files: GeneratedFile[];
+  thoughts: string;
+}
+
+
+// --- LLM Client: see llm.ts ---
+
+/**
+ * Generates a target agent project using the Meta-Agent and writes files locally for inspection.
+ * @param userRequest The user's natural language request for the agent.
+ * @param mcpSnippets Array of MCP tool code snippets to inject.
+ */
+
+// --- LLM Project Generation Function ---
+/**
+ * Generates a target agent project using the Meta-Agent and writes files locally for inspection.
+ * @param userRequest The user's natural language request for the agent.
+ * @param mcpSnippets Array of MCP tool code snippets to inject.
+ */
+export async function generateAgentProject(userRequest: string, mcpSnippets: string[]): Promise<GeneratedFile[]> {
+  console.log("🧠 Meta-Agent: Starting code generation...");
+
+  const SYSTEM_PROMPT = getSystemPrompt("meta-agent");
+
+  // 1. Construct the prompt using your existing folder structure
+  const fullPrompt = stripIndents`
+    ${SYSTEM_PROMPT}
+    
+    USER REQUEST:
+    "${userRequest}"
+    
+    AVAILABLE MCP TOOL SNIPPETS:
+    ${mcpSnippets.join('\n\n')}
+    
+    INSTRUCTIONS:
+    Generate the full project codebase. You must return a JSON object with a "files" array and a "thoughts" string.
+  `;
+
+
+  // 2. Call the shared LLM (Using JSON mode to ensure valid output)
+  let response, rawContent;
+  if (llm && typeof llm.chatCompletion === "function") {
+    response = await llm.chatCompletion({
+      messages: [
+        { role: "system", content: "You are an expert Web3 Meta-Agent Builder. Output strictly in JSON." },
+        { role: "user", content: fullPrompt }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+    });
+    // Try both possible response shapes for compatibility
+    rawContent = response.choices?.[0]?.message?.content || response.choices?.[0]?.message?.content || response?.message?.content || "{}";
+  } else {
+    throw new Error("No LLM client configured");
+  }
+
+  // 3. Parse the JSON response
+  const parsedResponse = JSON.parse(rawContent) as MetaAgentResponse;
+
+  console.log("💡 Meta-Agent Thoughts:", parsedResponse.thoughts);
+
+  // 4. Log and Write files locally for inspection
+  await writeFilesLocally(parsedResponse.files);
+  
+  return parsedResponse.files;
+}
+
+/**
+ * Writes generated files to a local .generated-bot-test directory for inspection.
+ */
+async function writeFilesLocally(files: GeneratedFile[]) {
+  const outputDir = path.join(process.cwd(), '.generated-bot-test');
+  // Clean up previous runs
+  await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
+  await fs.mkdir(outputDir, { recursive: true });
+
+  console.log(`\n📂 Writing ${files.length} files to ${outputDir}...`);
+
+  for (const file of files) {
+    // Handle nested directories (e.g., 'src/index.ts')
+    const fullPath = path.join(outputDir, file.filepath);
+    const dirName = path.dirname(fullPath);
+    await fs.mkdir(dirName, { recursive: true });
+    await fs.writeFile(fullPath, file.content, 'utf-8');
+    console.log(`  ✅ Created: ${file.filepath}`);
+  }
+
+  console.log("\n🚀 Done! Open .generated-bot-test/ to inspect the code.");
+}
 
 // ─── MCP Server Registry ──────────────────────────────────────────────────────
 
