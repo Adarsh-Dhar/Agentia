@@ -8,9 +8,9 @@
 import OpenAI from "openai";
 import type { ChatCompletionCreateParamsNonStreaming, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
+
 const GITHUB_MODEL_NAME = process.env.GITHUB_MODEL_NAME || "gpt-4o-mini";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
 interface ChatCompletionParams {
   messages: ChatCompletionMessageParam[];
@@ -23,27 +23,19 @@ class UniversalLLM {
   private model: string;
 
   constructor() {
-    if (GITHUB_TOKEN) {
-      // GitHub Models API is fully compatible with the OpenAI SDK!
-      // We just point it to the Azure endpoint.
-      this.client = new OpenAI({
-        baseURL: "https://models.inference.ai.azure.com",
-        apiKey: GITHUB_TOKEN,
-      });
-      this.model = GITHUB_MODEL_NAME;
-      console.log(`[LLM] Connected via GitHub Models (${this.model})`);
-    } else if (OPENAI_API_KEY) {
-      // Fallback to standard OpenAI
-      this.client = new OpenAI({
-        apiKey: OPENAI_API_KEY,
-      });
-      this.model = process.env.OPENAI_MODEL_NAME || "gpt-4o-mini";
-      console.log(`[LLM] Connected via OpenAI (${this.model})`);
-    } else {
+    if (!GITHUB_TOKEN) {
       throw new Error(
-        "Missing LLM API keys. Please set GITHUB_TOKEN or OPENAI_API_KEY in your .env file."
+        "Missing GITHUB_TOKEN. Please set GITHUB_TOKEN in your .env file."
       );
     }
+    // GitHub Models API is fully compatible with the OpenAI SDK!
+    // We just point it to the Azure endpoint.
+    this.client = new OpenAI({
+      baseURL: "https://models.inference.ai.azure.com",
+      apiKey: GITHUB_TOKEN,
+    });
+    this.model = GITHUB_MODEL_NAME;
+    console.log(`[LLM] Connected via GitHub Models (${this.model})`);
   }
 
   async chatCompletion({ messages, response_format, temperature }: ChatCompletionParams) {

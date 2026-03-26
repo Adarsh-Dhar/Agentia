@@ -187,7 +187,11 @@ export function WebContainerRunner() {
       const { WebContainer } = await import("@webcontainer/api");
       if (!globalWebContainerInstance) {
         try {
-          globalWebContainerInstance = await (WebContainer as { boot: () => Promise<unknown> }).boot();
+          // Add a timeout race so it doesn't hang forever
+          globalWebContainerInstance = await Promise.race([
+            (WebContainer as { boot: () => Promise<unknown> }).boot(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("WebContainer Boot Timeout")), 15000))
+          ]);
         } catch (bootErr: any) {
           if (bootErr?.message?.includes("Only a single WebContainer instance")) {
             throw new Error("WebContainer is already running in the background. Please hard refresh the page (Cmd/Ctrl + R). ");
@@ -206,7 +210,12 @@ export function WebContainerRunner() {
         on?: (ev: string, cb: (port: number, url: string) => void) => void;
       };
 
-      await wc.mount(parseFilesToTree(finalFiles));
+      // Add try-catch specifically around the mount function to catch FS errors
+      try {
+        await wc.mount(parseFilesToTree(finalFiles));
+      } catch (mountErr: any) {
+        throw new Error(`Failed to mount files. The LLM likely generated invalid paths or used native FS modules. Details: ${mountErr.message}`);
+      }
 
       // npm install
       setStatus("Installing packages...");
