@@ -1,398 +1,388 @@
+
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { FileCode, Terminal as TerminalIcon, Play, Settings } from "lucide-react";
+
+// ─── Global WebContainer Instance ─────────────────────────────────────────────
+// Store the WebContainer instance outside the component to survive hot reloads
+let globalWebContainerInstance: any = null;
+import { FileCode, Terminal as TerminalIcon, Play, Settings, Zap } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-function parsePrivateKey(input: string): string {
-  if (input.startsWith('[') && input.endsWith(']')) {
-    return input; // Already a byte array
-  }
-  // It's a Base58 string. Decode it.
-  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  const bytes = [0];
-  for (let i = 0; i < input.length; i++) {
-    const c = input[i];
-    for (let j = 0; j < bytes.length; j++) bytes[j] *= 58;
-    bytes[0] += ALPHABET.indexOf(c);
-    let carry = 0;
-    for (let j = 0; j < bytes.length; j++) {
-      bytes[j] += carry;
-      carry = bytes[j] >> 8;
-      bytes[j] &= 0xff;
-    }
-    while (carry) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-  for (let i = 0; i < input.length && input[i] === "1"; i++) bytes.push(0);
-  return JSON.stringify(bytes.reverse());
+interface GeneratedFile {
+  filepath: string;
+  content: string;
 }
 
-// Helper: Converts flat [{filepath, content}] into WebContainer's nested tree format
-function parseFilesToTree(files: { filepath: string; content: string }[]): any {
-  const tree: any = {};
+interface EnvConfig {
+  EVM_RPC_URL: string;
+  EVM_PRIVATE_KEY: string;
+  MAX_LOAN_USD: string;
+  MIN_PROFIT_USD: string;
+  DRY_RUN: string;
+}
+
+type Phase = "idle" | "generating" | "env-setup" | "running";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function parseFilesToTree(files: GeneratedFile[]): Record<string, unknown> {
+  const tree: Record<string, unknown> = {};
   for (const file of files) {
     const parts = file.filepath.split("/");
-    let currentLevel: any = tree;
+    let cur: Record<string, unknown> = tree;
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
-      const isFile = i === parts.length - 1;
-      if (isFile) {
-        currentLevel[part] = { file: { contents: file.content } };
+      if (i === parts.length - 1) {
+        cur[part] = { file: { contents: file.content } };
       } else {
-        if (!currentLevel[part]) currentLevel[part] = { directory: {} };
-        currentLevel = currentLevel[part].directory;
+        if (!cur[part]) cur[part] = { directory: {} };
+        cur = (cur[part] as { directory: Record<string, unknown> }).directory;
       }
     }
   }
   return tree;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function WebContainerRunner() {
-  const [phase, setPhase] = useState<"idle" | "generating" | "env-setup" | "running">("idle");
+  const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState("Idle");
-  
-  // Environment Configuration State
-  const [envConfig, setEnvConfig] = useState({
-    SOLANA_RPC_URL: "https://api.mainnet-beta.solana.com",
-    PRIVATE_KEY: "",
-    CHECK_INTERVAL: "5000"
+  const [envConfig, setEnvConfig] = useState<EnvConfig>({
+    EVM_RPC_URL:    "https://arb1.arbitrum.io/rpc",
+    EVM_PRIVATE_KEY: "",
+    MAX_LOAN_USD:   "10000",
+    MIN_PROFIT_USD: "50",
+    DRY_RUN:        "true",
   });
-
-  const [generatedFiles, setGeneratedFiles] = useState<{ filepath: string; content: string }[]>([]);
+  const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  
-  const webcontainerInstanceRef = useRef<any>(null);
-  const terminalElementRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
 
-  // Initialize xterm.js on mount
+  const webcontainerRef = useRef<unknown>(null);
+  const terminalElRef   = useRef<HTMLDivElement>(null);
+  const termRef         = useRef<Terminal | null>(null);
+  const fitRef          = useRef<FitAddon | null>(null);
+
+  // ── Init terminal ─────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (!terminalElementRef.current || terminalRef.current) return;
+    if (!terminalElRef.current || termRef.current) return;
 
     const term = new Terminal({
       cursorBlink: true,
       convertEol: true,
       disableStdin: true,
       theme: {
-        background: '#020617', 
-        foreground: '#22c55e', 
+        background: "#020617",
+        foreground: "#22d3ee",
+        green:      "#4ade80",
+        yellow:     "#facc15",
+        red:        "#f87171",
+        cyan:       "#22d3ee",
+        magenta:    "#c084fc",
+        blue:       "#60a5fa",
       },
       fontSize: 12,
-      fontFamily: 'Menlo, courier-new, courier, monospace',
+      fontFamily: "Menlo, 'Courier New', monospace",
     });
 
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(terminalElementRef.current);
-    fitAddon.fit();
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(terminalElRef.current);
+    fit.fit();
 
-    terminalRef.current = term;
-    fitAddonRef.current = fitAddon;
+    termRef.current = term;
+    fitRef.current  = fit;
 
-    term.writeln("\x1b[1;34m[System]\x1b[0m Terminal initialized. Ready.");
+    term.writeln("\x1b[36m[System]\x1b[0m Terminal ready. Click \x1b[1mGenerate Bot\x1b[0m to start.");
 
-    const resizeObserver = new ResizeObserver(() => fitAddon.fit());
-    resizeObserver.observe(terminalElementRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-      term.dispose();
-      terminalRef.current = null;
-    };
+    const obs = new ResizeObserver(() => fit.fit());
+    obs.observe(terminalElRef.current);
+    return () => { obs.disconnect(); term.dispose(); termRef.current = null; };
   }, []);
 
-  // --- PHASE 1: Fetch Code and Prompt for .env ---
+  // ── Phase 1: Generate files ───────────────────────────────────────────────
+
   const generateFiles = async () => {
-    const term = terminalRef.current;
+    const term = termRef.current;
     if (!term) return;
 
     term.clear();
     setPhase("generating");
-    setStatus("Generating code via AI...");
-    term.writeln("\x1b[1;34m[System]\x1b[0m Requesting code generation...");
+    setStatus("Generating bot code...");
+    term.writeln("\x1b[36m[System]\x1b[0m Calling AI code generator...");
 
     try {
       const res = await fetch("/api/get-code", {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          intent: `Write a FULLY FUNCTIONAL Flash Loan Arbitrage price scanner on Solana using Jupiter v6. 
-        DO NOT output boilerplate. Write the complete 'index.js' script that runs a continuous loop every 5 seconds.
-        Use EXACT versions: "@solana/web3.js": "1.95.0", "@jup-ag/api": "6.0.21", "dotenv": "16.4.5", "node-fetch": "2.7.0". 
-        IMPORTANT REQUIREMENTS:
-        1. WebContainers are IP-blocked by Jupiter and cannot reach localhost. You MUST mock the fetch response with a fully structured Jupiter v6 QuoteResponse object. Add this EXACT code at the top:
-          const { Response } = require('node-fetch');
-          const customFetch = async (url, init) => {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const mockData = {
-              inputMint: "So11111111111111111111111111111111111111112",
-              inAmount: "1000000000",
-              outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-              outAmount: Math.floor(Math.random() * (150000000 - 145000000) + 145000000).toString(),
-              otherAmountThreshold: "145000000",
-              swapMode: "ExactIn",
-              slippageBps: 50,
-              priceImpactPct: "0.0",
-              routePlan: [], // The SDK needs this array to .map() over without crashing!
-              contextSlot: 0,
-              timeTaken: 0
-            };
-            return new Response(JSON.stringify(mockData), { status: 200, headers: { 'Content-Type': 'application/json' } });
-          };
-        2. Initialize Jupiter EXACTLY like this to inject the mock:
-          const jupiterClient = createJupiterApiClient({ basePath: "https://quote-api.jup.ag/v6", fetchApi: customFetch });
-        3. To fetch prices, you MUST use 'await jupiterClient.quoteGet({ inputMint, outputMint, amount })'.
-        4. Use real Solana mints: SOL is "So11111111111111111111111111111111111111112", USDC is "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".
-        5. Use an amount of 1000000000 (1 SOL in lamports).
-        6. Log the 'outAmount' from the quote response to the console.`
-        }),
+        body:    JSON.stringify({ intent: "Build a Flash Loan Arbitrageur on Arbitrum using Aave V3" }),
       });
-      const data = await res.json();
 
-      if (!data.files) throw new Error("No files received.");
+      const data = await res.json();
+      if (!data.files?.length) throw new Error("No files received from generator");
 
       setGeneratedFiles(data.files);
-      setSelectedFile(data.files[0].filepath);
-      
-      // Stop here and ask for Environment Variables
-      setPhase("env-setup");
-      setStatus("Awaiting Config...");
-      term.writeln("\x1b[1;33m[System]\x1b[0m Code generated successfully. Awaiting environment variables...");
+      setSelectedFile("src/workflow.ts");
 
-    } catch (err: any) {
+      term.writeln("\x1b[32m[System]\x1b[0m " + data.files.length + " files generated successfully.");
+      term.writeln("\x1b[33m[System]\x1b[0m Configure your environment variables, then click \x1b[1mLaunch Sandbox\x1b[0m.");
+
+      setPhase("env-setup");
+      setStatus("Awaiting config...");
+    } catch (err: unknown) {
       setPhase("idle");
       setStatus("Error");
-      if (terminalRef.current) terminalRef.current.writeln(`\n\x1b[1;31m[Error]\x1b[0m ${err.message}`);
+      term.writeln("\x1b[31m[Error]\x1b[0m " + String(err instanceof Error ? err.message : err));
     }
   };
 
-  // --- PHASE 2: Inject .env, Boot Sandbox, and Run ---
+  // ── Phase 2: Boot WebContainer and run ────────────────────────────────────
+
   const bootAndRun = async () => {
-    const term = terminalRef.current;
+    const term = termRef.current;
     if (!term) return;
 
     setPhase("running");
-    setStatus("Booting Sandbox...");
-    term.writeln("\x1b[1;34m[System]\x1b[0m Configuring variables and booting WebContainer...");
+    setStatus("Booting sandbox...");
+    term.writeln("\x1b[36m[System]\x1b[0m Injecting environment and booting WebContainer...");
 
     try {
-      // 1. Prepare files with injected configuration, filtering out old config files to avoid duplicate React keys
-      const finalFiles = generatedFiles.filter(f => f.filepath !== ".npmrc" && f.filepath !== ".env");
+      // Merge .env overrides into the files list
+      const envContent = [
+        `DRY_RUN=${envConfig.DRY_RUN}`,
+        `EVM_RPC_URL=${envConfig.EVM_RPC_URL}`,
+        `EVM_PRIVATE_KEY=${envConfig.EVM_PRIVATE_KEY || "DEMO"}`,
+        `MAX_LOAN_USD=${envConfig.MAX_LOAN_USD}`,
+        `MIN_PROFIT_USD=${envConfig.MIN_PROFIT_USD}`,
+        `POLL_MS=3000`,
+      ].join("\n");
 
-      // Inject strict network resilience for WebContainer
-      finalFiles.push({
-        filepath: ".npmrc",
-        content: "registry=https://registry.yarnpkg.com/\nmaxsockets=2\nfetch-retries=5\nfetch-retry-mintimeout=20000\nfetch-retry-maxtimeout=120000\nfund=false\naudit=false\n"
-      });
+      const finalFiles = [
+        ...generatedFiles.filter(f => f.filepath !== ".env" && f.filepath !== ".npmrc"),
+        { filepath: ".env",   content: envContent },
+        {
+          filepath: ".npmrc",
+          content: [
+            "registry=https://registry.yarnpkg.com/",
+            "maxsockets=2",
+            "fetch-retries=5",
+            "fetch-retry-mintimeout=20000",
+            "fetch-retry-maxtimeout=120000",
+            "fund=false",
+            "audit=false",
+          ].join("\n"),
+        },
+      ];
 
-      // Inject the securely gathered .env parameters (support all common key names, auto-handle Base58 or byte array)
-      const safeKey = parsePrivateKey(envConfig.PRIVATE_KEY.trim());
-      const envContent = `
-RPC_URL=${envConfig.SOLANA_RPC_URL}
-SOLANA_RPC_URL=${envConfig.SOLANA_RPC_URL}
-PRIVATE_KEY=${safeKey}
-SECRET_KEY=${safeKey}
-KEYPAIR=${safeKey}
-WALLET_PRIVATE_KEY=${safeKey}
-CHECK_INTERVAL=${envConfig.CHECK_INTERVAL}
-`.trim() + '\n';
-      finalFiles.push({ filepath: ".env", content: envContent });
-
-      // Update state so the user can see the .env file in the sidebar explorer
       setGeneratedFiles(finalFiles);
       setSelectedFile(".env");
 
-      // 2. Boot WebContainer
+      // Boot WebContainer using global instance
       const { WebContainer } = await import("@webcontainer/api");
-      if (!webcontainerInstanceRef.current) {
-        webcontainerInstanceRef.current = await WebContainer.boot();
+      if (!globalWebContainerInstance) {
+        try {
+          globalWebContainerInstance = await (WebContainer as { boot: () => Promise<unknown> }).boot();
+        } catch (bootErr: any) {
+          if (bootErr?.message?.includes("Only a single WebContainer instance")) {
+            throw new Error("WebContainer is already running in the background. Please hard refresh the page (Cmd/Ctrl + R). ");
+          }
+          throw bootErr;
+        }
       }
-      const instance = webcontainerInstanceRef.current;
+      // Sync the ref for local component usage
+      webcontainerRef.current = globalWebContainerInstance;
+      const wc = webcontainerRef.current as {
+        mount: (t: unknown) => Promise<void>;
+        spawn: (cmd: string, args: string[], opts?: Record<string, unknown>) => Promise<{
+          output: { pipeTo: (w: WritableStream) => void };
+          exit: Promise<number>;
+        }>;
+        on?: (ev: string, cb: (port: number, url: string) => void) => void;
+      };
 
-      const fileSystemTree = parseFilesToTree(finalFiles);
-      await instance.mount(fileSystemTree);
+      await wc.mount(parseFilesToTree(finalFiles));
 
-      // 3. Install Packages
-      setStatus("Installing dependencies...");
-      term.writeln("\x1b[1;34m[System]\x1b[0m Executing: npm install");
-      
-      const installProcess = await instance.spawn('jsh', ['-c', 'npm install --loglevel=info --ignore-scripts --legacy-peer-deps --no-fund'], {
-        env: { npm_config_yes: "true" }
+      // npm install
+      setStatus("Installing packages...");
+      term.writeln("\x1b[36m[System]\x1b[0m npm install --legacy-peer-deps");
+
+      const install = await wc.spawn("jsh", ["-c", "npm install --loglevel=error --legacy-peer-deps --no-fund"], {
+        env: { npm_config_yes: "true" },
       });
 
-      installProcess.output.pipeTo(
-        new WritableStream({ write(chunk) { term.write(chunk); } })
-      );
+      install.output.pipeTo(new WritableStream({ write(chunk) { term.write(chunk); } }));
 
-      const installExitCode = await installProcess.exit;
-      if (installExitCode !== 0) {
+      const installCode = await install.exit;
+      if (installCode !== 0) {
         setStatus("Install failed");
-        term.writeln(`\n\x1b[1;31m[Error]\x1b[0m npm install failed with exit code ${installExitCode}`);
+        term.writeln("\x1b[31m[Error]\x1b[0m npm install failed (exit " + installCode + ")");
+        setPhase("env-setup");
         return;
       }
 
-      instance.on && instance.on('server-ready', (port: number, url: string) => {
-        term.writeln(`\n\x1b[1;32m🚀 Agent Dashboard Live at: ${url}\x1b[0m\n`);
-      });
+      // Run the bot
+      setStatus("Bot running...");
+      term.writeln("\n\x1b[36m[System]\x1b[0m npx tsx src/index.ts\n");
 
-      // 4. Start Agent
-      setStatus("Running agent...");
-      term.writeln("\n\x1b[1;34m[System]\x1b[0m Executing: node index.js\n");
-      
-      const startProcess = await instance.spawn('jsh', ['-c', 'node index.js'], {
-        env: { npm_config_yes: "true" },
-        NODE_OPTIONS: "--dns-result-order=ipv4first"
-      });
+      const run = await wc.spawn("jsh", ["-c", "npx tsx src/index.ts"]);
+      run.output.pipeTo(new WritableStream({ write(chunk) { term.write(chunk); } }));
 
-      startProcess.output.pipeTo(
-        new WritableStream({ write(chunk) { term.write(chunk); } })
-      );
-
-      setStatus("Agent running");
-
-    } catch (err: any) {
+      setStatus("Running ⚡");
+    } catch (err: unknown) {
       setStatus("Error");
-      term.writeln(`\n\x1b[1;31m[Error]\x1b[0m ${err.message}`);
+      term.writeln("\x1b[31m[Error]\x1b[0m " + String(err instanceof Error ? err.message : err));
+      setPhase("env-setup");
     }
   };
 
+  // ─── Render ───────────────────────────────────────────────────────────────
+
+  const selectedContent = generatedFiles.find(f => f.filepath === selectedFile)?.content ?? "// Click Generate Bot to see files";
+
   return (
     <div className="flex flex-col h-[700px] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden font-mono shadow-2xl text-slate-200">
+
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50">
-        <h2 className="text-xs font-bold flex items-center gap-2 text-slate-400">
-          <TerminalIcon size={14} /> Agentia IDE Sandbox
-        </h2>
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/60">
+        <div className="flex items-center gap-2">
+          <Zap size={14} className="text-cyan-400" />
+          <h2 className="text-xs font-bold text-slate-300">Flash Loan Arbitrageur IDE</h2>
+          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">
+            Aave V3 · Arbitrum
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
           <span className="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 border border-slate-700">
             {status.toUpperCase()}
           </span>
-          <button 
-            onClick={generateFiles} 
+          <button
+            onClick={generateFiles}
             disabled={phase !== "idle"}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed px-3 py-1.5 rounded text-xs font-bold text-white transition-all active:scale-95"
+            className="flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed px-3 py-1.5 rounded text-xs font-bold text-white transition-all active:scale-95"
           >
-            <Play size={12} fill="currentColor" /> Generate Code
+            <Play size={11} fill="currentColor" /> Generate Bot
           </button>
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar Explorer */}
-        <div className="w-52 border-r border-slate-800 bg-slate-900/20 p-2 overflow-y-auto custom-scrollbar">
-          <div className="text-[10px] uppercase text-slate-600 font-black mb-3 px-2 tracking-widest">Explorer</div>
+
+        {/* File Explorer */}
+        <div className="w-52 border-r border-slate-800 bg-slate-900/30 p-2 overflow-y-auto">
+          <div className="text-[10px] uppercase text-slate-600 font-black mb-2 px-2 tracking-widest">Explorer</div>
           {[...new Map(generatedFiles.map(f => [f.filepath, f])).values()].map(file => (
-            <button 
+            <button
               key={file.filepath}
               onClick={() => setSelectedFile(file.filepath)}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-xs mb-0.5 transition-colors ${
-                selectedFile === file.filepath 
-                ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20' 
-                : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-300'
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs mb-0.5 transition-colors text-left ${
+                selectedFile === file.filepath
+                  ? "bg-cyan-600/10 text-cyan-400 border border-cyan-500/20"
+                  : "text-slate-500 hover:bg-slate-800/50 hover:text-slate-300"
               }`}
             >
-              <FileCode size={14} className={selectedFile === file.filepath ? "text-blue-400" : "text-slate-600"} /> 
+              <FileCode size={13} className={selectedFile === file.filepath ? "text-cyan-400" : "text-slate-600"} />
               <span className="truncate">{file.filepath}</span>
             </button>
           ))}
         </div>
 
-        {/* Code Editor & Config UI */}
-        <div className="flex-1 flex flex-col min-w-0 bg-slate-950 relative">
-          
-          {/* Environment Configuration Overlay */}
+        {/* Editor + Config + Terminal */}
+        <div className="flex-1 flex flex-col min-w-0 relative">
+
+          {/* Env Setup Overlay */}
           {phase === "env-setup" && (
             <div className="absolute inset-0 z-20 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6">
               <div className="w-full max-w-md bg-[#0f172a] border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
                 <div className="px-6 py-4 border-b border-slate-800 bg-slate-900 flex items-center gap-2">
-                  <Settings size={16} className="text-blue-400" />
+                  <Settings size={15} className="text-cyan-400" />
                   <div>
-                    <h3 className="text-sm font-bold text-slate-200">Environment Configuration</h3>
-                    <p className="text-[10px] text-slate-400">Required credentials for the Solana Agent</p>
-                  </div>
-                </div>
-                
-                <div className="p-6 space-y-4">
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5">Solana RPC URL</label>
-                    <input 
-                      type="text" 
-                      value={envConfig.SOLANA_RPC_URL}
-                      onChange={e => setEnvConfig({...envConfig, SOLANA_RPC_URL: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-xs text-slate-300 focus:border-blue-500 focus:outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5">Wallet Private Key</label>
-                    <input 
-                      type="password" 
-                      value={envConfig.PRIVATE_KEY}
-                      onChange={e => setEnvConfig({...envConfig, PRIVATE_KEY: e.target.value})}
-                      placeholder="Enter Base58 String or Byte Array"
-                      className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-xs text-slate-300 focus:border-blue-500 focus:outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1.5">Check Interval (ms)</label>
-                    <input 
-                      type="text" 
-                      value={envConfig.CHECK_INTERVAL}
-                      onChange={e => setEnvConfig({...envConfig, CHECK_INTERVAL: e.target.value})}
-                      className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-xs text-slate-300 focus:border-blue-500 focus:outline-none transition-colors"
-                    />
+                    <h3 className="text-sm font-bold text-slate-200">Flash Loan Configuration</h3>
+                    <p className="text-[10px] text-slate-400">Environment variables for the arbitrage bot</p>
                   </div>
                 </div>
 
-                <div className="px-6 py-4 border-t border-slate-800 bg-slate-900 flex justify-end">
-                  <button 
+                <div className="p-5 space-y-3">
+                  {(
+                    [
+                      { key: "EVM_RPC_URL",    label: "EVM RPC URL (Arbitrum)",    type: "text",     placeholder: "https://arb1.arbitrum.io/rpc" },
+                      { key: "EVM_PRIVATE_KEY", label: "EVM Private Key",          type: "password", placeholder: "0x... (leave blank for DRY RUN)" },
+                      { key: "MAX_LOAN_USD",    label: "Max Flash Loan (USD)",     type: "number",   placeholder: "10000" },
+                      { key: "MIN_PROFIT_USD",  label: "Min Profit Target (USD)",  type: "number",   placeholder: "50" },
+                    ] as const
+                  ).map(({ key, label, type, placeholder }) => (
+                    <div key={key}>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{label}</label>
+                      <input
+                        type={type}
+                        value={envConfig[key]}
+                        placeholder={placeholder}
+                        onChange={e => setEnvConfig(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/50 focus:outline-none transition-colors"
+                      />
+                    </div>
+                  ))}
+
+                  {/* DRY RUN toggle */}
+                  <div className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2.5 border border-slate-800">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-300">Dry Run Mode</p>
+                      <p className="text-[10px] text-slate-500">Simulate trades without real transactions</p>
+                    </div>
+                    <button
+                      onClick={() => setEnvConfig(prev => ({ ...prev, DRY_RUN: prev.DRY_RUN === "true" ? "false" : "true" }))}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${envConfig.DRY_RUN === "true" ? "bg-cyan-600" : "bg-red-600"}`}
+                    >
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${envConfig.DRY_RUN === "true" ? "left-0.5" : "left-5"}`} />
+                    </button>
+                  </div>
+
+                  {envConfig.DRY_RUN === "false" && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
+                      ⚠️  LIVE mode — real transactions will be sent. Ensure your contract is deployed.
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-4 border-t border-slate-800 bg-slate-900">
+                  <button
                     onClick={bootAndRun}
-                    disabled={!envConfig.PRIVATE_KEY}
-                    className="bg-green-600 hover:bg-green-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed px-4 py-2 rounded text-xs font-bold text-white transition-all shadow-lg active:scale-95"
+                    className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:opacity-90 px-4 py-2.5 rounded-lg text-xs font-bold text-white transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
                   >
-                    Save & Start Sandbox
+                    <Zap size={13} /> Launch Sandbox
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Editor Area */}
-          <div className="flex-1 p-6 overflow-auto custom-scrollbar">
-            <pre className="text-sm leading-relaxed text-slate-300">
-              <code className="block whitespace-pre">
-                {(() => {
-                  const file = generatedFiles.find(f => f.filepath === selectedFile);
-                  if (!file) return "// Generate code to view files";
-                  if (typeof file.content === "string") return file.content;
-                  try {
-                    return JSON.stringify(file.content, null, 2);
-                  } catch {
-                    return String(file.content);
-                  }
-                })()}
-              </code>
+          {/* Code Editor */}
+          <div className="flex-1 overflow-auto bg-[#020617] p-4">
+            <pre className="text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap break-all">
+              <code>{selectedContent}</code>
             </pre>
           </div>
 
-          {/* Terminal Output */}
-          <div className="h-72 border-t border-slate-800 bg-[#020617] flex flex-col z-10">
-            <div className="flex items-center justify-between px-4 py-2 bg-slate-900/30 border-b border-slate-800">
-              <span className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Terminal Output</span>
-              <button 
-                onClick={() => terminalRef.current?.clear()}
+          {/* Terminal */}
+          <div className="h-64 border-t border-slate-800 bg-[#020617] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-1.5 bg-slate-900/40 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <TerminalIcon size={12} className="text-slate-500" />
+                <span className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Terminal</span>
+              </div>
+              <button
+                onClick={() => termRef.current?.clear()}
                 className="text-[9px] text-slate-600 hover:text-slate-400 uppercase font-bold"
               >
-                Clear Logs
+                Clear
               </button>
             </div>
-            <div className="flex-1 p-2 overflow-hidden" ref={terminalElementRef} />
+            <div className="flex-1 p-1 overflow-hidden" ref={terminalElRef} />
           </div>
         </div>
       </div>
