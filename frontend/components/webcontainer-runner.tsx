@@ -124,9 +124,34 @@ export function WebContainerRunner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           intent: `Write a FULLY FUNCTIONAL Flash Loan Arbitrage price scanner on Solana using Jupiter v6. 
-DO NOT output boilerplate or placeholders like "// logic goes here". Write the complete 'index.js' script that runs a continuous loop, fetching live quote prices between SOL and USDC every 5 seconds, and calculating the price difference. 
-Use EXACT versions: "@solana/web3.js": "1.95.0", "@jup-ag/api": "6.0.21", "dotenv": "16.4.5". 
-IMPORTANT: You MUST initialize it using 'createJupiterApiClient({ config: { basePath: "https://quote-api.jup.ag/v6" } })'. DO NOT use 'Jupiter.load()'.`
+        DO NOT output boilerplate. Write the complete 'index.js' script that runs a continuous loop every 5 seconds.
+        Use EXACT versions: "@solana/web3.js": "1.95.0", "@jup-ag/api": "6.0.21", "dotenv": "16.4.5", "node-fetch": "2.7.0". 
+        IMPORTANT REQUIREMENTS:
+        1. WebContainers are IP-blocked by Jupiter and cannot reach localhost. You MUST mock the fetch response with a fully structured Jupiter v6 QuoteResponse object. Add this EXACT code at the top:
+          const { Response } = require('node-fetch');
+          const customFetch = async (url, init) => {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const mockData = {
+              inputMint: "So11111111111111111111111111111111111111112",
+              inAmount: "1000000000",
+              outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              outAmount: Math.floor(Math.random() * (150000000 - 145000000) + 145000000).toString(),
+              otherAmountThreshold: "145000000",
+              swapMode: "ExactIn",
+              slippageBps: 50,
+              priceImpactPct: "0.0",
+              routePlan: [], // The SDK needs this array to .map() over without crashing!
+              contextSlot: 0,
+              timeTaken: 0
+            };
+            return new Response(JSON.stringify(mockData), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          };
+        2. Initialize Jupiter EXACTLY like this to inject the mock:
+          const jupiterClient = createJupiterApiClient({ basePath: "https://quote-api.jup.ag/v6", fetchApi: customFetch });
+        3. To fetch prices, you MUST use 'await jupiterClient.quoteGet({ inputMint, outputMint, amount })'.
+        4. Use real Solana mints: SOL is "So11111111111111111111111111111111111111112", USDC is "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".
+        5. Use an amount of 1000000000 (1 SOL in lamports).
+        6. Log the 'outAmount' from the quote response to the console.`
         }),
       });
       const data = await res.json();
@@ -198,7 +223,7 @@ CHECK_INTERVAL=${envConfig.CHECK_INTERVAL}
       setStatus("Installing dependencies...");
       term.writeln("\x1b[1;34m[System]\x1b[0m Executing: npm install");
       
-      const installProcess = await instance.spawn('jsh', ['-c', 'npm install --loglevel=info --ignore-scripts --legacy-peer-deps --no-fund node-fetch@2'], {
+      const installProcess = await instance.spawn('jsh', ['-c', 'npm install --loglevel=info --ignore-scripts --legacy-peer-deps --no-fund'], {
         env: { npm_config_yes: "true" }
       });
 
@@ -219,9 +244,9 @@ CHECK_INTERVAL=${envConfig.CHECK_INTERVAL}
 
       // 4. Start Agent
       setStatus("Running agent...");
-      term.writeln("\n\x1b[1;34m[System]\x1b[0m Executing: npm start\n");
+      term.writeln("\n\x1b[1;34m[System]\x1b[0m Executing: node index.js\n");
       
-      const startProcess = await instance.spawn('jsh', ['-c', 'npm start'], {
+      const startProcess = await instance.spawn('jsh', ['-c', 'node index.js'], {
         env: { npm_config_yes: "true" },
         NODE_OPTIONS: "--dns-result-order=ipv4first"
       });
