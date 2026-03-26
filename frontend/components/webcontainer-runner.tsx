@@ -290,7 +290,7 @@ export function WebContainerRunner() {
         DRY_RUN:          envConfig.DRY_RUN,
         POLL_MS:          "3000",
         // Specific Testnet Token Aliases
-        WETH_ADDRESS:     "0x980b62da83eff3d4576c647993b0c1d7faf17c73",
+        WETH_ADDRESS:     "0x980B62Da83eFf3D4576C647993b0c1D7faf17c73",
         USDC_ADDRESS:     "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
         // Generic aliases for the bot logic
         RPC_URL:          envConfig.EVM_RPC_URL,
@@ -421,7 +421,7 @@ export function WebContainerRunner() {
                       [
                         { key: "EVM_RPC_URL",    label: "EVM RPC URL (Arbitrum)",    type: "text",     placeholder: "https://arb1.arbitrum.io/rpc" },
                         { key: "EVM_PRIVATE_KEY", label: "EVM Private Key",          type: "password", placeholder: "0x... (leave blank for DRY RUN)" },
-                        { key: "CONTRACT_ADDRESS", label: "Contract Address (Deployed)", type: "text", placeholder: "0xb50201558B00496A145fE76f7424749556E326D8" },
+                        { key: "CONTRACT_ADDRESS", label: "Contract Address (Deployed)", type: "text", placeholder: "0xff75b696928640096181ba78e3b0e1188bf57393" },
                         { key: "MAX_LOAN_USD",    label: "Max Flash Loan (USD)",     type: "number",   placeholder: "10000" },
                         { key: "MIN_PROFIT_USD",  label: "Min Profit Target (USD)",  type: "number",   placeholder: "50" },
                       ] as const

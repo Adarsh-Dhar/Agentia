@@ -19,7 +19,7 @@ export async function POST(req: Request) {
         "Authorization": `Bearer ${process.env.GITHUB_TOKEN}` 
       },
       body: JSON.stringify({
-        model: "gpt-4o", // Or whichever specific model you are targeting on GitHub Models (e.g., "Meta-Llama-3.1-70B-Instruct")
+        model: "gpt-4o-mini", // Or whichever specific model you are targeting on GitHub Models (e.g., "Meta-Llama-3.1-70B-Instruct")
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userIntent }
