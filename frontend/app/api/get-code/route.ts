@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 
-// ─── Template file generators ───────────────────────────────────────────────
-
 function makePackageJson() {
   return JSON.stringify(
     {
@@ -10,13 +8,14 @@ function makePackageJson() {
       type: "module",
       scripts: { start: "tsx src/index.ts" },
       dependencies: {
-        chalk: "^5.3.0",
-        dotenv: "^16.4.0",
+        "chalk": "^5.3.0",
+        "dotenv": "^16.4.0",
+        "ethers": "^6.11.1" 
       },
       devDependencies: {
         "@types/node": "^20.0.0",
-        tsx: "^4.7.1",
-        typescript: "^5.3.0",
+        "tsx": "^4.7.1",
+        "typescript": "^5.3.0",
       },
     },
     null,
@@ -28,12 +27,13 @@ function makeTsConfig() {
   return JSON.stringify(
     {
       compilerOptions: {
-        target: "ESNext",
+        target: "ES2022",
         module: "ESNext",
-        moduleResolution: "bundler",
-        strict: false,
+        moduleResolution: "node",
         esModuleInterop: true,
+        strict: true,
         skipLibCheck: true,
+        forceConsistentCasingInFileNames: true,
       },
     },
     null,
@@ -41,23 +41,18 @@ function makeTsConfig() {
   );
 }
 
-const CONFIG_TS = `import 'dotenv/config'
-
-export const config = {
-  evmRpcUrl:       process.env.EVM_RPC_URL        ?? 'https://arb1.arbitrum.io/rpc',
-  privateKey:      process.env.EVM_PRIVATE_KEY     ?? 'DEMO_MODE',
-  contractAddress: process.env.CONTRACT_ADDRESS    ?? '0x0000000000000000000000000000000000000000',
-  maxLoanUsd:      parseFloat(process.env.MAX_LOAN_USD   ?? '10000'),
-  minProfitUsd:    parseFloat(process.env.MIN_PROFIT_USD ?? '50'),
-  dryRun:          process.env.DRY_RUN !== 'false',
-  pollMs:          parseInt(process.env.POLL_MS ?? '3000'),
+const CONFIG_TS = `export const config = {
+  evmRpcUrl:       process.env.EVM_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc',
+  privateKey:      process.env.EVM_PRIVATE_KEY || '',
+  contractAddress: process.env.CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000',
+  maxLoanUsd:      Number(process.env.MAX_LOAN_USD) || 100,
+  minProfitUsd:    Number(process.env.MIN_PROFIT_USD) || 0,
+  dryRun:          process.env.DRY_RUN === 'true',
+  pollMs:          Number(process.env.POLL_MS) || 4000,
 }
 `;
 
-const STATE_MACHINE_TS = `// Lightweight LangGraph-compatible state machine
-// (avoids heavy package installs in sandbox)
-
-type NodeFn<S> = (state: S) => Promise<Partial<S>>
+const STATE_MACHINE_TS = `export type NodeFn<S> = (state: S) => Promise<Partial<S>> | Partial<S>
 type RouterFn<S> = (state: S) => string
 
 export class StateGraph<S extends Record<string, unknown>> {
@@ -123,15 +118,13 @@ export interface ArbitrageOpportunity {
   estimatedProfitUsd: number
 }
 
+// Testnet Tokens (Arbitrum Sepolia)
 const TOKENS = [
-  { symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', price: 3000  },
-  { symbol: 'ARB',  address: '0x912CE59144191C1204E64559FE8253a0e49E6548', price: 1.45  },
-  { symbol: 'UNI',  address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', price: 12.5  },
-  { symbol: 'LINK', address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', price: 18.2  },
-  { symbol: 'GMX',  address: '0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a', price: 55.4  },
+  { symbol: 'WETH', address: '0x980B62Da83eFf3D4576C647993b0c1D7faf17c73', price: 3000  },
+  { symbol: 'USDC', address: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', price: 1  },
 ]
 
-const DEXES = ['Uniswap V3', 'SushiSwap', 'Camelot', 'Zyberswap', 'Balancer']
+const DEXES = ['Uniswap V3', 'SushiSwap', 'Camelot']
 
 function jitter(base: number, pct = 0.015) {
   return base * (1 + (Math.random() - 0.5) * pct * 2)
@@ -201,7 +194,7 @@ export function calculateProfit(
   const roi              = (netProfit / borrowUsd) * 100
 
   const recommendation: ProfitAnalysis['recommendation'] =
-    netProfit > 50 ? 'EXECUTE' : netProfit > 10 ? 'MONITOR' : 'SKIP'
+    netProfit > 0 ? 'EXECUTE' : netProfit > -5 ? 'MONITOR' : 'SKIP'
 
   return {
     isProfitable: netProfit > 0,
@@ -226,14 +219,10 @@ export interface SecurityReport {
   flags:        string[]
 }
 
-// Well-known safe tokens on Arbitrum
+// Well-known safe tokens on Arbitrum Sepolia
 const SAFE_LIST = new Set([
-  '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',  // WETH
-  '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',  // USDC
-  '0x912CE59144191C1204E64559FE8253a0e49E6548',  // ARB
-  '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',  // UNI
-  '0x514910771AF9Ca656af840dff83E8264EcF986CA',  // LINK
-  '0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a',  // GMX
+  '0x980B62Da83eFf3D4576C647993b0c1D7faf17c73',  // WETH
+  '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',  // USDC
 ])
 
 export async function validateToken(address: string): Promise<SecurityReport> {
@@ -253,78 +242,114 @@ export async function validateToken(address: string): Promise<SecurityReport> {
 }
 `;
 
-const FLASHLOAN_EXECUTOR_TS = `import { config } from './config.js'
+const FLASHLOAN_EXECUTOR_TS = `import { ethers } from "ethers";
+import { config } from "./config.js";
 
-// Flash Loan Executor
-// In production: calls the deployed FlashLoanArbitrageur.sol contract via ethers.js
-//
-// On-chain flow (all atomic in one tx):
-//   1. POOL.flashLoanSimple()  →  Aave lends funds
-//   2. executeOperation()      →  our callback fires
-//      a. DEX A exactInputSingle: tokenBorrow → tokenInterim
-//      b. DEX B exactInputSingle: tokenInterim → tokenBorrow
-//      c. Verify profit >= minProfit
-//      d. Approve POOL to pull back principal + 0.09% premium
-//   3. Profit stays in contract; owner withdraws via withdrawProfit()
+const ARBITRAGEUR_ABI = [
+  "function executeArbitrage((address tokenBorrow, address tokenInterim, uint256 amountBorrow, uint24 feeDexA, uint24 feeDexB, uint256 minProfit)) external",
+  "event ArbitrageExecuted(address indexed tokenBorrow, uint256 amountBorrowed, uint256 profit)"
+];
 
 export interface ExecuteParams {
-  tokenBorrow:    string
-  tokenInterim:   string   // e.g. WETH as the hop token
-  amountBorrowUsd: number
-  buyDex:         string
-  sellDex:        string
-  minProfitUsd:   number
+  tokenBorrow:    string;
+  tokenInterim:   string;
+  amountBorrowUsd: number;
+  buyDex:         string;
+  sellDex:        string;
+  minProfitUsd:   number;
 }
 
 export interface ExecResult {
-  success:    boolean
-  txHash?:    string
-  profit?:    number
-  gasUsed?:   number
-  durationMs?: number
-  error?:     string
+  success:    boolean;
+  txHash?:    string;
+  profit?:    number;
+  gasUsed?:   number;
+  durationMs?: number;
+  error?:     string;
 }
 
 export class FlashLoanExecutor {
-  // Mirrors contract.executeArbitrage.staticCall() — dry run before spending gas
-  async simulate(_params: ExecuteParams): Promise<boolean> {
-    await new Promise(r => setTimeout(r, 250 + Math.random() * 200))
-    return Math.random() > 0.08  // 92 % pass rate
+  private provider: ethers.JsonRpcProvider;
+  private signer: ethers.Wallet;
+  private contract: ethers.Contract;
+
+  constructor() {
+    this.provider = new ethers.JsonRpcProvider(config.evmRpcUrl);
+    // Create a random wallet if key is missing/DEMO to prevent crashing during instantiation
+    const pk = config.privateKey && config.privateKey.length > 20 
+      ? config.privateKey 
+      : ethers.Wallet.createRandom().privateKey;
+      
+    this.signer = new ethers.Wallet(pk, this.provider);
+    this.contract = new ethers.Contract(config.contractAddress, ARBITRAGEUR_ABI, this.signer);
+  }
+
+  async simulate(params: any): Promise<boolean> {
+    try {
+      await this.contract.executeArbitrage.staticCall(params);
+      return true;
+    } catch (err: any) {
+      return false;
+    }
   }
 
   async execute(params: ExecuteParams): Promise<ExecResult> {
-    const t0 = Date.now()
-
-    // Pre-flight simulation
-    const ok = await this.simulate(params)
-    if (!ok) return { success: false, error: 'Simulation failed — tx would revert on-chain' }
+    const t0 = Date.now();
 
     if (config.dryRun) {
-      await new Promise(r => setTimeout(r, 400))
-      const profit = params.minProfitUsd * (1 + Math.random() * 0.6)
+      await new Promise(r => setTimeout(r, 400));
       return {
         success: true,
-        txHash:    '0xDRY' + Date.now().toString(16).padStart(60, '0'),
-        profit:    parseFloat(profit.toFixed(2)),
-        gasUsed:   380_000 + Math.floor(Math.random() * 80_000),
+        txHash: '0xDRY' + Date.now().toString(16).padStart(60, '0'),
+        profit: params.minProfitUsd * 1.05,
+        gasUsed: 380000,
         durationMs: Date.now() - t0,
-      }
+      };
     }
 
-    // Live execution — would be: await contract.executeArbitrage(params, { gasLimit })
-    await new Promise(r => setTimeout(r, 600 + Math.random() * 500))
-    if (Math.random() > 0.12) {
-      const profit = params.minProfitUsd * (0.7 + Math.random() * 0.9)
+    try {
+      // Map USD amounts to 6 decimals (assuming USDC base)
+      const amountBorrow = BigInt(Math.floor(params.amountBorrowUsd * 1e6));
+      const minProfit = BigInt(Math.floor(params.minProfitUsd * 1e6));
+      
+      const contractParams = {
+        tokenBorrow: params.tokenBorrow,
+        tokenInterim: params.tokenInterim,
+        amountBorrow: amountBorrow,
+        feeDexA: 3000, // 0.3% pool tier
+        feeDexB: 3000, // 0.3% pool tier
+        minProfit: minProfit
+      };
+
+      // 1. Simulate locally to save gas on failures
+      const ok = await this.simulate(contractParams);
+      if (!ok) return { success: false, error: 'Simulation failed — tx would revert', durationMs: Date.now() - t0 };
+
+      // 2. Estimate Gas & Add 20% Buffer
+      const gasEstimate = await this.contract.executeArbitrage.estimateGas(contractParams);
+      const gasLimit = (gasEstimate * BigInt(120)) / BigInt(100);
+
+      // 3. Execute Transaction
+      const tx = await this.contract.executeArbitrage(contractParams, { gasLimit });
+      const receipt = await tx.wait();
+
+      // 4. Parse real profit from emitted event
+      const event = receipt.logs
+        .map((log: any) => { try { return this.contract.interface.parseLog(log); } catch { return null; } })
+        .find((e: any) => e?.name === "ArbitrageExecuted");
+        
+      const profit = event ? parseFloat(ethers.formatUnits(event.args.profit, 6)) : params.minProfitUsd;
+
       return {
-        success:    true,
-        txHash:     '0x' + [...Array(64)].map(() => Math.floor(Math.random() * 16).toString(16)).join(''),
-        profit:     parseFloat(profit.toFixed(2)),
-        gasUsed:    360_000 + Math.floor(Math.random() * 100_000),
+        success: true,
+        txHash: tx.hash,           // <--- REAL TX HASH RETURNED HERE
+        profit: profit,
+        gasUsed: Number(receipt.gasUsed),
         durationMs: Date.now() - t0,
-      }
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Execution error', durationMs: Date.now() - t0 };
     }
-
-    return { success: false, error: 'TX reverted: slippage too high or front-run', durationMs: Date.now() - t0 }
   }
 }
 `;
@@ -444,7 +469,7 @@ async function executeFlashLoan(state: BotState): Promise<Partial<BotState>> {
 
   const result = await executor.execute({
     tokenBorrow:     state.opportunity.tokenAddress,
-    tokenInterim:    '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    tokenInterim:    '0x980B62Da83eFf3D4576C647993b0c1D7faf17c73', // Arbitrum Sepolia WETH
     amountBorrowUsd: config.maxLoanUsd,
     buyDex:          state.opportunity.buyDex,
     sellDex:         state.opportunity.sellDex,
@@ -515,14 +540,11 @@ import chalk from 'chalk'
 import { buildArbitrageGraph } from './workflow.js'
 import { config } from './config.js'
 
-const WETH   = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
-const USDC   = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
-
 // ─── Banner ──────────────────────────────────────────────────────────────────
 console.log(chalk.cyan.bold('\\n╔═══════════════════════════════════════════════════════╗'))
 console.log(chalk.cyan.bold('║') + chalk.bold('   ⚡  Flash Loan Arbitrageur  —  Powered by Aave V3  ') + chalk.cyan.bold('║'))
 console.log(chalk.cyan.bold('╠═══════════════════════════════════════════════════════╣'))
-console.log(chalk.cyan.bold('║') + chalk.dim('  Network  : Arbitrum One                             ') + chalk.cyan.bold('║'))
+console.log(chalk.cyan.bold('║') + chalk.dim('  Network  : Arbitrum Sepolia (Testnet)               ') + chalk.cyan.bold('║'))
 console.log(chalk.cyan.bold('║') + chalk.dim('  Max Loan : $' + config.maxLoanUsd.toLocaleString().padEnd(42)) + chalk.cyan.bold('║'))
 console.log(chalk.cyan.bold('║') + chalk.dim('  Min P&L  : $' + config.minProfitUsd.toString().padEnd(42)) + chalk.cyan.bold('║'))
 console.log(chalk.cyan.bold('║') + '  Mode     : ' + (config.dryRun ? chalk.yellow('DRY RUN (safe)'.padEnd(39)) : chalk.red('LIVE TRADING ⚠️ '.padEnd(39))) + chalk.cyan.bold('║'))
@@ -553,58 +575,37 @@ await graph.invoke(
 
 // ─── Files array ─────────────────────────────────────────────────────────────
 
-function buildFiles(intent: string) {
-  const dryRun = !/live|production|mainnet/i.test(intent);
-  const maxLoan = /small|safe|conservative/i.test(intent) ? 1000 : 10000;
-  const minProfit = /aggressive/i.test(intent) ? 10 : 50;
+export function generateFromMetaAgent(intent: string) {
+  // In production, this function would call your Meta-Agent LLM backend with the user intent
+  // and receive a structured response containing the generated files.
 
-  const envContent = [
-    `# Flash Loan Arbitrageur — Environment`,
-    `DRY_RUN=${dryRun}`,
-    `EVM_RPC_URL=https://arb1.arbitrum.io/rpc`,
-    `EVM_PRIVATE_KEY=YOUR_PRIVATE_KEY_HERE`,
-    `CONTRACT_ADDRESS=YOUR_DEPLOYED_CONTRACT_ADDRESS`,
-    `MAX_LOAN_USD=${maxLoan}`,
-    `MIN_PROFIT_USD=${minProfit}`,
-    `POLL_MS=3000`,
-  ].join("\n");
-
-  return [
-    { filepath: "package.json",          content: makePackageJson()     },
-    { filepath: "tsconfig.json",         content: makeTsConfig()        },
-    { filepath: ".env",                  content: envContent            },
-    { filepath: "src/config.ts",         content: CONFIG_TS             },
-    { filepath: "src/state-machine.ts",  content: STATE_MACHINE_TS      },
-    { filepath: "src/price-monitor.ts",  content: PRICE_MONITOR_TS      },
-    { filepath: "src/profit-calculator.ts", content: PROFIT_CALC_TS     },
-    { filepath: "src/token-validator.ts", content: TOKEN_VALIDATOR_TS   },
-    { filepath: "src/flashloan-executor.ts", content: FLASHLOAN_EXECUTOR_TS },
-    { filepath: "src/workflow.ts",       content: WORKFLOW_TS           },
-    { filepath: "src/index.ts",          content: INDEX_TS              },
-  ];
+  return Promise.resolve({
+    files: [
+      { filepath: 'package.json', content: makePackageJson() },
+      { filepath: 'tsconfig.json', content: makeTsConfig() },
+      { filepath: 'src/config.ts', content: CONFIG_TS },
+      { filepath: 'src/state-machine.ts', content: STATE_MACHINE_TS },
+      { filepath: 'src/price-monitor.ts', content: PRICE_MONITOR_TS },
+      { filepath: 'src/profit-calculator.ts', content: PROFIT_CALC_TS },
+      { filepath: 'src/token-validator.ts', content: TOKEN_VALIDATOR_TS },
+      { filepath: 'src/flashloan-executor.ts', content: FLASHLOAN_EXECUTOR_TS },
+      { filepath: 'src/workflow.ts', content: WORKFLOW_TS },
+      { filepath: 'src/index.ts', content: INDEX_TS },
+    ]
+  });
 }
 
-// ─── Route handler ────────────────────────────────────────────────────────────
-
+// Route handler: Pass through LLM/Meta-Agent output directly
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const intent: string = body.intent ?? "Build a flash loan arbitrageur";
+    const userIntent: string = body.intent ?? "Build a flash loan arbitrageur";
 
-    const files = buildFiles(intent);
-
-    return NextResponse.json({
-      thoughts: `Generated a Flash Loan Arbitrageur with a 5-node LangGraph state machine:
-1. monitorPrices   — polls DexScreener for price gaps across Uniswap, SushiSwap, Camelot, Zyberswap
-2. validateSecurity — checks token safety via Rugcheck.xyz (score ≥ 70 required)
-3. calculateProfit  — models net P&L after Aave 0.09% fee, DEX fees (0.3%×2), and Arbitrum gas
-4. executeFlashLoan — runs a static-call simulation, then fires the Aave V3 flash loan
-5. logStats         — prints running totals after each trade
-
-Architecture mirrors FlashLoanArbitrageur.sol: borrow → swap A → swap B → repay, all atomic.
-DRY_RUN=true by default — no real funds moved until you set it to false.`,
-      files,
-    });
+    // Call the Meta-Agent LLM (or backend) to generate the files
+    const aiResponse = await generateFromMetaAgent(userIntent); 
+    
+    // Ensure the response maps 'filepath' correctly to what the WebContainer expects
+    return NextResponse.json({ files: aiResponse.files });
   } catch (err) {
     console.error("[get-code] Error:", err);
     return NextResponse.json(
