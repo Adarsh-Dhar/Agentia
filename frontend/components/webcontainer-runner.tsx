@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -21,6 +20,7 @@ interface GeneratedFile {
 interface EnvConfig {
   EVM_RPC_URL: string;
   EVM_PRIVATE_KEY: string;
+  CONTRACT_ADDRESS: string;
   MAX_LOAN_USD: string;
   MIN_PROFIT_USD: string;
   DRY_RUN: string;
@@ -71,11 +71,12 @@ export function WebContainerRunner() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState("Idle");
   const [envConfig, setEnvConfig] = useState<EnvConfig>({
-    EVM_RPC_URL:    "https://arb1.arbitrum.io/rpc",
+    EVM_RPC_URL:     "https://arb1.arbitrum.io/rpc",
     EVM_PRIVATE_KEY: "",
-    MAX_LOAN_USD:   "10000",
-    MIN_PROFIT_USD: "50",
-    DRY_RUN:        "true",
+    CONTRACT_ADDRESS: "0xb50201558B00496A145fE76f7424749556E326D8", // Aave V3 Arbitrum Sepolia
+    MAX_LOAN_USD:    "10000",
+    MIN_PROFIT_USD:  "50",
+    DRY_RUN:         "true",
   });
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -182,6 +183,7 @@ export function WebContainerRunner() {
         `DRY_RUN=${envConfig.DRY_RUN}`,
         `EVM_RPC_URL=${envConfig.EVM_RPC_URL}`,
         `EVM_PRIVATE_KEY=${envConfig.EVM_PRIVATE_KEY || "DEMO"}`,
+        `CONTRACT_ADDRESS=${envConfig.CONTRACT_ADDRESS}`,
         `MAX_LOAN_USD=${envConfig.MAX_LOAN_USD}`,
         `MIN_PROFIT_USD=${envConfig.MIN_PROFIT_USD}`,
         `POLL_MS=3000`,
@@ -261,15 +263,16 @@ export function WebContainerRunner() {
 
       // Prepare the environment object for the process
       const processEnv = {
-        EVM_RPC_URL: envConfig.EVM_RPC_URL,
-        EVM_PRIVATE_KEY: envConfig.EVM_PRIVATE_KEY || "DEMO",
-        MAX_LOAN_USD: envConfig.MAX_LOAN_USD,
-        MIN_PROFIT_USD: envConfig.MIN_PROFIT_USD,
-        DRY_RUN: envConfig.DRY_RUN,
-        POLL_MS: "3000",
+        EVM_RPC_URL:      envConfig.EVM_RPC_URL,
+        EVM_PRIVATE_KEY:  envConfig.EVM_PRIVATE_KEY || "DEMO",
+        CONTRACT_ADDRESS: envConfig.CONTRACT_ADDRESS,
+        MAX_LOAN_USD:     envConfig.MAX_LOAN_USD,
+        MIN_PROFIT_USD:   envConfig.MIN_PROFIT_USD,
+        DRY_RUN:          envConfig.DRY_RUN,
+        POLL_MS:          "3000",
         // Add common aliases in case the AI used different names
-        RPC_URL: envConfig.EVM_RPC_URL,
-        PRIVATE_KEY: envConfig.EVM_PRIVATE_KEY || "DEMO"
+        RPC_URL:          envConfig.EVM_RPC_URL,
+        PRIVATE_KEY:      envConfig.EVM_PRIVATE_KEY || "DEMO"
       };
 
       // Improve entry point detection (Skip files that look like config)
@@ -381,6 +384,7 @@ export function WebContainerRunner() {
                       [
                         { key: "EVM_RPC_URL",    label: "EVM RPC URL (Arbitrum)",    type: "text",     placeholder: "https://arb1.arbitrum.io/rpc" },
                         { key: "EVM_PRIVATE_KEY", label: "EVM Private Key",          type: "password", placeholder: "0x... (leave blank for DRY RUN)" },
+                        { key: "CONTRACT_ADDRESS", label: "Contract Address (Deployed)", type: "text", placeholder: "0xb50201558B00496A145fE76f7424749556E326D8" },
                         { key: "MAX_LOAN_USD",    label: "Max Flash Loan (USD)",     type: "number",   placeholder: "10000" },
                         { key: "MIN_PROFIT_USD",  label: "Min Profit Target (USD)",  type: "number",   placeholder: "50" },
                       ] as const
@@ -396,21 +400,6 @@ export function WebContainerRunner() {
                         />
                       </div>
                     ))}
-
-                    {/* DRY RUN toggle */}
-                    <div className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2.5 border border-slate-800">
-                      <div>
-                        <p className="text-xs font-semibold text-slate-300">Dry Run Mode</p>
-                        <p className="text-[10px] text-slate-500">Simulate trades without real transactions</p>
-                      </div>
-                      <button
-                        onClick={() => setEnvConfig(prev => ({ ...prev, DRY_RUN: prev.DRY_RUN === "true" ? "false" : "true" }))}
-                        className={`relative w-10 h-5 rounded-full transition-colors ${envConfig.DRY_RUN === "true" ? "bg-cyan-600" : "bg-red-600"}`}
-                      >
-                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${envConfig.DRY_RUN === "true" ? "left-0.5" : "left-5"}`} />
-                      </button>
-                    </div>
-
                     {envConfig.DRY_RUN === "false" && (
                       <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
                         ⚠️  LIVE mode — real transactions will be sent. Ensure your contract is deployed.
