@@ -1,8 +1,10 @@
 import { Agent, TradeAction, TradeResult } from "./types.js";
 import { Wallet, RESTClient, MsgSend, RawKey} from "@initia/initia.js";
+import { ethers } from "ethers";
 
 const INITIA_REST_URL =
   process.env.INITIA_REST_URL ?? "https://rest.initiation-2.initia.xyz"; // Updated to active Initia Initiation-2 endpoint
+const CHAIN_ID = 421614; // Arbitrum Sepolia
 
 export async function executeTrade(
   agent: Agent,
@@ -22,7 +24,7 @@ export async function executeTrade(
 
     try {
       const rest = new RESTClient(INITIA_REST_URL, {
-        chainId: "initiation-2",
+        chainId: CHAIN_ID,
         gasPrices: "0.15uinit",
         gasAdjustment: "2.0",
       });

@@ -168,3 +168,6 @@ export async function runTradingEngine(agent: Agent): Promise<void> {
     console.error(`❌ Engine error for agent "${agent.name}" (${agent.id}):`, error);
   }
 }
+
+const CHAIN_ID = 421614; // Arbitrum Sepolia
+const provider = new ethers.JsonRpcProvider("https://sepolia-rollup.arbitrum.io/rpc");

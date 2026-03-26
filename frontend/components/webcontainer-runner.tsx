@@ -71,7 +71,7 @@ export function WebContainerRunner() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState("Idle");
   const [envConfig, setEnvConfig] = useState<EnvConfig>({
-    EVM_RPC_URL:     "https://arb1.arbitrum.io/rpc",
+    EVM_RPC_URL:     "https://sepolia-rollup.arbitrum.io/rpc", // Arbitrum Sepolia
     EVM_PRIVATE_KEY: "",
     CONTRACT_ADDRESS: "0xb50201558B00496A145fE76f7424749556E326D8", // Aave V3 Arbitrum Sepolia
     MAX_LOAN_USD:    "10000",
@@ -262,25 +262,38 @@ export function WebContainerRunner() {
       }
 
       // Prepare the environment object for the process
+      const validHexKey = envConfig.EVM_PRIVATE_KEY || "DEMO";
       const processEnv = {
         EVM_RPC_URL:      envConfig.EVM_RPC_URL,
-        EVM_PRIVATE_KEY:  envConfig.EVM_PRIVATE_KEY || "DEMO",
+        EVM_PRIVATE_KEY:  validHexKey,
         CONTRACT_ADDRESS: envConfig.CONTRACT_ADDRESS,
         MAX_LOAN_USD:     envConfig.MAX_LOAN_USD,
         MIN_PROFIT_USD:   envConfig.MIN_PROFIT_USD,
         DRY_RUN:          envConfig.DRY_RUN,
         POLL_MS:          "3000",
-        // Add common aliases in case the AI used different names
+        // Specific Testnet Token Aliases
+        WETH_ADDRESS:     "0x980b62da83eff3d4576c647993b0c1d7faf17c73",
+        USDC_ADDRESS:     "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+        // Generic aliases for the bot logic
         RPC_URL:          envConfig.EVM_RPC_URL,
-        PRIVATE_KEY:      envConfig.EVM_PRIVATE_KEY || "DEMO"
+        PRIVATE_KEY:      validHexKey
       };
 
       // Improve entry point detection (Skip files that look like config)
       const actualFiles = finalFiles.map(f => (f.filepath || (f as any).path || "").replace(/^[./]+/, ""));
-      const entryPoints = ["src/index.ts", "index.ts", "src/main.ts", "main.ts", "src/workflow.ts"];
+      const entryPoints = [
+        "src/agent/index.ts", // Prioritize this!
+        "src/index.ts",
+        "index.ts",
+        "src/main.ts",
+        "main.ts",
+        "src/workflow.ts"
+      ];
+
+      // Refine the fallback to ignore the 'shared' folder
       const foundEntry = entryPoints.find(p => actualFiles.includes(p)) || 
-                         actualFiles.find(f => f.endsWith(".ts") && !f.includes("config") && !f.includes("types")) || 
-                         "src/index.ts";
+                         actualFiles.find(f => f.endsWith(".ts") && !f.includes("config") && !f.includes("types") && !f.includes("shared")) || 
+                         "src/agent/index.ts";
 
       setStatus("Bot running...");
       term.writeln(`\n\x1b[36m[System]\x1b[0m Detected entry point: \x1b[1m${foundEntry}\x1b[0m`);
