@@ -30,6 +30,8 @@ type Phase = "idle" | "generating" | "env-setup" | "running";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// ─── Inside webcontainer-runner.tsx ───
+
 function parseFilesToTree(files: any[]): Record<string, any> {
   const tree: Record<string, any> = {};
   for (const file of files) {
@@ -38,9 +40,13 @@ function parseFilesToTree(files: any[]): Record<string, any> {
 
     if (!path) continue;
 
-    // FIX: If the LLM returned a JSON object, stringify it properly
+    // FIX 1: If it's an object, stringify it safely
     if (typeof content === "object" && content !== null) {
       content = JSON.stringify(content, null, 2);
+    } 
+    // FIX 2: If it's a string, strip out accidental Markdown code blocks
+    else if (typeof content === "string") {
+      content = content.replace(/^\s*```[a-z]*\n?/i, "").replace(/\n?```\s*$/, "");
     }
 
     // Sanitize and split path
@@ -56,7 +62,6 @@ function parseFilesToTree(files: any[]): Record<string, any> {
         cur[part] = { file: { contents: String(content) } };
       } else {
         if (!cur[part]) cur[part] = { directory: {} };
-        // If this part was previously a file, convert it to a directory
         else if (cur[part].file) cur[part] = { directory: {} };
         cur = cur[part].directory;
       }
@@ -64,7 +69,6 @@ function parseFilesToTree(files: any[]): Record<string, any> {
   }
   return tree;
 }
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function WebContainerRunner() {
