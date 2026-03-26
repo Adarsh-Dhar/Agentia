@@ -73,7 +73,8 @@ export function WebContainerRunner() {
   const [envConfig, setEnvConfig] = useState<EnvConfig>({
     EVM_RPC_URL:     "https://sepolia-rollup.arbitrum.io/rpc", // Arbitrum Sepolia
     EVM_PRIVATE_KEY: "",
-    CONTRACT_ADDRESS: "0xb50201558B00496A145fE76f7424749556E326D8", // Aave V3 Arbitrum Sepolia
+    // CONTRACT_ADDRESS should be set to your deployed receiver contract, not the Aave Pool
+    CONTRACT_ADDRESS: "", 
     MAX_LOAN_USD:    "10000",
     MIN_PROFIT_USD:  "50",
     DRY_RUN:         "true",
@@ -178,11 +179,22 @@ export function WebContainerRunner() {
     term.writeln("\x1b[36m[System]\x1b[0m Injecting environment and booting WebContainer...");
 
     try {
-      // Merge .env overrides into the files list
+      // 1. Validation: Ensure required fields aren't blank strings
+      if (!envConfig.EVM_RPC_URL || !envConfig.CONTRACT_ADDRESS) {
+        term.writeln("\x1b[31m[Error]\x1b[0m Please fill in the RPC URL and Contract Address.");
+        setPhase("env-setup");
+        return;
+      }
+
+      // 2. Construction: Provide safe fallbacks for the Private Key
+      const validHexKey = /^[0-9a-fA-F]{64}$/.test(envConfig.EVM_PRIVATE_KEY.replace('0x', '')) 
+        ? envConfig.EVM_PRIVATE_KEY 
+        : "0000000000000000000000000000000000000000000000000000000000000000";
+
       const envContent = [
         `DRY_RUN=${envConfig.DRY_RUN}`,
         `EVM_RPC_URL=${envConfig.EVM_RPC_URL}`,
-        `EVM_PRIVATE_KEY=${envConfig.EVM_PRIVATE_KEY || "DEMO"}`,
+        `EVM_PRIVATE_KEY=${validHexKey}`,
         `CONTRACT_ADDRESS=${envConfig.CONTRACT_ADDRESS}`,
         `MAX_LOAN_USD=${envConfig.MAX_LOAN_USD}`,
         `MIN_PROFIT_USD=${envConfig.MIN_PROFIT_USD}`,
@@ -227,6 +239,9 @@ export function WebContainerRunner() {
       }
       // Sync the ref for local component usage
       webcontainerRef.current = globalWebContainerInstance;
+
+      // 3. CRITICAL: Add a small delay to allow the filesystem to sync
+      await new Promise(r => setTimeout(r, 500));
       const wc = webcontainerRef.current as {
         mount: (t: unknown) => Promise<void>;
         spawn: (cmd: string, args: string[], opts?: Record<string, unknown>) => Promise<{
@@ -262,11 +277,10 @@ export function WebContainerRunner() {
       }
 
       // Prepare the environment object for the process
-      const validHexKey = envConfig.EVM_PRIVATE_KEY || "DEMO";
       const processEnv = {
         EVM_RPC_URL:      envConfig.EVM_RPC_URL,
         EVM_PRIVATE_KEY:  validHexKey,
-        CONTRACT_ADDRESS: envConfig.CONTRACT_ADDRESS,
+        CONTRACT_ADDRESS: envConfig.CONTRACT_ADDRESS || "NOT_DEPLOYED_YET",
         MAX_LOAN_USD:     envConfig.MAX_LOAN_USD,
         MIN_PROFIT_USD:   envConfig.MIN_PROFIT_USD,
         DRY_RUN:          envConfig.DRY_RUN,
@@ -276,7 +290,9 @@ export function WebContainerRunner() {
         USDC_ADDRESS:     "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
         // Generic aliases for the bot logic
         RPC_URL:          envConfig.EVM_RPC_URL,
-        PRIVATE_KEY:      validHexKey
+        PRIVATE_KEY:      validHexKey,
+        // Solidity contract path for bot awareness
+        SOL_CONTRACT_PATH: "contracts/FlashLoanReceiver.sol"
       };
 
       // Improve entry point detection (Skip files that look like config)
@@ -298,8 +314,8 @@ export function WebContainerRunner() {
       setStatus("Bot running...");
       term.writeln(`\n\x1b[36m[System]\x1b[0m Detected entry point: \x1b[1m${foundEntry}\x1b[0m`);
 
-      // Run with the 'env' option
-      const run = await wc.spawn("npx", ["tsx", foundEntry], {
+      // 4. FIX: Use 'jsh' to ensure variables are exported correctly
+      const run = await wc.spawn("jsh", ["-c", `npx tsx ${foundEntry}`], {
         env: processEnv
       });
       run.output.pipeTo(new WritableStream({ write(chunk) { term.write(chunk); } }));
@@ -369,7 +385,11 @@ export function WebContainerRunner() {
                   : "text-slate-500 hover:bg-slate-800/50 hover:text-slate-300"
               }`}
             >
-              <FileCode size={13} className={selectedFile === file.filepath ? "text-cyan-400" : "text-slate-600"} />
+              {file.filepath.endsWith('.sol') ? (
+                <div className="w-3 h-3 rounded-full bg-indigo-500 mr-1" />
+              ) : (
+                <FileCode size={13} className={selectedFile === file.filepath ? "text-cyan-400" : "text-slate-600"} />
+              )}
               <span className="truncate">{file.filepath}</span>
             </button>
           ))}
