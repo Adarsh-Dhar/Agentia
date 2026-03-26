@@ -30,18 +30,35 @@ type Phase = "idle" | "generating" | "env-setup" | "running";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseFilesToTree(files: GeneratedFile[]): Record<string, unknown> {
-  const tree: Record<string, unknown> = {};
+function parseFilesToTree(files: any[]): Record<string, any> {
+  const tree: Record<string, any> = {};
   for (const file of files) {
-    const parts = file.filepath.split("/");
-    let cur: Record<string, unknown> = tree;
+    const path = file.filepath || file.path || file.filename;
+    let content = file.content ?? file.code ?? file.contents ?? "";
+
+    if (!path) continue;
+
+    // FIX: If the LLM returned a JSON object, stringify it properly
+    if (typeof content === "object" && content !== null) {
+      content = JSON.stringify(content, null, 2);
+    }
+
+    // Sanitize and split path
+    const cleanPath = path.replace(/^[./]+/, "");
+    const parts = cleanPath.split("/");
+
+    let cur: any = tree;
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
+      if (!part) continue;
+
       if (i === parts.length - 1) {
-        cur[part] = { file: { contents: file.content } };
+        cur[part] = { file: { contents: String(content) } };
       } else {
         if (!cur[part]) cur[part] = { directory: {} };
-        cur = (cur[part] as { directory: Record<string, unknown> }).directory;
+        // If this part was previously a file, convert it to a directory
+        else if (cur[part].file) cur[part] = { directory: {} };
+        cur = cur[part].directory;
       }
     }
   }
@@ -128,7 +145,14 @@ export function WebContainerRunner() {
       if (!data.files?.length) throw new Error("No files received from generator");
 
       setGeneratedFiles(data.files);
-      setSelectedFile("src/workflow.ts");
+      // Robustly find a starting file if src/workflow.ts doesn't exist
+      const hasWorkflow = data.files.some((f: any) => (f.filepath || f.path) === "src/workflow.ts");
+      if (!hasWorkflow && data.files.length > 0) {
+        const firstFile = data.files[0].filepath || data.files[0].path;
+        setSelectedFile(firstFile);
+      } else {
+        setSelectedFile("src/workflow.ts");
+      }
 
       term.writeln("\x1b[32m[System]\x1b[0m " + data.files.length + " files generated successfully.");
       term.writeln("\x1b[33m[System]\x1b[0m Configure your environment variables, then click \x1b[1mLaunch Sandbox\x1b[0m.");
@@ -235,14 +259,42 @@ export function WebContainerRunner() {
         return;
       }
 
-      // Run the bot
-      setStatus("Bot running...");
-      term.writeln("\n\x1b[36m[System]\x1b[0m npx tsx src/index.ts\n");
+      // Prepare the environment object for the process
+      const processEnv = {
+        EVM_RPC_URL: envConfig.EVM_RPC_URL,
+        EVM_PRIVATE_KEY: envConfig.EVM_PRIVATE_KEY || "DEMO",
+        MAX_LOAN_USD: envConfig.MAX_LOAN_USD,
+        MIN_PROFIT_USD: envConfig.MIN_PROFIT_USD,
+        DRY_RUN: envConfig.DRY_RUN,
+        POLL_MS: "3000",
+        // Add common aliases in case the AI used different names
+        RPC_URL: envConfig.EVM_RPC_URL,
+        PRIVATE_KEY: envConfig.EVM_PRIVATE_KEY || "DEMO"
+      };
 
-      const run = await wc.spawn("jsh", ["-c", "npx tsx src/index.ts"]);
+      // Improve entry point detection (Skip files that look like config)
+      const actualFiles = finalFiles.map(f => (f.filepath || (f as any).path || "").replace(/^[./]+/, ""));
+      const entryPoints = ["src/index.ts", "index.ts", "src/main.ts", "main.ts", "src/workflow.ts"];
+      const foundEntry = entryPoints.find(p => actualFiles.includes(p)) || 
+                         actualFiles.find(f => f.endsWith(".ts") && !f.includes("config") && !f.includes("types")) || 
+                         "src/index.ts";
+
+      setStatus("Bot running...");
+      term.writeln(`\n\x1b[36m[System]\x1b[0m Detected entry point: \x1b[1m${foundEntry}\x1b[0m`);
+
+      // Run with the 'env' option
+      const run = await wc.spawn("npx", ["tsx", foundEntry], {
+        env: processEnv
+      });
       run.output.pipeTo(new WritableStream({ write(chunk) { term.write(chunk); } }));
 
-      setStatus("Running ⚡");
+      const exitCode = await run.exit;
+      if (exitCode !== 0) {
+        term.writeln(`\n\x1b[31m[Error]\x1b[0m Bot crashed with exit code ${exitCode}`);
+        setStatus("Crashed");
+      } else {
+        setStatus("Finished");
+      }
     } catch (err: unknown) {
       setStatus("Error");
       term.writeln("\x1b[31m[Error]\x1b[0m " + String(err instanceof Error ? err.message : err));
@@ -252,7 +304,13 @@ export function WebContainerRunner() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
-  const selectedContent = generatedFiles.find(f => f.filepath === selectedFile)?.content ?? "// Click Generate Bot to see files";
+  let selectedContent = generatedFiles.find(f => f.filepath === selectedFile)?.content;
+  if (selectedContent === undefined) {
+    selectedContent = "// Click Generate Bot to see files";
+  } else if (typeof selectedContent === "object") {
+    // If the content is an object (e.g. package.json), pretty-print it
+    selectedContent = JSON.stringify(selectedContent, null, 2);
+  }
 
   return (
     <div className="flex flex-col h-[700px] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden font-mono shadow-2xl text-slate-200">
@@ -301,83 +359,86 @@ export function WebContainerRunner() {
           ))}
         </div>
 
-        {/* Editor + Config + Terminal */}
-        <div className="flex-1 flex flex-col min-w-0 relative">
+        {/* Editor + Config + Terminal Container */}
+        <div className="flex-1 flex flex-col min-w-0">
 
-          {/* Env Setup Overlay */}
-          {phase === "env-setup" && (
-            <div className="absolute inset-0 z-20 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6">
-              <div className="w-full max-w-md bg-[#0f172a] border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-800 bg-slate-900 flex items-center gap-2">
-                  <Settings size={15} className="text-cyan-400" />
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-200">Flash Loan Configuration</h3>
-                    <p className="text-[10px] text-slate-400">Environment variables for the arbitrage bot</p>
-                  </div>
-                </div>
-
-                <div className="p-5 space-y-3">
-                  {(
-                    [
-                      { key: "EVM_RPC_URL",    label: "EVM RPC URL (Arbitrum)",    type: "text",     placeholder: "https://arb1.arbitrum.io/rpc" },
-                      { key: "EVM_PRIVATE_KEY", label: "EVM Private Key",          type: "password", placeholder: "0x... (leave blank for DRY RUN)" },
-                      { key: "MAX_LOAN_USD",    label: "Max Flash Loan (USD)",     type: "number",   placeholder: "10000" },
-                      { key: "MIN_PROFIT_USD",  label: "Min Profit Target (USD)",  type: "number",   placeholder: "50" },
-                    ] as const
-                  ).map(({ key, label, type, placeholder }) => (
-                    <div key={key}>
-                      <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{label}</label>
-                      <input
-                        type={type}
-                        value={envConfig[key]}
-                        placeholder={placeholder}
-                        onChange={e => setEnvConfig(prev => ({ ...prev, [key]: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/50 focus:outline-none transition-colors"
-                      />
-                    </div>
-                  ))}
-
-                  {/* DRY RUN toggle */}
-                  <div className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2.5 border border-slate-800">
+          {/* Top Section: Editor and Overlay (Scoped together) */}
+          <div className="flex-1 relative flex flex-col min-h-0">
+            {/* Env Setup Overlay - Now only covers the Editor area */}
+            {phase === "env-setup" && (
+              <div className="absolute inset-0 z-20 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6">
+                <div className="w-full max-w-md bg-[#0f172a] border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-800 bg-slate-900 flex items-center gap-2">
+                    <Settings size={15} className="text-cyan-400" />
                     <div>
-                      <p className="text-xs font-semibold text-slate-300">Dry Run Mode</p>
-                      <p className="text-[10px] text-slate-500">Simulate trades without real transactions</p>
+                      <h3 className="text-sm font-bold text-slate-200">Flash Loan Configuration</h3>
+                      <p className="text-[10px] text-slate-400">Environment variables for the arbitrage bot</p>
                     </div>
+                  </div>
+
+                  <div className="p-5 space-y-3">
+                    {(
+                      [
+                        { key: "EVM_RPC_URL",    label: "EVM RPC URL (Arbitrum)",    type: "text",     placeholder: "https://arb1.arbitrum.io/rpc" },
+                        { key: "EVM_PRIVATE_KEY", label: "EVM Private Key",          type: "password", placeholder: "0x... (leave blank for DRY RUN)" },
+                        { key: "MAX_LOAN_USD",    label: "Max Flash Loan (USD)",     type: "number",   placeholder: "10000" },
+                        { key: "MIN_PROFIT_USD",  label: "Min Profit Target (USD)",  type: "number",   placeholder: "50" },
+                      ] as const
+                    ).map(({ key, label, type, placeholder }) => (
+                      <div key={key}>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">{label}</label>
+                        <input
+                          type={type}
+                          value={envConfig[key]}
+                          placeholder={placeholder}
+                          onChange={e => setEnvConfig(prev => ({ ...prev, [key]: e.target.value }))}
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-xs text-slate-300 focus:border-cyan-500/50 focus:outline-none transition-colors"
+                        />
+                      </div>
+                    ))}
+
+                    {/* DRY RUN toggle */}
+                    <div className="flex items-center justify-between bg-slate-900 rounded-lg px-3 py-2.5 border border-slate-800">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-300">Dry Run Mode</p>
+                        <p className="text-[10px] text-slate-500">Simulate trades without real transactions</p>
+                      </div>
+                      <button
+                        onClick={() => setEnvConfig(prev => ({ ...prev, DRY_RUN: prev.DRY_RUN === "true" ? "false" : "true" }))}
+                        className={`relative w-10 h-5 rounded-full transition-colors ${envConfig.DRY_RUN === "true" ? "bg-cyan-600" : "bg-red-600"}`}
+                      >
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${envConfig.DRY_RUN === "true" ? "left-0.5" : "left-5"}`} />
+                      </button>
+                    </div>
+
+                    {envConfig.DRY_RUN === "false" && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
+                        ⚠️  LIVE mode — real transactions will be sent. Ensure your contract is deployed.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="px-5 py-4 border-t border-slate-800 bg-slate-900">
                     <button
-                      onClick={() => setEnvConfig(prev => ({ ...prev, DRY_RUN: prev.DRY_RUN === "true" ? "false" : "true" }))}
-                      className={`relative w-10 h-5 rounded-full transition-colors ${envConfig.DRY_RUN === "true" ? "bg-cyan-600" : "bg-red-600"}`}
+                      onClick={bootAndRun}
+                      className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:opacity-90 px-4 py-2.5 rounded-lg text-xs font-bold text-white transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
                     >
-                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${envConfig.DRY_RUN === "true" ? "left-0.5" : "left-5"}`} />
+                      <Zap size={13} /> Launch Sandbox
                     </button>
                   </div>
-
-                  {envConfig.DRY_RUN === "false" && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
-                      ⚠️  LIVE mode — real transactions will be sent. Ensure your contract is deployed.
-                    </div>
-                  )}
-                </div>
-
-                <div className="px-5 py-4 border-t border-slate-800 bg-slate-900">
-                  <button
-                    onClick={bootAndRun}
-                    className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:opacity-90 px-4 py-2.5 rounded-lg text-xs font-bold text-white transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
-                  >
-                    <Zap size={13} /> Launch Sandbox
-                  </button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Code Editor */}
-          <div className="flex-1 overflow-auto bg-[#020617] p-4">
-            <pre className="text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap break-all">
-              <code>{selectedContent}</code>
-            </pre>
+            {/* Code Editor Content */}
+            <div className="flex-1 overflow-auto bg-[#020617] p-4">
+              <pre className="text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap break-all">
+                <code>{selectedContent}</code>
+              </pre>
+            </div>
           </div>
 
-          {/* Terminal */}
+          {/* Terminal Section - Moved outside the relative container to stay visible */}
           <div className="h-64 border-t border-slate-800 bg-[#020617] flex flex-col">
             <div className="flex items-center justify-between px-4 py-1.5 bg-slate-900/40 border-b border-slate-800">
               <div className="flex items-center gap-2">
