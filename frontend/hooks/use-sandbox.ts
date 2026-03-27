@@ -50,8 +50,9 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
         { filepath: ".env",   content: envContent },
         { filepath: ".npmrc", content: NPMRC_CONTENT },
       ];
-      // Sync the ref for local component usage
-      webcontainerRef.current = globalWebContainerInstance;
+      
+      // REMOVED webcontainerRef.current = globalWebContainerInstance FROM HERE
+      
       const { WebContainer } = await import("@webcontainer/api");
       if (!globalWebContainerInstance) {
         try {
@@ -66,6 +67,10 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
           throw bootErr;
         }
       }
+      
+      // ✅ MOVED HERE: Sync the ref AFTER the container has successfully booted
+      webcontainerRef.current = globalWebContainerInstance;
+      
       await new Promise(r => setTimeout(r, 500));
       const wc = webcontainerRef.current as any;
       try {
