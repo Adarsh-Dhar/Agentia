@@ -9,7 +9,7 @@ import OpenAI from "openai";
 import type { ChatCompletionCreateParamsNonStreaming, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 
-const GITHUB_MODEL_NAME = process.env.GITHUB_MODEL_NAME || "gpt-4o-mini";
+const GITHUB_MODEL_NAME = process.env.GITHUB_MODEL_NAME || "gpt-4o";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
 
 interface ChatCompletionParams {

@@ -63,7 +63,7 @@ export default function DeployChatPage() {
                 <p className="text-sm font-semibold leading-none">Agent Creator</p>
                 <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
-                  Powered by gpt-4o-mini
+                  Powered by gpt-4o
                 </p>
               </div>
             </div>

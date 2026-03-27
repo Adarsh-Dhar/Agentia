@@ -54,7 +54,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-// ─── GitHub Models → gpt-4o-mini ───────────────────────────────────────────────────
+// ─── GitHub Models → gpt-4o ───────────────────────────────────────────────────
 
 async function interpretIntent(intent: string): Promise<MissionPlan> {
   const githubToken = process.env.GITHUB_TOKEN;
@@ -77,7 +77,7 @@ async function interpretIntent(intent: string): Promise<MissionPlan> {
           Authorization:  `Bearer ${githubToken}`,
         },
         body: JSON.stringify({
-          model:           "gpt-4o-mini",
+          model:           "gpt-4o",
           temperature:     0.3,
           max_tokens:      900,
           response_format: { type: "json_object" },
@@ -316,7 +316,7 @@ export async function POST(req: NextRequest) {
     return errorResponse(`User "${userId}" not found.`, 404);
   }
 
-  // ── 4. Call GitHub Models gpt-4o-mini to interpret intent ─────────────────────
+  // ── 4. Call GitHub Models gpt-4o to interpret intent ─────────────────────
   let plan: MissionPlan;
   try {
     plan = await interpretIntent(trimmedIntent);
