@@ -2,7 +2,7 @@ import { PrismaClient } from '../lib/generated/prisma/client.ts';
 import { PrismaPg } from '@prisma/adapter-pg';
 import {Pool} from 'pg';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter: PrismaPg = new PrismaPg(pool);
+const adapter: PrismaPg = new PrismaPg(pool as any);
 import "dotenv/config";
 
 const globalForPrisma = globalThis as unknown as {

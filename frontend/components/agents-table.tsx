@@ -6,11 +6,7 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Settings2, Pause, Play, Loader2 } from 'lucide-react'
 import { Agent, updateAgentStatus, formatSessionExpiry, strategyLabel } from '@/lib/api'
-
-interface AgentsTableProps {
-  agents: Agent[]
-  onRefresh?: () => void
-}
+import { AgentsTableProps } from '@/lib/types'
 
 export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
   const [loadingId, setLoadingId] = useState<string | null>(null)

@@ -1,43 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma.ts";
+import { MissionPlan, CreateAgentRequestBody, Strategy, Confidence } from "@/lib/types.ts";
+import { VALID_STRATEGIES, VALID_CONFIDENCE } from "@/lib/constant.ts";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const VALID_STRATEGIES = ["MEME_SNIPER", "ARBITRAGE", "SENTIMENT_TRADER"] as const;
-const VALID_CONFIDENCE  = ["HIGH", "MEDIUM", "LOW"] as const;
-
-type Strategy   = typeof VALID_STRATEGIES[number];
-type Confidence = typeof VALID_CONFIDENCE[number];
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface MissionPlan {
-  agentName:                 string;
-  strategy:                  Strategy;
-  targetPair:                string;
-  description:               string;
-  entryConditions:           string[];
-  exitConditions:            string[];
-  riskNotes:                 string[];
-  sessionDurationHours:      number;
-  recommendedSpendAllowance: number;
-  confidence:                Confidence;
-  warnings:                  string[];
-}
-
-interface CreateAgentRequestBody {
-  userId:  string;
-  intent:  string;           // natural language — required
-  // optional overrides (from Tier 3 guardrails)
-  spendAllowance?:      number;
-  sessionDurationHours?: number;
-  maxDailyLoss?:        number;
-  // optional pre-generated session key (generated client-side or server-side)
-  sessionKeyPub?:  string;
-  sessionKeyPriv?: string;
-}
-
-// ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are an expert AI trading strategy architect for the Initia blockchain ecosystem.
 Your job is to interpret a user's natural language trading intent and produce a precise, executable Mission Plan.

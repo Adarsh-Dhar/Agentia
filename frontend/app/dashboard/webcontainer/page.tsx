@@ -1,6 +1,6 @@
 
 // Use a separate Client Component to render WebContainerRunner
-import WebcontainerClient from "./webcontainer-client";
+import WebcontainerClient from "@/components/webcontainer-client";
 
 export default function WebcontainerPage() {
 	return (

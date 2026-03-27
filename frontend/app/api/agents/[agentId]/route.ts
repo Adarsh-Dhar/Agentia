@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-// Next.js 15+ requires params to be a Promise
-type RouteContext = {
-  params: Promise<{ agentId: string }>;
-};
+import { RouteContext } from "@/lib/types";
 
 // ─── GET: Fetch a single agent's full details ─────────────────────────────────
 export async function GET(_req: NextRequest, { params }: RouteContext) {

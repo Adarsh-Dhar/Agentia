@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Bot, ChevronLeft, Send, ShieldCheck, ShieldOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useDeployChat }   from "@/hooks/use-deploy-chat"
+import { useDeployChat }   from '@/hooks/use-deploy-chat'
 import { MessageList }     from '@/components/message-list'
 import { Chips }           from '@/components/ui/chips'
 import { DepositModal }    from '@/components/deposit-modal'
@@ -21,6 +21,10 @@ export default function DeployChatPage() {
     handleDeposit, handleSkipDeposit,
     setConvState,
   } = useDeployChat()
+
+  if (bottomRef === null) {
+    return null
+  }
 
   const inputPlaceholder =
     convState === 'done'           ? 'Ask me anything…'

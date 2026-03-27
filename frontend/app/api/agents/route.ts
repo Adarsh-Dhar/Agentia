@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-// Use an array instead of the Prisma Enum to bypass Turbopack bug
-const VALID_STRATEGIES = ["MEME_SNIPER", "ARBITRAGE", "SENTIMENT_TRADER"];
+import { VALID_STRATEGIES } from "@/lib/constant";
 
 // ─── GET: List all agents for a user ─────────────────────────────────────────
 export async function GET(req: NextRequest) {

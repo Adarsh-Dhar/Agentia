@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-type RouteContext = {
-  params: Promise<{ agentId: string }>;
-};
+import { RouteContext } from "@/lib/types";
 
 // ─── GET: Fetch the last 50 trade logs for the terminal UI ────────────────
 export async function GET(req: NextRequest, { params }: RouteContext) {

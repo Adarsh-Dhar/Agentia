@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-// Next.js 15+ RouteContext type for App Router handlers
-type RouteContext = {
-  params: Promise<{ agentId: string }>;
-};
+import { RouteContext } from "@/lib/types";
 
 // ─── PATCH: Update an agent's status (PAUSED / REVOKED / EXPIRED) ─────────────
 export async function PATCH(

@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { ACTION_LOG_TYPE_MAP } from "@/lib/constant";
+import { LogType } from "@/lib/generated/prisma/enums";
 
-// Map incoming action strings to the correct string representation of the Enum
-const ACTION_LOG_TYPE_MAP: Record<string, string> = {
-  BUY:            "EXECUTION_BUY",
-  SELL:           "EXECUTION_SELL",
-  PROFIT_SECURED: "PROFIT_SECURED",
-  ERROR:          "ERROR",
-  INFO:           "INFO",
-};
 
-// Map incoming action strings to the correct LogType enum
-// (see above)
+
 
 // ─── POST: Receive trade reports from the off-chain AI worker ─────────────────
 // This route is NEVER called by the frontend. It is the private channel
@@ -78,7 +71,7 @@ export async function POST(req: NextRequest) {
       await tx.tradeLog.create({
         data: {
           agentId,
-          type: logType as string, // Passes the string directly to Prisma
+          type: logType as LogType, // Passes the string directly to Prisma
           message: logMessage,
           txHash:  txHash  ?? null,
           price:   typeof price  === "number" ? price  : null,

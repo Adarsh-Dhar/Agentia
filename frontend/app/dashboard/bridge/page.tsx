@@ -7,12 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowRight, Zap, Shield, ExternalLink } from 'lucide-react'
 import { useInterwovenKit } from '@initia/interwovenkit-react'
-
-const SUPPORTED_NETWORKS = [
-  { id: 'arbitrum', name: 'Arbitrum',  icon: '🔴' },
-  { id: 'ethereum', name: 'Ethereum',  icon: '⟠' },
-  { id: 'polygon',  name: 'Polygon',   icon: '🟣' },
-]
+import { SUPPORTED_NETWORKS } from '@/lib/constant'
 
 export default function BridgePage() {
   const { address, initiaAddress } = useInterwovenKit()
