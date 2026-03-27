@@ -33,9 +33,11 @@ export async function POST(req: Request) {
       const errorText = await response.text();
       throw new Error(`GitHub Models API Failed: ${response.status} ${errorText}`);
     }
-
+    console.log("[get-code] Raw LLM response:", response)
     const data = await response.json();
+    console.log("[get-code] Raw LLM data:", data);
     const aiMessage = data.choices[0].message.content;
+    console.log("[get-code] LLM message content:", aiMessage);
 
     const parsedResponse = JSON.parse(aiMessage);
 

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { parseFilesToTree } from "@/lib/utils";
 import { ENTRY_POINTS, NPMRC_CONTENT, TOKEN_ADDRESSES } from "@/lib/constant";
 import { Phase, EnvConfig, GeneratedFile } from "@/lib/types";
@@ -13,6 +13,13 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState("Idle");
   const webcontainerRef = useRef<unknown>(null);
+
+  // ADDED: Automatically trigger the EnvConfigModal when files are generated
+  useEffect(() => {
+    if (generatedFiles.length > 0 && phase === "idle") {
+      setPhase("env-setup");
+    }
+  }, [generatedFiles, phase]);
 
   const bootAndRun = async () => {
     const term = termRef.current;

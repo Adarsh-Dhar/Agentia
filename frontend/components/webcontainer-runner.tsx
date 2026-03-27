@@ -9,7 +9,8 @@ import { FileExplorer } from "./ui/FileExplorer";
 import { CodeEditor } from "./ui/CodeEditor";
 import { EnvConfigModal } from "./ui/EnvConfigModal";
 import { TerminalPanel } from "./ui/TerminalPanel";
-import { Zap, Play } from "lucide-react";
+// ADD Settings to your lucide-react imports
+import { Zap, Play, Settings } from "lucide-react"; 
 
 export function WebContainerRunner() {
   const [envConfig, setEnvConfig] = useState({ ...DEFAULT_ENV_CONFIG });
@@ -41,19 +42,33 @@ export function WebContainerRunner() {
             Aave V3 · Arbitrum
           </span>
         </div>
+        
+        {/* FIXED SECTION: Dynamic Buttons based on state */}
         <div className="flex items-center gap-3">
           <span className="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 border border-slate-700">
             {status.toUpperCase()}
           </span>
-          <button
-            onClick={generateFiles}
-            disabled={phase !== "idle"}
-            className="flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed px-3 py-1.5 rounded text-xs font-bold text-white transition-all active:scale-95"
-          >
-            <Play size={11} fill="currentColor" /> Generate Bot
-          </button>
+          
+          {generatedFiles.length === 0 ? (
+            <button
+              onClick={generateFiles}
+              disabled={phase !== "idle"}
+              className="flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed px-3 py-1.5 rounded text-xs font-bold text-white transition-all active:scale-95"
+            >
+              <Play size={11} fill="currentColor" /> Generate Bot
+            </button>
+          ) : (
+            <button
+              onClick={() => setPhase("env-setup")}
+              disabled={phase !== "idle"}
+              className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed px-3 py-1.5 rounded text-xs font-bold text-white transition-all active:scale-95"
+            >
+              <Settings size={11} /> Configure & Run
+            </button>
+          )}
         </div>
       </div>
+      
       <div className="flex flex-1 overflow-hidden">
         {/* File Explorer */}
         <FileExplorer files={generatedFiles} selectedFile={selectedFile} onSelect={setSelectedFile} />
