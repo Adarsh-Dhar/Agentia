@@ -30,3 +30,32 @@ export function makeAssistantMsg(
 export function makeUserMsg(content: string): ChatMessage {
   return { id: uid(), role: 'user', content, timestamp: new Date() }
 }
+
+export function parseFilesToTree(files: any[]): Record<string, any> {
+  const tree: Record<string, any> = {};
+  for (const file of files) {
+    const path = file.filepath || file.path || file.filename;
+    let content = file.content ?? file.code ?? file.contents ?? "";
+    if (!path) continue;
+    if (typeof content === "object" && content !== null) {
+      content = JSON.stringify(content, null, 2);
+    } else if (typeof content === "string") {
+      content = content.replace(/^\s*```[a-z]*\n?/i, "").replace(/\n?```\s*$/, "");
+    }
+    const cleanPath = path.replace(/^[./]+/, "");
+    const parts = cleanPath.split("/");
+    let cur: any = tree;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (!part) continue;
+      if (i === parts.length - 1) {
+        cur[part] = { file: { contents: String(content) } };
+      } else {
+        if (!cur[part]) cur[part] = { directory: {} };
+        else if (cur[part].file) cur[part] = { directory: {} };
+        cur = cur[part].directory;
+      }
+    }
+  }
+  return tree;
+}

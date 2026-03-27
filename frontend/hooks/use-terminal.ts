@@ -1,18 +1,13 @@
-import { useRef, useEffect } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
-
 import { RefObject, useRef, useEffect } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
 export function useTerminal(): {
-  terminalRef: RefObject<HTMLDivElement>;
+  terminalRef: RefObject<HTMLDivElement | null>;
   termRef: RefObject<Terminal | null>;
 } {
-  const terminalRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
 

@@ -2,7 +2,7 @@ import { Terminal as TerminalIcon } from "lucide-react";
 import { RefObject } from "react";
 
 interface TerminalPanelProps {
-  terminalRef: RefObject<HTMLDivElement>;
+  terminalRef: RefObject<HTMLDivElement | null>;
   onClear: () => void;
 }
 

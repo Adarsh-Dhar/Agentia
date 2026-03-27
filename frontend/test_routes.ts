@@ -4,7 +4,7 @@ import { PrismaClient } from "./lib/generated/prisma/client.ts";
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
+const adapter = new PrismaPg(pool as any);
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 const WEBHOOK_SECRET = process.env.INTERNAL_WEBHOOK_SECRET ?? "dev-secret";

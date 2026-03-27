@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DEFAULT_ENV_CONFIG } from "./constants";
+import { DEFAULT_ENV_CONFIG } from "@/lib/constant";
 import { useTerminal } from "../hooks/use-terminal";
 import { useSandbox } from "../hooks/use-sandbox";
 import { useCodeGen } from "../hooks/use-code-gen";

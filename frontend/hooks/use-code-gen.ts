@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { GeneratedFile } from "../components/types";
+import { GeneratedFile } from "@/lib/types";
 
 export function useCodeGen(termRef: React.MutableRefObject<any>) {
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);

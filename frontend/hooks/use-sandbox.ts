@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
-import { parseFilesToTree } from "../utils/parseFilesToTree";
-import { ENTRY_POINTS, NPMRC_CONTENT, TOKEN_ADDRESSES } from "../constants";
-import { Phase, EnvConfig, GeneratedFile } from "../types";
+import { parseFilesToTree } from "@/lib/utils";
+import { ENTRY_POINTS, NPMRC_CONTENT, TOKEN_ADDRESSES } from "@/lib/constant";
+import { Phase, EnvConfig, GeneratedFile } from "@/lib/types";
 
 let globalWebContainerInstance: any = null;
 
