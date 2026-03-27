@@ -1,8 +1,18 @@
 /**
- * MCP Server: oneinch
+ * MCP Server: oneinch  v2.0.0
  *
- * Code generator for 1inch aggregator integration on EVM chains.
- * Provides best-route swap execution for the EVM-side arbitrage leg.
+ * FIXED: Added live quote/price tools that actually call the 1inch API.
+ * The old server only returned code strings — an agent can't trade with text.
+ *
+ * Tools (live):
+ *   get_quote            – fetch real swap quote (output amount, gas, route)
+ *   get_token_price      – spot price via 1inch Price API
+ *   get_liquidity_sources – list available DEXs on a chain
+ *
+ * Tools (code generators — kept):
+ *   get_swap_code        – ethers.js swap execution boilerplate
+ *   get_quote_code       – quote-fetching boilerplate
+ *   get_fusion_swap_code – gasless Fusion swap boilerplate
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,41 +24,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const server = new Server(
-  { name: "oneinch-mcp", version: "1.0.0" },
+  { name: "oneinch-mcp", version: "2.0.0" },
   { capabilities: { tools: {} } }
 );
-
-const TOOLS: Tool[] = [
-  {
-    name: "get_swap_code",
-    description:
-      "Returns TypeScript code for executing EVM token swaps via 1inch Aggregation Router V5 with optimal routing.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        chainId: { type: "number", description: "EVM chain ID (1=eth, 137=polygon, 42161=arbitrum)" },
-        includeApproval: { type: "boolean", description: "Include ERC20 token approval logic" },
-      },
-      required: ["chainId"],
-    },
-  },
-  {
-    name: "get_quote_code",
-    description:
-      "Returns TypeScript code for fetching 1inch swap quotes to check prices before execution.",
-    inputSchema: {
-      type: "object",
-      properties: { chainId: { type: "number" } },
-      required: ["chainId"],
-    },
-  },
-  {
-    name: "get_fusion_swap_code",
-    description:
-      "Returns TypeScript code for 1inch Fusion swaps — gasless, MEV-protected order execution via resolvers.",
-    inputSchema: { type: "object", properties: {} },
-  },
-];
 
 const ONEINCH_ROUTERS: Record<number, string> = {
   1: "0x1111111254EEB25477B68fb85Ed929f73A960582",
@@ -57,153 +35,228 @@ const ONEINCH_ROUTERS: Record<number, string> = {
   56: "0x1111111254EEB25477B68fb85Ed929f73A960582",
 };
 
+// ─── Fetch helper ─────────────────────────────────────────────────────────────
+
+async function oneinchFetch(path: string, params: Record<string, string | number> = {}): Promise<any> {
+  const apiKey = process.env.ONEINCH_API_KEY;
+  const url = new URL(`https://api.1inch.dev${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+  const res = await fetch(url.toString(), {
+    headers,
+    signal: AbortSignal.timeout(8000),
+  });
+
+  const body = await res.json();
+  if (!res.ok) {
+    throw new Error(body.description ?? body.error ?? `HTTP ${res.status}`);
+  }
+  return body;
+}
+
+// ─── Tool definitions ─────────────────────────────────────────────────────────
+
+const TOOLS: Tool[] = [
+  {
+    name: "get_quote",
+    description:
+      "LIVE: Fetches a real swap quote from 1inch API. Returns exact output amount, price impact, estimated gas, and the full route. Set ONEINCH_API_KEY env var for authenticated access.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chainId: { type: "number", description: "EVM chain ID (1=ETH, 137=Polygon, 42161=Arbitrum, 56=BSC)" },
+        fromToken: { type: "string", description: "Input token contract address" },
+        toToken: { type: "string", description: "Output token contract address" },
+        amount: { type: "string", description: "Amount in input token's smallest unit (wei for 18-decimal)" },
+      },
+      required: ["chainId", "fromToken", "toToken", "amount"],
+    },
+  },
+  {
+    name: "get_token_price",
+    description:
+      "LIVE: Returns the current USD price of a token via the 1inch Price API (no API key required for basic use).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chainId: { type: "number" },
+        tokenAddress: { type: "string" },
+      },
+      required: ["chainId", "tokenAddress"],
+    },
+  },
+  {
+    name: "get_liquidity_sources",
+    description:
+      "LIVE: Lists all DEX protocols that 1inch routes through on a given chain.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chainId: { type: "number" },
+      },
+      required: ["chainId"],
+    },
+  },
+  {
+    name: "get_swap_code",
+    description: "Returns TypeScript/ethers.js boilerplate for executing 1inch swaps on-chain (code template).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chainId: { type: "number" },
+        includeApproval: { type: "boolean" },
+      },
+      required: ["chainId"],
+    },
+  },
+  {
+    name: "get_fusion_swap_code",
+    description: "Returns TypeScript boilerplate for 1inch Fusion gasless swaps (code template).",
+    inputSchema: { type: "object", properties: {} },
+  },
+];
+
+// ─── Handlers ─────────────────────────────────────────────────────────────────
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   switch (name) {
+    // ── LIVE: real quote ──────────────────────────────────────────────────────
+    case "get_quote": {
+      const chainId = (args as any)?.chainId as number;
+      const fromToken = (args as any)?.fromToken as string;
+      const toToken = (args as any)?.toToken as string;
+      const amount = (args as any)?.amount as string;
+
+      try {
+        const data = await oneinchFetch(`/swap/v6.0/${chainId}/quote`, {
+          src: fromToken,
+          dst: toToken,
+          amount,
+        });
+
+        const result = {
+          chainId,
+          fromToken,
+          toToken,
+          inputAmount: data.fromTokenAmount ?? amount,
+          outputAmount: data.dstAmount ?? data.toTokenAmount,
+          priceImpactPct: data.priceImpact ?? "unknown",
+          estimatedGas: data.gas,
+          routeProtocols: (data.protocols ?? [])
+            .flat(3)
+            .map((p: any) => p.name)
+            .filter(Boolean),
+          quotedAt: new Date().toISOString(),
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (err: any) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: err.message, chainId, fromToken, toToken }) },
+          ],
+        };
+      }
+    }
+
+    // ── LIVE: token price ─────────────────────────────────────────────────────
+    case "get_token_price": {
+      const chainId = (args as any)?.chainId as number;
+      const tokenAddress = (args as any)?.tokenAddress as string;
+
+      try {
+        const data = await oneinchFetch(`/price/v1.1/${chainId}/${tokenAddress}`, {
+          currency: "USD",
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                chainId,
+                tokenAddress,
+                priceUsd: data[tokenAddress.toLowerCase()] ?? data[tokenAddress] ?? null,
+                checkedAt: new Date().toISOString(),
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message }) }],
+        };
+      }
+    }
+
+    // ── LIVE: liquidity sources ───────────────────────────────────────────────
+    case "get_liquidity_sources": {
+      const chainId = (args as any)?.chainId as number;
+
+      try {
+        const data = await oneinchFetch(`/swap/v6.0/${chainId}/liquidity-sources`);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                chainId,
+                count: data.protocols?.length ?? 0,
+                protocols: (data.protocols ?? []).map((p: any) => ({ id: p.id, title: p.title })),
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message }) }],
+        };
+      }
+    }
+
+    // ── Code generator: swap ──────────────────────────────────────────────────
     case "get_swap_code": {
       const chainId = (args as any)?.chainId ?? 42161;
       const includeApproval = (args as any)?.includeApproval ?? true;
-      const routerAddress = ONEINCH_ROUTERS[chainId];
+      const routerAddress = ONEINCH_ROUTERS[chainId as number];
 
       return {
         content: [
           {
             type: "text",
             text: `
-// ============================================================
 // FILE: src/oneinch-swap.ts
-// 1inch Aggregator V5 — EVM swap execution
-// Chain ID: ${chainId} | Router: ${routerAddress}
-// ============================================================
+// 1inch Aggregator V6 swap execution — Chain ${chainId} | Router: ${routerAddress}
+// NOTE: Use get_quote MCP tool to fetch the transaction data, then sign & send below.
 
-import axios from "axios";
 import { ethers } from "ethers";
 
-const ONEINCH_API = "https://api.1inch.dev/swap/v6.0/${chainId}";
-const ROUTER_ADDRESS = "${routerAddress}";
-
-// API key from 1inch dev portal (https://portal.1inch.dev/)
-const API_KEY = process.env.ONEINCH_API_KEY!;
-
-export interface OneInchSwapParams {
-  fromTokenAddress: string;
-  toTokenAddress: string;
-  amount: string;          // In fromToken's smallest unit (wei for 18-decimal tokens)
-  fromAddress: string;     // The wallet that will execute the swap
-  slippage: number;        // 0.5 = 0.5% slippage tolerance
-  disableEstimate?: boolean;
-}
-
-${includeApproval ? `
-/**
- * Approves the 1inch router to spend your tokens.
- * Call once before the first swap with a given token.
- */
-export async function approveToken(
-  signer: ethers.Signer,
-  tokenAddress: string,
-  amount: bigint = ethers.MaxUint256  // Infinite approval (common DeFi practice)
-): Promise<string> {
-  const ERC20_ABI = [
-    "function approve(address spender, uint256 amount) returns (bool)",
-    "function allowance(address owner, address spender) view returns (uint256)",
-  ];
-  
-  const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
-  const walletAddress = await signer.getAddress();
-
-  // Check existing allowance first
-  const existing = await token.allowance(walletAddress, ROUTER_ADDRESS);
-  if (existing >= amount) {
-    console.log("[1inch] Token already approved");
-    return "already-approved";
-  }
-
-  const tx = await token.approve(ROUTER_ADDRESS, amount);
-  await tx.wait();
-  console.log(\`[1inch] Token approved: \${tx.hash}\`);
-  return tx.hash;
-}
-` : ""}
-
-/**
- * Fetches swap transaction data from 1inch API.
- * Returns calldata ready to be submitted to the router contract.
- */
-export async function getSwapTransaction(
-  params: OneInchSwapParams
-): Promise<{
-  to: string;
-  data: string;
-  value: string;
-  gas: number;
-  fromTokenAmount: string;
-  toTokenAmount: string;
-}> {
-  const { data } = await axios.get(\`\${ONEINCH_API}/swap\`, {
-    headers: { Authorization: \`Bearer \${API_KEY}\` },
-    params: {
-      src: params.fromTokenAddress,
-      dst: params.toTokenAddress,
-      amount: params.amount,
-      from: params.fromAddress,
-      slippage: params.slippage,
-      disableEstimate: params.disableEstimate ?? false,
-      allowPartialFill: false,
-    },
-  });
-
-  return {
-    to: data.tx.to,
-    data: data.tx.data,
-    value: data.tx.value,
-    gas: data.tx.gas,
-    fromTokenAmount: data.fromTokenAmount,
-    toTokenAmount: data.toTokenAmount,
-  };
-}
-
-/**
- * Executes a 1inch swap.
- * Approves token if needed, then submits the swap transaction.
- */
 export async function executeSwap(
   signer: ethers.Signer,
-  params: OneInchSwapParams
-): Promise<{ success: boolean; txHash?: string; outputAmount?: string; error?: string }> {
-  try {
-    // Get optimized swap calldata from 1inch
-    const swapData = await getSwapTransaction(params);
-
-    console.log(\`[1inch] Swapping: input=\${params.amount} | expected output=\${swapData.toTokenAmount}\`);
-
-    // Submit transaction
-    const tx = await signer.sendTransaction({
-      to: swapData.to,
-      data: swapData.data,
-      value: BigInt(swapData.value || "0"),
-      gasLimit: BigInt(Math.ceil(swapData.gas * 1.2)), // 20% buffer
-    });
-
-    console.log(\`[1inch] TX submitted: \${tx.hash}\`);
-    const receipt = await tx.wait();
-    
-    if (receipt?.status === 0) {
-      return { success: false, txHash: tx.hash, error: "Transaction reverted" };
-    }
-
-    return { 
-      success: true, 
-      txHash: tx.hash,
-      outputAmount: swapData.toTokenAmount,
-    };
-
-  } catch (err: any) {
-    return { success: false, error: err.response?.data?.description || err.message };
-  }
+  swapData: { to: string; data: string; value: string; gas: number }
+): Promise<string> {
+  ${includeApproval ? `
+  // Run get_quote first, which returns swapData.to / .data / .value / .gas
+  // Token approval should already be done once via approveToken()
+  ` : ""}
+  const tx = await signer.sendTransaction({
+    to: swapData.to,
+    data: swapData.data,
+    value: BigInt(swapData.value || "0"),
+    gasLimit: BigInt(Math.ceil(swapData.gas * 1.2)),
+  });
+  const receipt = await tx.wait();
+  if (receipt?.status === 0) throw new Error("Swap tx reverted");
+  return tx.hash;
 }
             `,
           },
@@ -211,40 +264,7 @@ export async function executeSwap(
       };
     }
 
-    case "get_quote_code": {
-      const chainId = (args as any)?.chainId ?? 42161;
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `
-// FILE: src/oneinch-quote.ts
-// 1inch price quotes for profitability checking
-
-import axios from "axios";
-
-export async function get1inchQuote(
-  chainId: number,
-  fromToken: string,
-  toToken: string,
-  amount: string
-): Promise<{ outputAmount: string; estimatedGas: number }> {
-  const { data } = await axios.get(
-    \`https://api.1inch.dev/swap/v6.0/\${chainId}/quote\`,
-    {
-      headers: { Authorization: \`Bearer \${process.env.ONEINCH_API_KEY}\` },
-      params: { src: fromToken, dst: toToken, amount },
-    }
-  );
-  return { outputAmount: data.dstAmount, estimatedGas: data.gas };
-}
-            `,
-          },
-        ],
-      };
-    }
-
+    // ── Code generator: fusion ────────────────────────────────────────────────
     case "get_fusion_swap_code": {
       return {
         content: [
@@ -252,17 +272,11 @@ export async function get1inchQuote(
             type: "text",
             text: `
 // FILE: src/oneinch-fusion.ts
-// 1inch Fusion — gasless, MEV-protected swaps via resolvers
-
+// 1inch Fusion — gasless MEV-protected swaps
 import { FusionSDK, NetworkEnum, PrivateKeyProviderConnector } from "@1inch/fusion-sdk";
 import { ethers } from "ethers";
 
-export async function executeFusionSwap(
-  fromToken: string,
-  toToken: string,
-  amount: string,
-  walletAddress: string
-) {
+export async function executeFusionSwap(from: string, to: string, amount: string, wallet: string) {
   const sdk = new FusionSDK({
     url: "https://fusion.1inch.io",
     network: NetworkEnum.ETHEREUM,
@@ -272,16 +286,8 @@ export async function executeFusionSwap(
       new ethers.JsonRpcProvider(process.env.RPC_URL)
     ),
   });
-
-  const params = await sdk.getQuote({
-    fromTokenAddress: fromToken,
-    toTokenAddress: toToken,
-    amount,
-    walletAddress,
-  });
-
+  const params = await sdk.getQuote({ fromTokenAddress: from, toTokenAddress: to, amount, walletAddress: wallet });
   const order = await sdk.placeOrder(params);
-  console.log(\`[FusionSwap] Order placed: \${order.orderHash}\`);
   return order;
 }
             `,
@@ -298,7 +304,7 @@ export async function executeFusionSwap(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[oneinch-mcp] Server running on stdio");
+  console.error("[oneinch-mcp v2] Server running — live API + code-gen mode");
 }
 
 main().catch(console.error);

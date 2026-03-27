@@ -1,8 +1,17 @@
 /**
- * MCP Server: jupiter-api
+ * MCP Server: jupiter-api  v2.0.0
  *
- * Code generator for Jupiter Aggregator (Solana's best swap aggregator).
- * Provides quote-fetching, swap execution, and route optimization code.
+ * FIXED: Now actually calls Jupiter Price API and Quote API.
+ * Previous version only returned code strings.
+ *
+ * Tools (live):
+ *   get_token_price      – real-time USD price from Jupiter Price API
+ *   get_batch_prices     – prices for multiple tokens at once
+ *   get_quote            – real swap quote (output amount, price impact, route)
+ *
+ * Tools (code generators — kept):
+ *   get_jupiter_swap_code       – versioned-tx swap boilerplate
+ *   get_jupiter_price_api_code  – price-feed boilerplate
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,190 +23,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const server = new Server(
-  { name: "jupiter-api-mcp", version: "1.0.0" },
+  { name: "jupiter-api-mcp", version: "2.0.0" },
   { capabilities: { tools: {} } }
 );
 
-const TOOLS: Tool[] = [
-  {
-    name: "get_jupiter_swap_code",
-    description:
-      "Returns TypeScript code for executing token swaps through Jupiter Aggregator on Solana with best-route optimization.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        useVersionedTx: {
-          type: "boolean",
-          description: "Use Solana versioned transactions (recommended)",
-        },
-      },
-    },
-  },
-  {
-    name: "get_jupiter_quote_code",
-    description:
-      "Returns TypeScript code for fetching swap quotes from Jupiter API without executing — use this for price checking before arbitrage.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "get_jupiter_price_api_code",
-    description:
-      "Returns TypeScript code for the Jupiter Price API — faster than quote API for real-time price monitoring.",
-    inputSchema: { type: "object", properties: {} },
-  },
-];
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  switch (name) {
-    case "get_jupiter_swap_code": {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `
-// ============================================================
-// FILE: src/jupiter-swap.ts
-// Jupiter Aggregator V6 — Best-route swap execution on Solana
-// ============================================================
-
-import {
-  Connection,
-  Keypair,
-  VersionedTransaction,
-  PublicKey,
-  TransactionMessage,
-} from "@solana/web3.js";
-import axios from "axios";
-
-const JUPITER_API_V6 = "https://quote-api.jup.ag/v6";
-
-export interface SwapParams {
-  inputMint: string;        // Token to sell (e.g., USDC mint address)
-  outputMint: string;       // Token to buy
-  amount: number;           // Amount in input token's smallest unit (e.g., lamports/micro-USDC)
-  slippageBps: number;      // Slippage tolerance in basis points (50 = 0.5%)
-  onlyDirectRoutes?: boolean;
-  asLegacyTransaction?: boolean;
-}
-
-export interface SwapResult {
-  success: boolean;
-  txSignature?: string;
-  inputAmount: number;
-  outputAmount: number;
-  priceImpactPct: number;
-  error?: string;
-}
-
-/**
- * Fetches the best swap route from Jupiter.
- * Always call this before execute() to verify the route is profitable.
- */
-export async function getSwapQuote(params: SwapParams) {
-  const url = new URL(\`\${JUPITER_API_V6}/quote\`);
-  url.searchParams.set("inputMint", params.inputMint);
-  url.searchParams.set("outputMint", params.outputMint);
-  url.searchParams.set("amount", params.amount.toString());
-  url.searchParams.set("slippageBps", params.slippageBps.toString());
-  if (params.onlyDirectRoutes) url.searchParams.set("onlyDirectRoutes", "true");
-
-  const { data: quoteResponse } = await axios.get(url.toString());
-  
-  console.log(\`[Jupiter] Best route: \${quoteResponse.routePlan?.map((r: any) => r.swapInfo?.label).join(" → ")}\`);
-  console.log(\`[Jupiter] Price impact: \${quoteResponse.priceImpactPct}%\`);
-  
-  return quoteResponse;
-}
-
-/**
- * Executes a swap via Jupiter using a versioned transaction.
- */
-export async function executeSwap(
-  connection: Connection,
-  keypair: Keypair,
-  params: SwapParams
-): Promise<SwapResult> {
-  try {
-    // Step 1: Get the best route
-    const quoteResponse = await getSwapQuote(params);
-    
-    if (parseFloat(quoteResponse.priceImpactPct) > 2) {
-      console.warn(\`[Jupiter] High price impact: \${quoteResponse.priceImpactPct}% — aborting\`);
-      return {
-        success: false,
-        inputAmount: params.amount,
-        outputAmount: 0,
-        priceImpactPct: parseFloat(quoteResponse.priceImpactPct),
-        error: "Price impact too high",
-      };
-    }
-
-    // Step 2: Get serialized transaction from Jupiter
-    const { data: swapResponse } = await axios.post(\`\${JUPITER_API_V6}/swap\`, {
-      quoteResponse,
-      userPublicKey: keypair.publicKey.toString(),
-      wrapAndUnwrapSol: true,
-      dynamicComputeUnitLimit: true,   // Optimize compute units automatically
-      prioritizationFeeLamports: "auto", // Auto-set priority fee for fast landing
-    });
-
-    // Step 3: Deserialize and sign the transaction
-    const swapTransactionBuf = Buffer.from(swapResponse.swapTransaction, "base64");
-    const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
-    transaction.sign([keypair]);
-
-    // Step 4: Submit with preflight disabled for speed (transaction pre-verified by Jupiter)
-    const rawTransaction = transaction.serialize();
-    const txid = await connection.sendRawTransaction(rawTransaction, {
-      skipPreflight: true,
-      maxRetries: 3,
-    });
-
-    console.log(\`[Jupiter] TX submitted: https://solscan.io/tx/\${txid}\`);
-
-    // Step 5: Wait for confirmation
-    const { value } = await connection.confirmTransaction(
-      { signature: txid, ...await connection.getLatestBlockhash() },
-      "confirmed"
-    );
-
-    if (value.err) {
-      return {
-        success: false,
-        txSignature: txid,
-        inputAmount: params.amount,
-        outputAmount: 0,
-        priceImpactPct: parseFloat(quoteResponse.priceImpactPct),
-        error: JSON.stringify(value.err),
-      };
-    }
-
-    return {
-      success: true,
-      txSignature: txid,
-      inputAmount: parseInt(quoteResponse.inAmount),
-      outputAmount: parseInt(quoteResponse.outAmount),
-      priceImpactPct: parseFloat(quoteResponse.priceImpactPct),
-    };
-
-  } catch (err: any) {
-    return {
-      success: false,
-      inputAmount: params.amount,
-      outputAmount: 0,
-      priceImpactPct: 0,
-      error: err.message,
-    };
-  }
-}
-
-// ─── Common Token Mints on Solana ─────────────────────────────────────────────
-
-export const SOLANA_TOKENS = {
+// Well-known Solana token mints (for convenience)
+export const SOLANA_TOKENS: Record<string, string> = {
   SOL:  "So11111111111111111111111111111111111111112",
   USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
@@ -206,73 +37,242 @@ export const SOLANA_TOKENS = {
   RAY:  "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
   ORCA: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",
 };
-            `,
-          },
-        ],
-      };
+
+// ─── Fetch helper ─────────────────────────────────────────────────────────────
+
+async function jupFetch(url: string): Promise<any> {
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Jupiter API HTTP ${res.status}`);
+  return res.json();
+}
+
+// ─── Tool definitions ─────────────────────────────────────────────────────────
+
+const TOOLS: Tool[] = [
+  {
+    name: "get_token_price",
+    description:
+      "LIVE: Returns the current USD price of a Solana token from Jupiter Price API. Accepts token mint address or symbol (SOL/USDC/USDT/BONK/JUP/RAY/ORCA).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tokenMintOrSymbol: { type: "string", description: "Mint address or known symbol" },
+      },
+      required: ["tokenMintOrSymbol"],
+    },
+  },
+  {
+    name: "get_batch_prices",
+    description:
+      "LIVE: Returns current USD prices for multiple Solana tokens in a single call. Pass mint addresses or known symbols.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tokensOrMints: {
+          type: "array",
+          items: { type: "string" },
+          description: "Array of mint addresses or symbols (e.g. ['SOL','USDC','BONK'])",
+        },
+      },
+      required: ["tokensOrMints"],
+    },
+  },
+  {
+    name: "get_quote",
+    description:
+      "LIVE: Fetches a real Jupiter swap quote. Returns exact output amount, price impact %, best route, and estimated fee. Use this to check if a Solana arbitrage is still profitable before executing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        inputMint: { type: "string", description: "Input token mint address or symbol" },
+        outputMint: { type: "string", description: "Output token mint address or symbol" },
+        amount: { type: "number", description: "Input amount in token's smallest unit (e.g. lamports for SOL, micro-USDC for USDC)" },
+        slippageBps: { type: "number", description: "Slippage tolerance in basis points (50 = 0.5%)", default: 50 },
+        onlyDirectRoutes: { type: "boolean", default: false },
+      },
+      required: ["inputMint", "outputMint", "amount"],
+    },
+  },
+  {
+    name: "get_jupiter_swap_code",
+    description: "Returns TypeScript boilerplate for executing a Jupiter swap using a versioned transaction (code template, not a live call).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_jupiter_price_api_code",
+    description: "Returns TypeScript boilerplate for a batch price feed (code template).",
+    inputSchema: { type: "object", properties: {} },
+  },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function resolveMint(tokenOrMint: string): string {
+  // If it looks like a mint address (long base58), use as-is
+  if (tokenOrMint.length > 20) return tokenOrMint;
+  return SOLANA_TOKENS[tokenOrMint.toUpperCase()] ?? tokenOrMint;
+}
+
+// ─── Handlers ─────────────────────────────────────────────────────────────────
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  switch (name) {
+    // ── LIVE: single token price ──────────────────────────────────────────────
+    case "get_token_price": {
+      const input: string = (args as any)?.tokenMintOrSymbol;
+      const mint = resolveMint(input);
+
+      try {
+        const data = await jupFetch(
+          `https://price.jup.ag/v6/price?ids=${mint}`
+        );
+        const entry = data.data?.[mint];
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                input,
+                mint,
+                priceUsd: entry?.price ?? null,
+                confidence: entry?.confidenceLevel ?? null,
+                checkedAt: new Date().toISOString(),
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, mint }) }],
+        };
+      }
     }
 
-    case "get_jupiter_quote_code": {
+    // ── LIVE: batch token prices ──────────────────────────────────────────────
+    case "get_batch_prices": {
+      const inputs: string[] = (args as any)?.tokensOrMints ?? [];
+      const mints = inputs.map(resolveMint);
+
+      try {
+        const data = await jupFetch(
+          `https://price.jup.ag/v6/price?ids=${mints.join(",")}`
+        );
+
+        const prices: Record<string, number | null> = {};
+        for (let i = 0; i < mints.length; i++) {
+          const mint = mints[i];
+          prices[inputs[i]] = data.data?.[mint]?.price ?? null;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ prices, checkedAt: new Date().toISOString() }, null, 2),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message }) }],
+        };
+      }
+    }
+
+    // ── LIVE: real swap quote ─────────────────────────────────────────────────
+    case "get_quote": {
+      const inputMint = resolveMint((args as any)?.inputMint);
+      const outputMint = resolveMint((args as any)?.outputMint);
+      const amount = (args as any)?.amount as number;
+      const slippageBps = (args as any)?.slippageBps ?? 50;
+      const onlyDirect = (args as any)?.onlyDirectRoutes ?? false;
+
+      try {
+        const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=${slippageBps}&onlyDirectRoutes=${onlyDirect}`;
+        const data = await jupFetch(url);
+
+        const inAmt = parseInt(data.inAmount ?? amount);
+        const outAmt = parseInt(data.outAmount ?? "0");
+        const impact = parseFloat(data.priceImpactPct ?? "0");
+
+        const route = (data.routePlan ?? [])
+          .map((step: any) => step.swapInfo?.label ?? "?")
+          .join(" → ");
+
+        const result = {
+          inputMint,
+          outputMint,
+          inputAmount: inAmt,
+          outputAmount: outAmt,
+          priceImpactPct: impact,
+          slippageBps,
+          route: route || "direct",
+          otherAmountThreshold: data.otherAmountThreshold,
+          contextSlot: data.contextSlot,
+          timeTaken: data.timeTaken,
+          profitable:
+            impact < 1 && outAmt > 0
+              ? "LIKELY — low price impact"
+              : impact >= 2
+              ? "RISKY — high price impact"
+              : "MARGINAL",
+          quotedAt: new Date().toISOString(),
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, inputMint, outputMint }) }],
+        };
+      }
+    }
+
+    // ── Code generators (kept) ────────────────────────────────────────────────
+    case "get_jupiter_swap_code": {
       return {
         content: [
           {
             type: "text",
             text: `
-// ============================================================
-// FILE: src/jupiter-quote.ts
-// Lightweight quote fetcher — no execution, just price checking
-// ============================================================
+// FILE: src/jupiter-swap.ts
+// Execute a Jupiter swap using a versioned transaction.
+// Step 1: call the get_quote MCP tool to get quoteResponse.
+// Step 2: POST to /swap to get serialized tx, then sign & send.
 
-import axios from "axios";
+import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 
-const JUPITER_PRICE_API = "https://price.jup.ag/v6/price";
-const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6/quote";
+export async function executeJupiterSwap(
+  connection: Connection,
+  keypair: Keypair,
+  quoteResponse: any
+): Promise<string> {
+  const { swapTransaction } = await fetch("https://quote-api.jup.ag/v6/swap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      quoteResponse,
+      userPublicKey: keypair.publicKey.toString(),
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: "auto",
+    }),
+  }).then(r => r.json());
 
-/**
- * Fetches current USD price for a Solana token using Jupiter Price API.
- * Much faster than the quote API — ideal for continuous monitoring.
- */
-export async function getTokenPrice(
-  mintAddress: string,
-  vsToken: string = "USDC"
-): Promise<number> {
-  const { data } = await axios.get(JUPITER_PRICE_API, {
-    params: { ids: mintAddress, vsToken },
-    timeout: 3000,
-  });
-  
-  return data.data[mintAddress]?.price ?? 0;
-}
-
-/**
- * Compares prices across a route to detect arbitrage opportunities.
- * Returns the expected output for a given input without executing.
- */
-export async function getExpectedOutput(
-  inputMint: string,
-  outputMint: string,
-  inputAmount: number,
-  slippageBps: number = 50
-): Promise<{
-  expectedOutput: number;
-  priceImpact: number;
-  route: string[];
-}> {
-  const { data } = await axios.get(JUPITER_QUOTE_API, {
-    params: {
-      inputMint,
-      outputMint,
-      amount: inputAmount,
-      slippageBps,
-    },
-    timeout: 5000,
-  });
-
-  return {
-    expectedOutput: parseInt(data.outAmount),
-    priceImpact: parseFloat(data.priceImpactPct),
-    route: data.routePlan?.map((r: any) => r.swapInfo?.label) ?? [],
-  };
+  const tx = VersionedTransaction.deserialize(Buffer.from(swapTransaction, "base64"));
+  tx.sign([keypair]);
+  const txid = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
+  await connection.confirmTransaction({ signature: txid, ...await connection.getLatestBlockhash() }, "confirmed");
+  return txid;
 }
             `,
           },
@@ -286,18 +286,12 @@ export async function getExpectedOutput(
           {
             type: "text",
             text: `
-// Jupiter Price API — ultra-fast price feed for real-time monitoring
-// Endpoint: https://price.jup.ag/v6/price
+// Tip: use get_batch_prices MCP tool instead of this boilerplate.
+// The MCP tool calls Jupiter Price API directly and returns structured data.
 
-export async function getBatchPrices(mintAddresses: string[]): Promise<Map<string, number>> {
-  const ids = mintAddresses.join(",");
-  const { data } = await fetch(\`https://price.jup.ag/v6/price?ids=\${ids}\`).then(r => r.json());
-  
-  const prices = new Map<string, number>();
-  mintAddresses.forEach(mint => {
-    if (data.data[mint]) prices.set(mint, data.data[mint].price);
-  });
-  return prices;
+export async function getBatchPrices(mints: string[]): Promise<Map<string, number>> {
+  const data = await fetch(\`https://price.jup.ag/v6/price?ids=\${mints.join(",")}\`).then(r => r.json());
+  return new Map(mints.map(m => [m, data.data[m]?.price ?? 0]));
 }
             `,
           },
@@ -313,7 +307,7 @@ export async function getBatchPrices(mintAddresses: string[]): Promise<Map<strin
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[jupiter-api-mcp] Server running on stdio");
+  console.error("[jupiter-api-mcp v2] Server running — live API + code-gen mode");
 }
 
 main().catch(console.error);

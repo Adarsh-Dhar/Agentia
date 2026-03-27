@@ -1,9 +1,13 @@
 /**
- * MCP Server: rugcheck
+ * MCP Server: rugcheck  v2.0.0
  *
- * Security validation code generator.
- * Generates code to check tokens against rug pull / honeypot databases
- * before the agent interacts with them.
+ * FIXED: Now actually calls Rugcheck.xyz (Solana) and GoPlus (EVM) APIs.
+ * Previous version only returned code strings.
+ *
+ * Tools:
+ *   validate_token        – LIVE call to Rugcheck/GoPlus, returns real risk report
+ *   check_honeypot        – LIVE call to honeypot.is for EVM tokens
+ *   get_token_validator_code – (kept) code template
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -15,41 +19,282 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const server = new Server(
-  { name: "rugcheck-mcp", version: "1.0.0" },
+  { name: "rugcheck-mcp", version: "2.0.0" },
   { capabilities: { tools: {} } }
 );
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type RiskLevel = "SAFE" | "LOW_RISK" | "MEDIUM_RISK" | "HIGH_RISK" | "CRITICAL";
+
+interface TokenSecurityReport {
+  tokenAddress: string;
+  chain: string;
+  riskLevel: RiskLevel;
+  isSafe: boolean;
+  score: number; // 0–100, higher = safer
+  flags: string[];
+  details: {
+    mintAuthority?: boolean;
+    freezeAuthority?: boolean;
+    isHoneypot?: boolean;
+    lpLocked?: boolean;
+    topHolderConcentration?: number;
+    hasBlacklist?: boolean;
+    isProxy?: boolean;
+  };
+  source: string;
+  checkedAt: string;
+}
+
+// ─── Fetch helper ─────────────────────────────────────────────────────────────
+
+async function apiFetch(url: string, opts: RequestInit = {}): Promise<any> {
+  const res = await fetch(url, {
+    ...opts,
+    headers: { Accept: "application/json", ...(opts.headers ?? {}) },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+  return res.json();
+}
+
+// ─── Rugcheck.xyz — Solana ────────────────────────────────────────────────────
+
+async function validateSolanaToken(
+  mintAddress: string,
+  strict: boolean
+): Promise<TokenSecurityReport> {
+  const flags: string[] = [];
+  let score = 100;
+  const details: TokenSecurityReport["details"] = {};
+
+  try {
+    const data = await apiFetch(
+      `https://api.rugcheck.xyz/v1/tokens/${mintAddress}/report/summary`
+    );
+
+    const risks: Array<{ name: string; description: string; level: string }> =
+      data.risks ?? [];
+
+    for (const risk of risks) {
+      flags.push(`[${risk.level.toUpperCase()}] ${risk.name}: ${risk.description}`);
+      if (risk.level === "danger") score -= 40;
+      else if (risk.level === "warn") score -= 15;
+      else score -= 5;
+    }
+
+    details.mintAuthority = data.token?.mintAuthority !== null && data.token?.mintAuthority !== undefined;
+    details.freezeAuthority = data.token?.freezeAuthority !== null && data.token?.freezeAuthority !== undefined;
+
+    const lockedPct =
+      data.markets
+        ?.map((m: any) => m.lp?.lpLockedPct ?? 0)
+        .reduce((a: number, b: number) => Math.max(a, b), 0) ?? 0;
+    details.lpLocked = lockedPct > 80;
+
+    const concentration = (data.topHolders ?? [])
+      .slice(0, 10)
+      .reduce((s: number, h: any) => s + (h.pct ?? 0), 0);
+    details.topHolderConcentration = Math.round(concentration * 100) / 100;
+
+    if (details.mintAuthority) {
+      flags.push("[DANGER] MINT_AUTHORITY_ENABLED: token supply can be inflated");
+      score -= 30;
+    }
+    if (details.freezeAuthority) {
+      flags.push("[WARN] FREEZE_AUTHORITY_ENABLED: transfers can be frozen");
+      score -= 20;
+    }
+    if (concentration > 50) {
+      flags.push(`[WARN] HIGH_CONCENTRATION: top-10 wallets hold ${concentration.toFixed(1)}%`);
+      score -= 15;
+    }
+    if (!details.lpLocked) {
+      flags.push("[WARN] LP_NOT_LOCKED: liquidity not verified as locked");
+      score -= 10;
+    }
+  } catch (err: any) {
+    flags.push(`VALIDATION_FAILED: ${err.message}`);
+    score = 0;
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const riskLevel = scoreToRisk(score);
+
+  return {
+    tokenAddress: mintAddress,
+    chain: "solana",
+    riskLevel,
+    isSafe: strict ? riskLevel === "SAFE" : ["SAFE", "LOW_RISK"].includes(riskLevel),
+    score,
+    flags,
+    details,
+    source: "rugcheck.xyz",
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+// ─── GoPlus — EVM ─────────────────────────────────────────────────────────────
+
+async function validateEvmToken(
+  tokenAddress: string,
+  chainId: string,
+  strict: boolean
+): Promise<TokenSecurityReport> {
+  const flags: string[] = [];
+  let score = 100;
+  const details: TokenSecurityReport["details"] = {};
+
+  try {
+    const data = await apiFetch(
+      `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${tokenAddress}`
+    );
+
+    const result = data.result?.[tokenAddress.toLowerCase()];
+    if (!result) throw new Error("Token not found in GoPlus database");
+
+    details.isHoneypot = result.is_honeypot === "1";
+    details.hasBlacklist = result.is_blacklisted === "1";
+    details.mintAuthority = result.can_take_back_ownership === "1";
+    details.isProxy = result.is_proxy === "1";
+
+    const lockedHolder = (result.lp_holders ?? []).find(
+      (h: any) => h.is_locked
+    );
+    details.lpLocked =
+      parseFloat(lockedHolder?.percent ?? "0") > 0.5;
+
+    const top10Pct =
+      (result.holders ?? [])
+        .slice(0, 10)
+        .reduce((s: number, h: any) => s + parseFloat(h.percent ?? "0"), 0) *
+      100;
+    details.topHolderConcentration = Math.round(top10Pct * 10) / 10;
+
+    if (details.isHoneypot) {
+      flags.push("[CRITICAL] HONEYPOT: token cannot be sold");
+      score -= 100;
+    }
+    if (details.hasBlacklist) {
+      flags.push("[DANGER] BLACKLIST: addresses can be blacklisted");
+      score -= 30;
+    }
+    if (details.mintAuthority) {
+      flags.push("[DANGER] MINT_CONTROL: owner can mint unlimited tokens");
+      score -= 40;
+    }
+    if (details.isProxy) {
+      flags.push("[WARN] PROXY_CONTRACT: contract logic can be swapped");
+      score -= 20;
+    }
+    if (!details.lpLocked) {
+      flags.push("[WARN] LP_UNLOCKED: liquidity can be removed at any time");
+      score -= 10;
+    }
+    if (top10Pct > 50) {
+      flags.push(`[WARN] HIGH_CONCENTRATION: top-10 hold ${top10Pct.toFixed(1)}%`);
+      score -= 10;
+    }
+
+    // Bonus flags from GoPlus
+    if (result.sell_tax && parseFloat(result.sell_tax) > 0.1) {
+      flags.push(`[WARN] HIGH_SELL_TAX: ${(parseFloat(result.sell_tax) * 100).toFixed(1)}%`);
+      score -= 15;
+    }
+    if (result.buy_tax && parseFloat(result.buy_tax) > 0.1) {
+      flags.push(`[WARN] HIGH_BUY_TAX: ${(parseFloat(result.buy_tax) * 100).toFixed(1)}%`);
+      score -= 10;
+    }
+  } catch (err: any) {
+    flags.push(`VALIDATION_FAILED: ${err.message}`);
+    score = 0;
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const riskLevel = scoreToRisk(score);
+  const chainNames: Record<string, string> = {
+    "1": "ethereum", "56": "bsc", "137": "polygon",
+    "42161": "arbitrum", "10": "optimism", "8453": "base",
+  };
+
+  return {
+    tokenAddress,
+    chain: chainNames[chainId] ?? `chain-${chainId}`,
+    riskLevel,
+    isSafe: strict ? riskLevel === "SAFE" : ["SAFE", "LOW_RISK"].includes(riskLevel),
+    score,
+    flags,
+    details,
+    source: "gopluslabs.io",
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+function scoreToRisk(score: number): RiskLevel {
+  if (score >= 80) return "SAFE";
+  if (score >= 60) return "LOW_RISK";
+  if (score >= 40) return "MEDIUM_RISK";
+  if (score >= 20) return "HIGH_RISK";
+  return "CRITICAL";
+}
+
+// ─── Tool definitions ─────────────────────────────────────────────────────────
+
 const TOOLS: Tool[] = [
   {
-    name: "get_token_validator_code",
+    name: "validate_token",
     description:
-      "Returns TypeScript code that validates a token's safety using Rugcheck.xyz and GoPlus Security APIs before trading.",
+      "LIVE: Calls Rugcheck.xyz (Solana) or GoPlus (EVM) right now and returns a real security report with risk score, flags, and a clear isSafe verdict. Always call this before trading any token.",
     inputSchema: {
       type: "object",
       properties: {
+        tokenAddress: { type: "string", description: "Token contract / mint address" },
         chain: {
           type: "string",
-          enum: ["solana", "ethereum", "bsc", "polygon"],
+          enum: ["solana", "ethereum", "bsc", "polygon", "arbitrum", "optimism", "base"],
+          description: "Blockchain the token is on",
         },
-        strictMode: {
+        strict: {
           type: "boolean",
-          description: "If true, reject any token with even minor risk flags",
+          description: "If true, only 'SAFE' tokens pass. If false, 'LOW_RISK' also passes. Default true.",
+          default: true,
         },
       },
+      required: ["tokenAddress", "chain"],
     },
   },
   {
-    name: "get_honeypot_check_code",
+    name: "check_honeypot",
     description:
-      "Returns TypeScript code to check if a token is a honeypot (buy works but sell is blocked).",
+      "LIVE: Calls honeypot.is to check whether an EVM token can actually be sold. Returns isHoneypot, buyTax, sellTax.",
     inputSchema: {
       type: "object",
       properties: {
-        network: { type: "string", enum: ["ethereum", "bsc", "polygon"] },
+        tokenAddress: { type: "string" },
+        chainId: {
+          type: "number",
+          description: "EVM chain ID: 1=ETH, 56=BSC, 137=Polygon, 42161=Arbitrum",
+          default: 1,
+        },
+      },
+      required: ["tokenAddress"],
+    },
+  },
+  {
+    name: "get_token_validator_code",
+    description: "Returns TypeScript boilerplate for token validation (code template, not a live call).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chain: { type: "string", enum: ["solana", "ethereum", "bsc", "polygon"] },
+        strictMode: { type: "boolean" },
       },
     },
   },
 ];
+
+// ─── Handlers ─────────────────────────────────────────────────────────────────
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
@@ -57,225 +302,93 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   switch (name) {
-    case "get_token_validator_code": {
-      const chain = (args as any)?.chain ?? "solana";
-      const strictMode = (args as any)?.strictMode ?? true;
+    // ── LIVE token validation ─────────────────────────────────────────────────
+    case "validate_token": {
+      const address: string = (args as any)?.tokenAddress;
+      const chain: string = (args as any)?.chain ?? "solana";
+      const strict: boolean = (args as any)?.strict ?? true;
+
+      const chainIdMap: Record<string, string> = {
+        ethereum: "1", bsc: "56", polygon: "137",
+        arbitrum: "42161", optimism: "10", base: "8453",
+      };
+
+      let report: TokenSecurityReport;
+      if (chain === "solana") {
+        report = await validateSolanaToken(address, strict);
+      } else {
+        const chainId = chainIdMap[chain] ?? "1";
+        report = await validateEvmToken(address, chainId, strict);
+      }
 
       return {
-        content: [
-          {
-            type: "text",
-            text: `
-// ============================================================
-// FILE: src/token-validator.ts
-// Security validation — ALWAYS run before trading any token
-// Chain: ${chain} | Strict Mode: ${strictMode}
-// ============================================================
-
-import axios from "axios";
-
-export type RiskLevel = "SAFE" | "LOW_RISK" | "MEDIUM_RISK" | "HIGH_RISK" | "CRITICAL";
-
-export interface TokenSecurityReport {
-  tokenAddress: string;
-  riskLevel: RiskLevel;
-  isSafe: boolean;
-  flags: string[];
-  score: number;         // 0-100, higher = safer
-  details: {
-    mintAuthority?: boolean;       // Can supply be inflated?
-    freezeAuthority?: boolean;     // Can transfers be frozen?
-    isHoneypot?: boolean;          // Can tokens be sold?
-    lpLocked?: boolean;            // Is liquidity locked?
-    topHolderConcentration?: number; // % held by top 10 wallets
-    hasBlacklist?: boolean;
-    isProxy?: boolean;
-  };
-}
-
-${chain === "solana" ? `
-/**
- * Validates a Solana token using Rugcheck.xyz API.
- * Checks for: mint authority, freeze authority, LP lock status.
- */
-export async function validateSolanaToken(
-  mintAddress: string
-): Promise<TokenSecurityReport> {
-  const flags: string[] = [];
-  let score = 100;
-
-  try {
-    // Rugcheck API (free, no key required)
-    const { data } = await axios.get(
-      \`https://api.rugcheck.xyz/v1/tokens/\${mintAddress}/report/summary\`,
-      { timeout: 8000 }
-    );
-
-    // Parse risk indicators from Rugcheck
-    const risks = data.risks || [];
-    
-    risks.forEach((risk: any) => {
-      flags.push(\`\${risk.name}: \${risk.description}\`);
-      // Deduct score based on severity
-      if (risk.level === "danger") score -= 40;
-      else if (risk.level === "warn") score -= 15;
-      else if (risk.level === "info") score -= 5;
-    });
-
-    const details = {
-      mintAuthority: data.token?.mintAuthority !== null,
-      freezeAuthority: data.token?.freezeAuthority !== null,
-      lpLocked: data.markets?.some((m: any) => m.lp?.lpLockedPct > 80),
-      topHolderConcentration: data.topHolders?.reduce(
-        (sum: number, h: any) => sum + (h.pct || 0), 0
-      ),
-    };
-
-    if (details.mintAuthority) {
-      flags.push("MINT_AUTHORITY_ENABLED: Supply can be inflated");
-      score -= 30;
-    }
-    if (details.freezeAuthority) {
-      flags.push("FREEZE_AUTHORITY_ENABLED: Transfers can be frozen");
-      score -= 20;
-    }
-    if ((details.topHolderConcentration || 0) > 50) {
-      flags.push(\`HIGH_CONCENTRATION: Top 10 hold \${details.topHolderConcentration?.toFixed(1)}%\`);
-      score -= 15;
-    }
-
-    score = Math.max(0, score);
-
-    let riskLevel: RiskLevel;
-    if (score >= 80) riskLevel = "SAFE";
-    else if (score >= 60) riskLevel = "LOW_RISK";
-    else if (score >= 40) riskLevel = "MEDIUM_RISK";
-    else if (score >= 20) riskLevel = "HIGH_RISK";
-    else riskLevel = "CRITICAL";
-
-    const isSafe = ${strictMode} 
-      ? riskLevel === "SAFE" 
-      : ["SAFE", "LOW_RISK"].includes(riskLevel);
-
-    return { tokenAddress: mintAddress, riskLevel, isSafe, flags, score, details };
-
-  } catch (err) {
-    // If we can't validate, treat as unsafe
-    return {
-      tokenAddress: mintAddress,
-      riskLevel: "CRITICAL",
-      isSafe: false,
-      flags: ["VALIDATION_FAILED: Could not fetch security report"],
-      score: 0,
-      details: {},
-    };
-  }
-}
-` : `
-/**
- * Validates an EVM token using GoPlus Security API.
- * Checks for: honeypot, blacklist, proxy, ownership.
- */
-export async function validateEvmToken(
-  tokenAddress: string,
-  chainId: string = "1"  // 1=eth, 56=bsc, 137=polygon, 42161=arbitrum
-): Promise<TokenSecurityReport> {
-  const flags: string[] = [];
-  let score = 100;
-
-  try {
-    const { data } = await axios.get(
-      \`https://api.gopluslabs.io/api/v1/token_security/\${chainId}\`,
-      { params: { contract_addresses: tokenAddress }, timeout: 8000 }
-    );
-    
-    const result = data.result[tokenAddress.toLowerCase()];
-    if (!result) throw new Error("Token not found in GoPlus database");
-
-    const details = {
-      isHoneypot: result.is_honeypot === "1",
-      hasBlacklist: result.is_blacklisted === "1",
-      mintAuthority: result.can_take_back_ownership === "1",
-      isProxy: result.is_proxy === "1",
-      lpLocked: parseFloat(result.lp_holders?.find((h: any) => h.is_locked)?.percent || "0") > 0.5,
-      topHolderConcentration: result.holders?.slice(0, 10)
-        .reduce((s: number, h: any) => s + parseFloat(h.percent), 0) * 100,
-    };
-
-    if (details.isHoneypot) { flags.push("HONEYPOT: Cannot sell token"); score -= 100; }
-    if (details.hasBlacklist) { flags.push("BLACKLIST: Address can be blacklisted"); score -= 30; }
-    if (details.mintAuthority) { flags.push("MINT_CONTROL: Owner can mint unlimited tokens"); score -= 40; }
-    if (details.isProxy) { flags.push("PROXY_CONTRACT: Logic can be changed"); score -= 20; }
-
-    score = Math.max(0, score);
-    
-    const riskLevel: RiskLevel = score >= 80 ? "SAFE" : score >= 60 ? "LOW_RISK" 
-      : score >= 40 ? "MEDIUM_RISK" : score >= 20 ? "HIGH_RISK" : "CRITICAL";
-
-    return {
-      tokenAddress,
-      riskLevel,
-      isSafe: ${strictMode} ? riskLevel === "SAFE" : ["SAFE", "LOW_RISK"].includes(riskLevel),
-      flags, score, details,
-    };
-  } catch {
-    return { tokenAddress, riskLevel: "CRITICAL", isSafe: false, 
-             flags: ["VALIDATION_FAILED"], score: 0, details: {} };
-  }
-}
-`}
-
-/**
- * Quick validation gate — use this in your LangGraph workflow node.
- * Returns true only if the token is safe to trade.
- */
-export async function isTokenSafe(
-  tokenAddress: string, 
-  chain: string = "${chain}"
-): Promise<boolean> {
-  console.log(\`[Security] Validating \${tokenAddress} on \${chain}...\`);
-  
-  const report = chain === "solana"
-    ? await validateSolanaToken(tokenAddress)
-    : await validateEvmToken(tokenAddress);
-
-  if (!report.isSafe) {
-    console.warn(\`[Security] ⛔ UNSAFE TOKEN: \${tokenAddress}\`);
-    report.flags.forEach(f => console.warn(\`  → \${f}\`));
-  } else {
-    console.log(\`[Security] ✓ Token safe (score: \${report.score}/100)\`);
-  }
-
-  return report.isSafe;
-}
-            `,
-          },
-        ],
+        content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
       };
     }
 
-    case "get_honeypot_check_code": {
+    // ── LIVE honeypot check ───────────────────────────────────────────────────
+    case "check_honeypot": {
+      const address: string = (args as any)?.tokenAddress;
+      const chainId: number = (args as any)?.chainId ?? 1;
+
+      try {
+        const data = await apiFetch(
+          `https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`
+        );
+
+        const result = {
+          tokenAddress: address,
+          chainId,
+          isHoneypot: data.honeypotResult?.isHoneypot ?? false,
+          honeypotReason: data.honeypotResult?.honeypotReason ?? null,
+          buyTaxPct: Math.round((data.simulationResult?.buyTax ?? 0) * 100) / 100,
+          sellTaxPct: Math.round((data.simulationResult?.sellTax ?? 0) * 100) / 100,
+          buyGas: data.simulationResult?.buyGas ?? null,
+          sellGas: data.simulationResult?.sellGas ?? null,
+          verdict:
+            data.honeypotResult?.isHoneypot
+              ? "HONEYPOT — DO NOT TRADE"
+              : "SELL_ENABLED — appears safe",
+          checkedAt: new Date().toISOString(),
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (err: any) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ error: err.message, tokenAddress: address }),
+            },
+          ],
+        };
+      }
+    }
+
+    // ── Code template (kept) ─────────────────────────────────────────────────
+    case "get_token_validator_code": {
       return {
         content: [
           {
             type: "text",
             text: `
-// Honeypot detection via honeypot.is API (EVM only)
-import axios from "axios";
+// Tip: use the validate_token MCP tool directly from your agent instead of
+// copy-pasting this template. The MCP tool already calls the APIs for you.
 
-export async function checkHoneypot(
-  tokenAddress: string,
-  chainId: number = 1
-): Promise<{ isHoneypot: boolean; sellTax: number; buyTax: number }> {
-  const { data } = await axios.get(
-    \`https://api.honeypot.is/v2/IsHoneypot?address=\${tokenAddress}&chainID=\${chainId}\`
-  );
-  
-  return {
-    isHoneypot: data.honeypotResult?.isHoneypot ?? false,
-    sellTax: data.simulationResult?.sellTax ?? 0,
-    buyTax: data.simulationResult?.buyTax ?? 0,
-  };
+// Quick guard to paste into your agent workflow:
+async function guardToken(mcpClient: any, address: string, chain: string) {
+  const result = await mcpClient.callTool("validate_token", {
+    tokenAddress: address,
+    chain,
+    strict: true,
+  });
+  const report = JSON.parse(result.content[0].text);
+  if (!report.isSafe) {
+    throw new Error(\`Token rejected [\${report.riskLevel}]: \${report.flags.join("; ")}\`);
+  }
+  return report;
 }
             `,
           },
@@ -291,7 +404,7 @@ export async function checkHoneypot(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[rugcheck-mcp] Server running on stdio");
+  console.error("[rugcheck-mcp v2] Server running — live API mode");
 }
 
 main().catch(console.error);

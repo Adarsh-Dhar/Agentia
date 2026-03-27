@@ -1,9 +1,14 @@
 /**
  * MCP Server: dexscreener
  *
- * Provides code generation tools for DexScreener API integration.
- * This is the "eyes" of the arbitrageur — real-time price monitoring
- * across all chains and DEX pairs.
+ * FIXED: Now actually calls the DexScreener API and returns live data.
+ * Previous version only returned code strings — useless for an autonomous agent.
+ *
+ * Tools:
+ *   scan_live_opportunities  – fetch real arbitrage gaps right now
+ *   get_token_pairs          – get all DEX pairs for a token address
+ *   get_pair_detail          – fetch one specific pair by address
+ *   get_price_monitor_code   – (kept) code template for continuous monitoring
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -15,77 +20,13 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const server = new Server(
-  { name: "dexscreener-mcp", version: "1.0.0" },
+  { name: "dexscreener-mcp", version: "2.0.0" },
   { capabilities: { tools: {} } }
 );
 
-const TOOLS: Tool[] = [
-  {
-    name: "get_price_monitor_code",
-    description:
-      "Returns TypeScript code for monitoring token prices across multiple DEXs using DexScreener API. Detects price discrepancies for arbitrage.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        pollingIntervalMs: {
-          type: "number",
-          description: "How often to poll prices in milliseconds (default: 3000)",
-        },
-        minGapPercent: {
-          type: "number",
-          description: "Minimum price gap % to flag as opportunity (default: 0.5)",
-        },
-      },
-    },
-  },
-  {
-    name: "get_pair_search_code",
-    description:
-      "Returns TypeScript code for searching token pair data via DexScreener API.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        includeFilters: {
-          type: "boolean",
-          description: "Include liquidity and volume filters",
-        },
-      },
-    },
-  },
-  {
-    name: "get_multi_chain_scanner",
-    description:
-      "Returns TypeScript code that scans the same token pair across multiple chains simultaneously to find cross-chain arbitrage opportunities.",
-    inputSchema: { type: "object", properties: {} },
-  },
-];
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  switch (name) {
-    case "get_price_monitor_code": {
-      const interval = (args as any)?.pollingIntervalMs ?? 3000;
-      const minGap = (args as any)?.minGapPercent ?? 0.5;
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `
-// ============================================================
-// FILE: src/price-monitor.ts
-// DexScreener Price Monitor — detects arbitrage opportunities
-// Polls every ${interval}ms, flags gaps > ${minGap}%
-// ============================================================
-
-import axios from "axios";
-
-const DEXSCREENER_BASE = "https://api.dexscreener.com/latest/dex";
-
-export interface PairData {
+interface DexPair {
   pairAddress: string;
   dexId: string;
   chainId: string;
@@ -97,236 +38,320 @@ export interface PairData {
   volume: { h24: number };
   liquidity: { usd: number };
   priceChange: { h1: number; h24: number };
+  url: string;
 }
 
-export interface ArbitrageOpportunity {
+interface ArbitrageOpportunity {
   tokenSymbol: string;
   tokenAddress: string;
-  buyOn: PairData;    // Lower price — buy here
-  sellOn: PairData;   // Higher price — sell here
+  buyOn: { dex: string; chain: string; priceUsd: string; pair: string };
+  sellOn: { dex: string; chain: string; priceUsd: string; pair: string };
   gapPercent: number;
-  estimatedProfitUSD: number;
-  timestamp: number;
+  grossProfitUsd: number;
+  netProfitEstimateUsd: number; // after ~0.9% fees (Aave + 2×DEX)
+  viable: boolean;
 }
 
-/**
- * Fetches all pairs for a given token address from DexScreener.
- * Returns pairs sorted by liquidity (highest first).
- */
-export async function fetchTokenPairs(tokenAddress: string): Promise<PairData[]> {
-  const url = \`\${DEXSCREENER_BASE}/tokens/\${tokenAddress}\`;
-  
-  try {
-    const { data } = await axios.get(url, { timeout: 5000 });
-    
-    if (!data.pairs || data.pairs.length === 0) return [];
+// ─── Shared fetch helper (no axios needed — use native fetch in Node 18+) ──────
 
-    return data.pairs
-      .filter((p: PairData) => 
-        p.liquidity?.usd > 50000 &&  // Min $50k liquidity
-        p.volume?.h24 > 10000        // Min $10k daily volume
-      )
-      .sort((a: PairData, b: PairData) => 
-        (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
-      );
-  } catch (err) {
-    console.error(\`[DexScreener] Failed to fetch \${tokenAddress}: \${err}\`);
-    return [];
-  }
+async function dexFetch(url: string): Promise<any> {
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`DexScreener HTTP ${res.status}: ${url}`);
+  return res.json();
 }
 
-/**
- * Searches for pairs by token symbol/name query.
- */
-export async function searchPairs(query: string): Promise<PairData[]> {
-  const url = \`\${DEXSCREENER_BASE}/search?q=\${encodeURIComponent(query)}\`;
-  const { data } = await axios.get(url, { timeout: 5000 });
-  return data.pairs || [];
+// ─── Core logic ───────────────────────────────────────────────────────────────
+
+async function fetchPairsForToken(tokenAddress: string): Promise<DexPair[]> {
+  const data = await dexFetch(
+    `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`
+  );
+  return (data.pairs ?? []).filter(
+    (p: DexPair) =>
+      p.liquidity?.usd > 50_000 &&
+      p.volume?.h24 > 10_000 &&
+      parseFloat(p.priceUsd ?? "0") > 0
+  );
 }
 
-/**
- * Detects price discrepancies across DEXs for the same token.
- * Returns opportunities where gap exceeds ${minGap}%.
- */
-export function detectArbitrageOpportunities(
-  pairs: PairData[],
-  minGapPercent: number = ${minGap},
-  tradeAmountUSD: number = 10000
+function detectOpportunities(
+  pairs: DexPair[],
+  tradeAmountUsd: number,
+  minGapPct: number
 ): ArbitrageOpportunity[] {
-  const opportunities: ArbitrageOpportunity[] = [];
-
-  // Group pairs by base token
-  const byToken = new Map<string, PairData[]>();
-  pairs.forEach((p) => {
-    const key = p.baseToken.address.toLowerCase();
+  // Group by base-token address (same token, different DEXes)
+  const byToken = new Map<string, DexPair[]>();
+  for (const p of pairs) {
+    const key = `${p.chainId}:${p.baseToken.address.toLowerCase()}`;
     if (!byToken.has(key)) byToken.set(key, []);
     byToken.get(key)!.push(p);
-  });
+  }
 
-  // For each token with multiple pairs, find price gaps
+  const opportunities: ArbitrageOpportunity[] = [];
+
   byToken.forEach((tokenPairs) => {
     if (tokenPairs.length < 2) return;
 
-    const prices = tokenPairs
-      .map((p) => ({ pair: p, price: parseFloat(p.priceUsd) }))
+    const sorted = [...tokenPairs]
+      .map((p) => ({ p, price: parseFloat(p.priceUsd) }))
       .filter((x) => x.price > 0)
       .sort((a, b) => a.price - b.price);
 
-    const cheapest = prices[0];
-    const mostExpensive = prices[prices.length - 1];
-    
-    const gapPercent =
-      ((mostExpensive.price - cheapest.price) / cheapest.price) * 100;
+    const cheapest = sorted[0];
+    const priciest = sorted[sorted.length - 1];
+    const gapPct =
+      ((priciest.price - cheapest.price) / cheapest.price) * 100;
 
-    if (gapPercent >= minGapPercent) {
-      // Rough profit estimate (before fees and gas)
-      const estimatedProfitUSD = (tradeAmountUSD * gapPercent) / 100;
+    if (gapPct < minGapPct) return;
 
-      opportunities.push({
-        tokenSymbol: cheapest.pair.baseToken.symbol,
-        tokenAddress: cheapest.pair.baseToken.address,
-        buyOn: cheapest.pair,
-        sellOn: mostExpensive.pair,
-        gapPercent: Math.round(gapPercent * 100) / 100,
-        estimatedProfitUSD: Math.round(estimatedProfitUSD * 100) / 100,
-        timestamp: Date.now(),
-      });
-    }
+    // Rough profit: gap minus Aave 0.09% + 2× 0.3% DEX fees = 0.69% total fees
+    const grossProfit = (tradeAmountUsd * gapPct) / 100;
+    const fees = tradeAmountUsd * 0.0069;
+    const netProfit = grossProfit - fees;
+
+    opportunities.push({
+      tokenSymbol: cheapest.p.baseToken.symbol,
+      tokenAddress: cheapest.p.baseToken.address,
+      buyOn: {
+        dex: cheapest.p.dexId,
+        chain: cheapest.p.chainId,
+        priceUsd: cheapest.p.priceUsd,
+        pair: cheapest.p.pairAddress,
+      },
+      sellOn: {
+        dex: priciest.p.dexId,
+        chain: priciest.p.chainId,
+        priceUsd: priciest.p.priceUsd,
+        pair: priciest.p.pairAddress,
+      },
+      gapPercent: Math.round(gapPct * 100) / 100,
+      grossProfitUsd: Math.round(grossProfit * 100) / 100,
+      netProfitEstimateUsd: Math.round(netProfit * 100) / 100,
+      viable: netProfit > 0,
+    });
   });
 
   return opportunities.sort((a, b) => b.gapPercent - a.gapPercent);
 }
 
-/**
- * Continuous monitoring loop — polls DexScreener and emits opportunities.
- */
-export async function startPriceMonitor(
-  watchlist: string[],  // Array of token addresses to monitor
-  onOpportunity: (opp: ArbitrageOpportunity) => Promise<void>,
-  pollingIntervalMs: number = ${interval}
-): Promise<void> {
-  console.log(\`[PriceMonitor] Starting — watching \${watchlist.length} tokens every \${pollingIntervalMs}ms\`);
+// ─── Tool definitions ─────────────────────────────────────────────────────────
 
-  const monitor = async () => {
-    for (const tokenAddress of watchlist) {
-      try {
-        const pairs = await fetchTokenPairs(tokenAddress);
-        const opportunities = detectArbitrageOpportunities(pairs);
+const TOOLS: Tool[] = [
+  {
+    name: "scan_live_opportunities",
+    description:
+      "LIVE: Queries DexScreener right now and returns real arbitrage opportunities for the given token addresses. Returns actual price gaps, estimated profit, and which DEXs to use.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tokenAddresses: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of token contract addresses to scan",
+        },
+        tradeAmountUsd: {
+          type: "number",
+          description: "Flash loan size in USD (used to estimate profit)",
+          default: 10000,
+        },
+        minGapPercent: {
+          type: "number",
+          description: "Minimum price gap % to report (default 0.5)",
+          default: 0.5,
+        },
+      },
+      required: ["tokenAddresses"],
+    },
+  },
+  {
+    name: "get_token_pairs",
+    description:
+      "LIVE: Returns all active DEX pairs for a token address from DexScreener, filtered for adequate liquidity and volume.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tokenAddress: { type: "string", description: "Token contract address" },
+      },
+      required: ["tokenAddress"],
+    },
+  },
+  {
+    name: "get_pair_detail",
+    description:
+      "LIVE: Returns full detail for a specific DEX pair by its pair address.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pairAddress: { type: "string" },
+        chain: {
+          type: "string",
+          description: "Chain slug, e.g. ethereum, solana, arbitrum",
+          default: "ethereum",
+        },
+      },
+      required: ["pairAddress"],
+    },
+  },
+  {
+    name: "get_price_monitor_code",
+    description:
+      "Returns TypeScript boilerplate for a continuous price-monitoring loop (code template, not live data).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pollingIntervalMs: { type: "number", default: 3000 },
+        minGapPercent: { type: "number", default: 0.5 },
+      },
+    },
+  },
+];
 
-        for (const opp of opportunities) {
-          console.log(
-            \`[PriceMonitor] 🎯 \${opp.tokenSymbol}: \${opp.gapPercent}% gap | Est. profit: \${opp.estimatedProfitUSD} | Buy: \${opp.buyOn.dexId} @ \${opp.buyOn.priceUsd} | Sell: \${opp.sellOn.dexId} @ \${opp.sellOn.priceUsd}\`
-          );
-          await onOpportunity(opp);
-        }
-      } catch (err) {
-        console.error(\`[PriceMonitor] Error scanning \${tokenAddress}:\`, err);
+// ─── Request handlers ─────────────────────────────────────────────────────────
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  switch (name) {
+    // ── LIVE: scan multiple tokens and return real opportunities ──────────────
+    case "scan_live_opportunities": {
+      const addresses: string[] = (args as any)?.tokenAddresses ?? [];
+      const tradeAmt: number = (args as any)?.tradeAmountUsd ?? 10_000;
+      const minGap: number = (args as any)?.minGapPercent ?? 0.5;
+
+      if (addresses.length === 0) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: "No token addresses provided" }) },
+          ],
+        };
       }
+
+      const allPairs: DexPair[] = [];
+      const errors: string[] = [];
+
+      for (const addr of addresses) {
+        try {
+          const pairs = await fetchPairsForToken(addr);
+          allPairs.push(...pairs);
+        } catch (e: any) {
+          errors.push(`${addr}: ${e.message}`);
+        }
+      }
+
+      const opportunities = detectOpportunities(allPairs, tradeAmt, minGap);
+
+      const result = {
+        scannedAt: new Date().toISOString(),
+        tokensScanned: addresses.length,
+        pairsFound: allPairs.length,
+        opportunitiesFound: opportunities.length,
+        viable: opportunities.filter((o) => o.viable).length,
+        opportunities,
+        errors,
+      };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+
+    // ── LIVE: get all pairs for one token ─────────────────────────────────────
+    case "get_token_pairs": {
+      const addr: string = (args as any)?.tokenAddress;
+      if (!addr) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: "tokenAddress required" }) }],
+        };
+      }
+
+      try {
+        const pairs = await fetchPairsForToken(addr);
+        const summary = pairs.map((p) => ({
+          dex: p.dexId,
+          chain: p.chainId,
+          pair: p.pairAddress,
+          priceUsd: p.priceUsd,
+          liquidityUsd: p.liquidity?.usd,
+          volume24h: p.volume?.h24,
+          priceChange1h: p.priceChange?.h1,
+          url: p.url,
+        }));
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ token: addr, pairsFound: pairs.length, pairs: summary }, null, 2),
+            },
+          ],
+        };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: e.message }) }],
+        };
+      }
+    }
+
+    // ── LIVE: get one pair by address ─────────────────────────────────────────
+    case "get_pair_detail": {
+      const pairAddr: string = (args as any)?.pairAddress;
+      const chain: string = (args as any)?.chain ?? "ethereum";
+
+      try {
+        const data = await dexFetch(
+          `https://api.dexscreener.com/latest/dex/pairs/${chain}/${pairAddr}`
+        );
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: e.message }) }],
+        };
+      }
+    }
+
+    // ── Code generator (kept for reference) ──────────────────────────────────
+    case "get_price_monitor_code": {
+      const interval = (args as any)?.pollingIntervalMs ?? 3000;
+      const minGap = (args as any)?.minGapPercent ?? 0.5;
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `
+// FILE: src/price-monitor.ts
+// Continuous price-monitoring loop using the dexscreener MCP server
+// Tip: use the scan_live_opportunities MCP tool directly from your agent instead.
+
+import { McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+
+export async function startPriceMonitor(
+  mcpClient: McpClient,
+  watchlist: string[],
+  onOpportunity: (opp: any) => Promise<void>,
+  pollingIntervalMs = ${interval}
+) {
+  const poll = async () => {
+    const result = await mcpClient.callTool("scan_live_opportunities", {
+      tokenAddresses: watchlist,
+      tradeAmountUsd: 10000,
+      minGapPercent: ${minGap},
+    });
+    const data = JSON.parse((result.content[0] as any).text);
+    for (const opp of data.opportunities.filter((o: any) => o.viable)) {
+      await onOpportunity(opp);
     }
   };
 
-  // Run immediately, then on interval
-  await monitor();
-  setInterval(monitor, pollingIntervalMs);
-}
-            `,
-          },
-        ],
-      };
-    }
-
-    case "get_pair_search_code": {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `
-// ============================================================
-// FILE: src/pair-search.ts
-// Finds the best pairs to monitor based on liquidity + volume
-// ============================================================
-
-import axios from "axios";
-
-/**
- * Finds top arbitrage candidate tokens by scanning DexScreener
- * for tokens listed on 3+ DEXs with sufficient liquidity.
- */
-export async function findArbitrageCandidates(options: {
-  chain: string;          // e.g. "ethereum", "solana", "arbitrum"
-  minLiquidityUSD: number;
-  minVolume24h: number;
-  minDexCount: number;    // Token must be on at least this many DEXs
-}): Promise<{ address: string; symbol: string; dexCount: number }[]> {
-  const { chain, minLiquidityUSD, minVolume24h, minDexCount } = options;
-
-  // Search DexScreener for recently active pairs on this chain
-  const url = \`https://api.dexscreener.com/latest/dex/search?q=USDC \${chain}\`;
-  const { data } = await axios.get(url);
-
-  const pairsByToken = new Map<string, any[]>();
-  
-  (data.pairs || [])
-    .filter((p: any) => 
-      p.chainId === chain &&
-      p.liquidity?.usd >= minLiquidityUSD &&
-      p.volume?.h24 >= minVolume24h
-    )
-    .forEach((p: any) => {
-      const key = p.baseToken.address;
-      if (!pairsByToken.has(key)) pairsByToken.set(key, []);
-      pairsByToken.get(key)!.push(p);
-    });
-
-  return Array.from(pairsByToken.entries())
-    .filter(([, pairs]) => pairs.length >= minDexCount)
-    .map(([address, pairs]) => ({
-      address,
-      symbol: pairs[0].baseToken.symbol,
-      dexCount: pairs.length,
-    }))
-    .sort((a, b) => b.dexCount - a.dexCount);
-}
-            `,
-          },
-        ],
-      };
-    }
-
-    case "get_multi_chain_scanner": {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `
-// ============================================================
-// FILE: src/multi-chain-scanner.ts
-// Scans the same token across multiple chains simultaneously
-// ============================================================
-
-import { fetchTokenPairs } from "./price-monitor.js";
-
-const CHAIN_BRIDGE_TOKENS: Record<string, string[]> = {
-  USDC: [
-    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // Ethereum
-    "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", // Polygon
-    "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", // Arbitrum
-    "0x7F5c764cBc14f9669B88837ca1490cCa17c31607", // Optimism
-  ],
-};
-
-export async function scanMultiChain(tokenSymbol: string) {
-  const addresses = CHAIN_BRIDGE_TOKENS[tokenSymbol];
-  if (!addresses) throw new Error(\`No known addresses for \${tokenSymbol}\`);
-
-  const results = await Promise.all(
-    addresses.map(async (addr) => {
-      const pairs = await fetchTokenPairs(addr);
-      return { address: addr, pairs };
-    })
-  );
-
-  return results;
+  await poll();
+  setInterval(poll, pollingIntervalMs);
 }
             `,
           },
@@ -339,10 +364,12 @@ export async function scanMultiChain(tokenSymbol: string) {
   }
 });
 
+// ─── Start ────────────────────────────────────────────────────────────────────
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[dexscreener-mcp] Server running on stdio");
+  console.error("[dexscreener-mcp v2] Server running — live API mode");
 }
 
 main().catch(console.error);
