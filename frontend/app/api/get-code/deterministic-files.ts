@@ -97,7 +97,7 @@ export const CONTRACTS = {
   UNI_SWAP_ROUTER: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   SUSHI_ROUTER:    "0x1b02dA8Cb0d097eB8D57A175b88c7d8b47997506",
   WETH:            "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  USDC_E:          "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+  USDC:          "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
 } as const;
 
 function required(name: string): string {
@@ -188,7 +188,7 @@ export async function getUniswapV3Price(
     );
     const [amountOutUsdc] = await quoter.quoteExactInputSingle.staticCall({
       tokenIn:           CONTRACTS.WETH,
-      tokenOut:          CONTRACTS.USDC_E,
+      tokenOut:          CONTRACTS.USDC,
       amountIn:          amountInWeth,
       fee:               500n,   // 0.05% pool (most liquid WETH/USDC.e on Arbitrum)
       sqrtPriceLimitX96: 0n,
@@ -226,7 +226,7 @@ export async function getSushiSwapPrice(
     );
     const amounts: bigint[] = await router.getAmountsOut(amountInWeth, [
       CONTRACTS.WETH,
-      CONTRACTS.USDC_E,
+      CONTRACTS.USDC,
     ]);
     const out = amounts[1];
     return {
@@ -598,7 +598,7 @@ pragma solidity ^0.8.20;
  *   Uni V3 Router: 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45
  *   Sushi Router:  0x1b02dA8Cb0d097eB8D57A175b88c7d8b47997506
  *   WETH:          0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
- *   USDC.e:        0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8
+ *   USDC.e:        0xaf88d065e77c8cC2239327C5EDb3A432268e5831
  *
  * @dev Deploy this contract first, then set CONTRACT_ADDRESS in .env.
  *      Only the deployer (owner) can call executeArbitrage().
@@ -628,7 +628,7 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
     address public constant UNI_ROUTER   = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
     address public constant SUSHI_ROUTER = 0x1b02dA8Cb0d097eB8D57A175b88c7d8b47997506;
     address public constant WETH         = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
-    address public constant USDC_E       = 0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8;
+    address public constant USDC       = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831;
 
     address public immutable owner;
     constructor() { owner = msg.sender; }
@@ -657,32 +657,32 @@ contract FlashLoanReceiver is IFlashLoanSimpleReceiver {
         IERC20(WETH).approve(UNI_ROUTER, wethIn);
         return ISwapRouter02(UNI_ROUTER).exactInputSingle(
             ISwapRouter02.ExactInputSingleParams({
-                tokenIn: WETH, tokenOut: USDC_E, fee: 500,
+                tokenIn: WETH, tokenOut: USDC, fee: 500,
                 recipient: address(this), amountIn: wethIn,
                 amountOutMinimum: 0, sqrtPriceLimitX96: 0
             })
         );
     }
     function _buyOnSushi(uint256 usdcIn, uint256 minWethOut) internal {
-        IERC20(USDC_E).approve(SUSHI_ROUTER, usdcIn);
-        address[] memory p = new address[](2); p[0] = USDC_E; p[1] = WETH;
+        IERC20(USDC).approve(SUSHI_ROUTER, usdcIn);
+        address[] memory p = new address[](2); p[0] = USDC; p[1] = WETH;
         IUniswapV2Router(SUSHI_ROUTER).swapExactTokensForTokens(
             usdcIn, minWethOut, p, address(this), block.timestamp + 60
         );
     }
     function _sellOnSushi(uint256 wethIn) internal returns (uint256) {
         IERC20(WETH).approve(SUSHI_ROUTER, wethIn);
-        address[] memory p = new address[](2); p[0] = WETH; p[1] = USDC_E;
+        address[] memory p = new address[](2); p[0] = WETH; p[1] = USDC;
         uint256[] memory a = IUniswapV2Router(SUSHI_ROUTER).swapExactTokensForTokens(
             wethIn, 0, p, address(this), block.timestamp + 60
         );
         return a[1];
     }
     function _buyOnUni(uint256 usdcIn, uint256 minWethOut) internal {
-        IERC20(USDC_E).approve(UNI_ROUTER, usdcIn);
+        IERC20(USDC).approve(UNI_ROUTER, usdcIn);
         ISwapRouter02(UNI_ROUTER).exactInputSingle(
             ISwapRouter02.ExactInputSingleParams({
-                tokenIn: USDC_E, tokenOut: WETH, fee: 500,
+                tokenIn: USDC, tokenOut: WETH, fee: 500,
                 recipient: address(this), amountIn: usdcIn,
                 amountOutMinimum: minWethOut, sqrtPriceLimitX96: 0
             })

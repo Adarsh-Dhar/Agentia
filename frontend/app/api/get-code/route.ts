@@ -201,6 +201,12 @@ export async function POST(req: Request) {
   }
 
   console.log(`[get-code] Returning ${finalFiles.length} verified files.`);
+  console.log(`[get-code] codes: ${finalFiles.map(f => f.filepath).join(", ")}`);
+
+  // Log the code for each generated file
+  for (const file of finalFiles) {
+    console.log(`[get-code] File: ${file.filepath}\n---\n${file.content}\n---`);
+  }
 
   return NextResponse.json({
     thoughts: aiThoughts,

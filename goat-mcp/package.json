@@ -1,0 +1,25 @@
+{
+  "name": "goat-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "packageManager": "pnpm@9.10.0+sha1.216899f511c8dfde183c7cb50b69009c779534a8",
+  "dependencies": {
+    "@goat-sdk/adapter-model-context-protocol": "^0.2.11",
+    "@goat-sdk/wallet-viem": "^0.3.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "viem": "^2.47.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

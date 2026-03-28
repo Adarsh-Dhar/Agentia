@@ -27,7 +27,7 @@ export const BASE_PROMPT = `You are an expert on-chain agent architect for Arbit
 // SushiSwap V2 Router:      0x1b02dA8Cb0d097eB8D57A175b88c7d8b47997506
 // SushiSwap V2 Factory:     0xc35DADB65012eC5796536bD9864eD8773aBc74C4
 // WETH (Arbitrum):          0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
-// USDC.e (Bridged, 6 dec):  0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8
+// USDC.e (Bridged, 6 dec):  0xaf88d065e77c8cC2239327C5EDb3A432268e5831
 // USDC  (Native, 6 dec):    0xaf88d065e77c8cC2239327C5EDb3A432268e5831
 // DAI   (18 dec):           0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1
 
@@ -54,7 +54,7 @@ const CONTRACTS = {
   SUSHI_ROUTER:        "0x1b02dA8Cb0d097eB8D57A175b88c7d8b47997506",
   // Tokens
   WETH:                "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  USDC_E:              "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", // 6 decimals
+  USDC:              "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // 6 decimals
 } as const;
 
 ────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ The QuoterV2 at 0x61fFE014bA17989E743c5F6cB21bF9697530B21e takes a STRUCT parame
   Call pattern (exact, copy verbatim):
   const [amountOut] = await quoterV2.quoteExactInputSingle.staticCall({
     tokenIn: CONTRACTS.WETH,
-    tokenOut: CONTRACTS.USDC_E,
+    tokenOut: CONTRACTS.USDC,
     amountIn: amountInWei,
     fee: 500n,          // BigInt fee: 500 = 0.05%, 3000 = 0.3%, 10000 = 1%
     sqrtPriceLimitX96: 0n,
@@ -81,7 +81,7 @@ RULE 2 — SUSHISWAP V2 PRICE (CORRECT PATTERN):
   const sushiRouter = new ethers.Contract(CONTRACTS.SUSHI_ROUTER, [
     "function getAmountsOut(uint256 amountIn, address[] calldata path) external view returns (uint256[] memory amounts)"
   ], provider);
-  const amounts = await sushiRouter.getAmountsOut(amountInWei, [CONTRACTS.WETH, CONTRACTS.USDC_E]);
+  const amounts = await sushiRouter.getAmountsOut(amountInWei, [CONTRACTS.WETH, CONTRACTS.USDC]);
   const sushiOut = amounts[1]; // BigInt in USDC.e 6-decimal units
 
 RULE 3 — DECIMAL ARITHMETIC (NO FLOATING POINT):
