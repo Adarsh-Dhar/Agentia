@@ -1,4 +1,4 @@
-import { GeneratedFile } from "../types";
+import { GeneratedFile } from "@/lib/types";
 
 interface FileExplorerProps {
   files: GeneratedFile[];
@@ -7,10 +7,12 @@ interface FileExplorerProps {
 }
 
 export function FileExplorer({ files, selectedFile, onSelect }: FileExplorerProps) {
+  // Filter out files with missing or invalid filepath
+  const validFiles = files.filter(f => typeof f.filepath === 'string' && f.filepath.length > 0);
   return (
     <div className="w-52 border-r border-slate-800 bg-slate-900/30 p-2 overflow-y-auto">
       <div className="text-[10px] uppercase text-slate-600 font-black mb-2 px-2 tracking-widest">Explorer</div>
-      {[...new Map(files.map(f => [f.filepath, f])).values()].map(file => (
+      {[...new Map(validFiles.map(f => [f.filepath, f])).values()].map(file => (
         <button
           key={file.filepath}
           onClick={() => onSelect(file.filepath)}
