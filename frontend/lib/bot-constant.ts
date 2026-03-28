@@ -1,25 +1,25 @@
 /**
  * frontend/lib/bot-constant.ts
  *
- * Env-config shape and defaults for the Base Sepolia MCP arbitrage bot.
- * Used by the WebContainer IDE env-setup modal.
+ * Env-config shape and defaults for the Base Sepolia arbitrage bot.
+ * Bot uses direct REST APIs (1inch + Webacy) + ethers.js — no MCP subprocesses.
  */
 
 export interface BotEnvConfig {
-  WALLET_PRIVATE_KEY: string;
-  RPC_PROVIDER_URL:   string;
-  WEBACY_API_KEY:     string;
-  GOAT_EVM_PATH:      string;   // optional — live execution only
-  SIMULATION_MODE:    string;   // "true" | "false"
-  BORROW_AMOUNT_HUMAN: string;
-  POLL_INTERVAL:      string;   // seconds
+  ONEINCH_API_KEY:     string;  // Required — get at https://portal.1inch.dev
+  WEBACY_API_KEY:      string;  // Required — get at https://webacy.com
+  RPC_PROVIDER_URL:    string;  // Required for live mode
+  WALLET_PRIVATE_KEY:  string;  // Required for live mode (hex, no 0x prefix)
+  SIMULATION_MODE:     string;  // "true" | "false"
+  BORROW_AMOUNT_HUMAN: string;  // Human-readable USDC, e.g. "1"
+  POLL_INTERVAL:       string;  // Seconds between cycles, e.g. "5"
 }
 
 export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
-  WALLET_PRIVATE_KEY:  "",
-  RPC_PROVIDER_URL:    "https://base-sepolia.g.alchemy.com/v2/YOUR_KEY",
+  ONEINCH_API_KEY:     "",
   WEBACY_API_KEY:      "",
-  GOAT_EVM_PATH:       "",
+  RPC_PROVIDER_URL:    "https://base-sepolia.g.alchemy.com/v2/YOUR_KEY",
+  WALLET_PRIVATE_KEY:  "",
   SIMULATION_MODE:     "true",
   BORROW_AMOUNT_HUMAN: "1",
   POLL_INTERVAL:       "5",

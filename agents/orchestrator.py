@@ -65,9 +65,10 @@ class MetaAgentBuilder:
     def __init__(self):
         self.mcp_manager = MultiMCPClient()
 
-        self.token       = os.environ.get("GITHUB_TOKEN")
-        self.alchemy_key = os.environ.get("ALCHEMY_API_KEY")
-        self.webacy_key  = os.environ.get("WEBACY_API_KEY")
+        self.token        = os.environ.get("GITHUB_TOKEN")
+        self.alchemy_key  = os.environ.get("ALCHEMY_API_KEY")
+        self.webacy_key   = os.environ.get("WEBACY_API_KEY")
+        self.oneinch_key  = os.environ.get("1INCH_API_KEY")
 
         if not self.token:
             raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
@@ -92,10 +93,15 @@ class MetaAgentBuilder:
         print("Connecting to MCP Servers...")
 
         try:
+            one_inch_args = [
+                "-y", "supergateway",
+                "--streamableHttp", "https://api.1inch.com/mcp/protocol",
+            ]
+            if self.oneinch_key:
+                one_inch_args += ["--header", f"Authorization: Bearer {self.oneinch_key}"]
+            one_inch_args += ["--outputTransport", "stdio"]
             await self.mcp_manager.connect_to_server(
-                "one_inch", "npx",
-                ["-y", "supergateway", "--streamableHttp",
-                 "https://api.1inch.com/mcp/protocol", "--outputTransport", "stdio"],
+                "one_inch", "npx", one_inch_args
             )
         except Exception as e:
             print(f"⚠️ 1inch: {e}")
