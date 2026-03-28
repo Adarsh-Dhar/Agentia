@@ -125,7 +125,7 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
       term.writeln(`\n\x1b[36m[System]\x1b[0m Detected entry point: \x1b[1m${foundEntry}\x1b[0m`);
       
       // ✅ Track the running bot process
-      const run = await wc.spawn("jsh", ["-c", `npx tsx ${foundEntry}`], {
+      const run = await wc.spawn("jsh", ["-c", `npx -y tsx ${foundEntry}`], {
         env: processEnv,
         terminal: { cols: term.cols, rows: term.rows }
       });
