@@ -52,7 +52,7 @@ async function fetchGasPrice(chain: string): Promise<{
 
   const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
   if (!res.ok) throw new Error(`Gas API HTTP ${res.status} for ${chain}`);
-  const data = await res.json();
+  const data: any = await res.json();
 
   if (data.status !== "1") throw new Error(`Gas API error: ${data.message}`);
   const r = data.result;

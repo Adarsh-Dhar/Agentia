@@ -1,7 +1,7 @@
 {
   "name": "flash-loan-arbitrageur-system",
   "version": "1.0.0",
-  "description": "Meta-Agent + MCP Server system for building Flash Loan Arbitrageur bots",
+  "description": "Meta-Agent + MCP Server system for building Flash Loan Arbitrageur bots — Initia Hackathon Edition",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -10,8 +10,9 @@
   ],
   "scripts": {
     "build": "pnpm run build --workspaces",
-    "start:all-mcp": "concurrently \"pnpm run start -w mcp-servers/goat-solana\" \"pnpm run start -w mcp-servers/jupiter-api\" \"pnpm run start -w mcp-servers/aave-flashloan\" \"pnpm run start -w mcp-servers/dexscreener\" \"pnpm run start -w mcp-servers/rugcheck\" \"pnpm run start -w mcp-servers/quicknode\" \"pnpm run start -w mcp-servers/biconomy\" \"pnpm run start -w mcp-servers/1inch\"",
-    "start:meta-agent": "pnpm run start -w meta-agent"
+    "start:all-mcp": "concurrently \"pnpm run start -w mcp-servers/goat-solana\" \"pnpm run start -w mcp-servers/jupiter-api\" \"pnpm run start -w mcp-servers/aave-flashloan\" \"pnpm run start -w mcp-servers/dexscreener\" \"pnpm run start -w mcp-servers/rugcheck\" \"pnpm run start -w mcp-servers/quicknode\" \"pnpm run start -w mcp-servers/biconomy\" \"pnpm run start -w mcp-servers/1inch\" \"pnpm run start -w mcp-servers/initia\"",
+    "start:meta-agent": "pnpm run start -w meta-agent",
+    "start:initia-mcp": "pnpm run start -w mcp-servers/initia"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

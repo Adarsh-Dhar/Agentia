@@ -50,7 +50,7 @@ async function oneinchFetch(path: string, params: Record<string, string | number
     signal: AbortSignal.timeout(8000),
   });
 
-  const body = await res.json();
+  const body: any = await res.json();
   if (!res.ok) {
     throw new Error(body.description ?? body.error ?? `HTTP ${res.status}`);
   }
