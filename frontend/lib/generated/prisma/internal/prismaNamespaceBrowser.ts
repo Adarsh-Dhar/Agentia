@@ -53,6 +53,7 @@ export const AnyNull = runtime.AnyNull
 export const ModelName = {
   User: 'User',
   Agent: 'Agent',
+  AgentFile: 'AgentFile',
   TradeLog: 'TradeLog'
 } as const
 
@@ -75,7 +76,7 @@ export type TransactionIsolationLevel = (typeof TransactionIsolationLevel)[keyof
 export const UserScalarFieldEnum = {
   id: 'id',
   email: 'email',
-  walletAddress: 'walletAddress',
+  name: 'name',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -86,15 +87,10 @@ export type UserScalarFieldEnum = (typeof UserScalarFieldEnum)[keyof typeof User
 export const AgentScalarFieldEnum = {
   id: 'id',
   name: 'name',
-  strategy: 'strategy',
   status: 'status',
-  targetPair: 'targetPair',
-  spendAllowance: 'spendAllowance',
-  sessionExpiresAt: 'sessionExpiresAt',
-  sessionKeyPub: 'sessionKeyPub',
-  sessionKeyPriv: 'sessionKeyPriv',
-  currentPnl: 'currentPnl',
   userId: 'userId',
+  configuration: 'configuration',
+  sessionKeyPriv: 'sessionKeyPriv',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -102,15 +98,31 @@ export const AgentScalarFieldEnum = {
 export type AgentScalarFieldEnum = (typeof AgentScalarFieldEnum)[keyof typeof AgentScalarFieldEnum]
 
 
+export const AgentFileScalarFieldEnum = {
+  id: 'id',
+  agentId: 'agentId',
+  filepath: 'filepath',
+  content: 'content',
+  language: 'language',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type AgentFileScalarFieldEnum = (typeof AgentFileScalarFieldEnum)[keyof typeof AgentFileScalarFieldEnum]
+
+
 export const TradeLogScalarFieldEnum = {
   id: 'id',
-  type: 'type',
-  message: 'message',
-  txHash: 'txHash',
-  price: 'price',
-  amount: 'amount',
   agentId: 'agentId',
-  timestamp: 'timestamp'
+  txHash: 'txHash',
+  tokenIn: 'tokenIn',
+  tokenOut: 'tokenOut',
+  amountIn: 'amountIn',
+  amountOut: 'amountOut',
+  profitEth: 'profitEth',
+  profitUsd: 'profitUsd',
+  executionTimeMs: 'executionTimeMs',
+  createdAt: 'createdAt'
 } as const
 
 export type TradeLogScalarFieldEnum = (typeof TradeLogScalarFieldEnum)[keyof typeof TradeLogScalarFieldEnum]
@@ -122,6 +134,14 @@ export const SortOrder = {
 } as const
 
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
 
 
 export const QueryMode = {
@@ -138,4 +158,13 @@ export const NullsOrder = {
 } as const
 
 export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+export const JsonNullValueFilter = {
+  DbNull: DbNull,
+  JsonNull: JsonNull,
+  AnyNull: AnyNull
+} as const
+
+export type JsonNullValueFilter = (typeof JsonNullValueFilter)[keyof typeof JsonNullValueFilter]
 

@@ -386,6 +386,7 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 export const ModelName = {
   User: 'User',
   Agent: 'Agent',
+  AgentFile: 'AgentFile',
   TradeLog: 'TradeLog'
 } as const
 
@@ -402,7 +403,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "agent" | "tradeLog"
+    modelProps: "user" | "agent" | "agentFile" | "tradeLog"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -554,6 +555,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    AgentFile: {
+      payload: Prisma.$AgentFilePayload<ExtArgs>
+      fields: Prisma.AgentFileFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.AgentFileFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.AgentFileFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>
+        }
+        findFirst: {
+          args: Prisma.AgentFileFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.AgentFileFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>
+        }
+        findMany: {
+          args: Prisma.AgentFileFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>[]
+        }
+        create: {
+          args: Prisma.AgentFileCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>
+        }
+        createMany: {
+          args: Prisma.AgentFileCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.AgentFileCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>[]
+        }
+        delete: {
+          args: Prisma.AgentFileDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>
+        }
+        update: {
+          args: Prisma.AgentFileUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>
+        }
+        deleteMany: {
+          args: Prisma.AgentFileDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.AgentFileUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.AgentFileUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>[]
+        }
+        upsert: {
+          args: Prisma.AgentFileUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$AgentFilePayload>
+        }
+        aggregate: {
+          args: Prisma.AgentFileAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateAgentFile>
+        }
+        groupBy: {
+          args: Prisma.AgentFileGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AgentFileGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.AgentFileCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AgentFileCountAggregateOutputType> | number
+        }
+      }
+    }
     TradeLog: {
       payload: Prisma.$TradeLogPayload<ExtArgs>
       fields: Prisma.TradeLogFieldRefs
@@ -670,7 +745,7 @@ export type TransactionIsolationLevel = (typeof TransactionIsolationLevel)[keyof
 export const UserScalarFieldEnum = {
   id: 'id',
   email: 'email',
-  walletAddress: 'walletAddress',
+  name: 'name',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -681,15 +756,10 @@ export type UserScalarFieldEnum = (typeof UserScalarFieldEnum)[keyof typeof User
 export const AgentScalarFieldEnum = {
   id: 'id',
   name: 'name',
-  strategy: 'strategy',
   status: 'status',
-  targetPair: 'targetPair',
-  spendAllowance: 'spendAllowance',
-  sessionExpiresAt: 'sessionExpiresAt',
-  sessionKeyPub: 'sessionKeyPub',
-  sessionKeyPriv: 'sessionKeyPriv',
-  currentPnl: 'currentPnl',
   userId: 'userId',
+  configuration: 'configuration',
+  sessionKeyPriv: 'sessionKeyPriv',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -697,15 +767,31 @@ export const AgentScalarFieldEnum = {
 export type AgentScalarFieldEnum = (typeof AgentScalarFieldEnum)[keyof typeof AgentScalarFieldEnum]
 
 
+export const AgentFileScalarFieldEnum = {
+  id: 'id',
+  agentId: 'agentId',
+  filepath: 'filepath',
+  content: 'content',
+  language: 'language',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type AgentFileScalarFieldEnum = (typeof AgentFileScalarFieldEnum)[keyof typeof AgentFileScalarFieldEnum]
+
+
 export const TradeLogScalarFieldEnum = {
   id: 'id',
-  type: 'type',
-  message: 'message',
-  txHash: 'txHash',
-  price: 'price',
-  amount: 'amount',
   agentId: 'agentId',
-  timestamp: 'timestamp'
+  txHash: 'txHash',
+  tokenIn: 'tokenIn',
+  tokenOut: 'tokenOut',
+  amountIn: 'amountIn',
+  amountOut: 'amountOut',
+  profitEth: 'profitEth',
+  profitUsd: 'profitUsd',
+  executionTimeMs: 'executionTimeMs',
+  createdAt: 'createdAt'
 } as const
 
 export type TradeLogScalarFieldEnum = (typeof TradeLogScalarFieldEnum)[keyof typeof TradeLogScalarFieldEnum]
@@ -717,6 +803,14 @@ export const SortOrder = {
 } as const
 
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
 
 
 export const QueryMode = {
@@ -733,6 +827,15 @@ export const NullsOrder = {
 } as const
 
 export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+export const JsonNullValueFilter = {
+  DbNull: DbNull,
+  JsonNull: JsonNull,
+  AnyNull: AnyNull
+} as const
+
+export type JsonNullValueFilter = (typeof JsonNullValueFilter)[keyof typeof JsonNullValueFilter]
 
 
 
@@ -770,20 +873,6 @@ export type ListDateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaM
 
 
 /**
- * Reference to a field of type 'StrategyType'
- */
-export type EnumStrategyTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'StrategyType'>
-    
-
-
-/**
- * Reference to a field of type 'StrategyType[]'
- */
-export type ListEnumStrategyTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'StrategyType[]'>
-    
-
-
-/**
  * Reference to a field of type 'AgentStatus'
  */
 export type EnumAgentStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'AgentStatus'>
@@ -798,30 +887,16 @@ export type ListEnumAgentStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$
 
 
 /**
- * Reference to a field of type 'Float'
+ * Reference to a field of type 'Json'
  */
-export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float'>
+export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Json'>
     
 
 
 /**
- * Reference to a field of type 'Float[]'
+ * Reference to a field of type 'QueryMode'
  */
-export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
-    
-
-
-/**
- * Reference to a field of type 'LogType'
- */
-export type EnumLogTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'LogType'>
-    
-
-
-/**
- * Reference to a field of type 'LogType[]'
- */
-export type ListEnumLogTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'LogType[]'>
+export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
     
 
 
@@ -836,6 +911,20 @@ export type IntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'In
  * Reference to a field of type 'Int[]'
  */
 export type ListIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Float'
+ */
+export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float'>
+    
+
+
+/**
+ * Reference to a field of type 'Float[]'
+ */
+export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
     
 
 /**
@@ -935,6 +1024,7 @@ export type PrismaClientOptions = ({
 export type GlobalOmitConfig = {
   user?: Prisma.UserOmit
   agent?: Prisma.AgentOmit
+  agentFile?: Prisma.AgentFileOmit
   tradeLog?: Prisma.TradeLogOmit
 }
 

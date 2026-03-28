@@ -20,34 +20,16 @@ export type AgentModel = runtime.Types.Result.DefaultSelection<Prisma.$AgentPayl
 
 export type AggregateAgent = {
   _count: AgentCountAggregateOutputType | null
-  _avg: AgentAvgAggregateOutputType | null
-  _sum: AgentSumAggregateOutputType | null
   _min: AgentMinAggregateOutputType | null
   _max: AgentMaxAggregateOutputType | null
-}
-
-export type AgentAvgAggregateOutputType = {
-  spendAllowance: number | null
-  currentPnl: number | null
-}
-
-export type AgentSumAggregateOutputType = {
-  spendAllowance: number | null
-  currentPnl: number | null
 }
 
 export type AgentMinAggregateOutputType = {
   id: string | null
   name: string | null
-  strategy: $Enums.StrategyType | null
   status: $Enums.AgentStatus | null
-  targetPair: string | null
-  spendAllowance: number | null
-  sessionExpiresAt: Date | null
-  sessionKeyPub: string | null
-  sessionKeyPriv: string | null
-  currentPnl: number | null
   userId: string | null
+  sessionKeyPriv: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -55,15 +37,9 @@ export type AgentMinAggregateOutputType = {
 export type AgentMaxAggregateOutputType = {
   id: string | null
   name: string | null
-  strategy: $Enums.StrategyType | null
   status: $Enums.AgentStatus | null
-  targetPair: string | null
-  spendAllowance: number | null
-  sessionExpiresAt: Date | null
-  sessionKeyPub: string | null
-  sessionKeyPriv: string | null
-  currentPnl: number | null
   userId: string | null
+  sessionKeyPriv: string | null
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -71,43 +47,22 @@ export type AgentMaxAggregateOutputType = {
 export type AgentCountAggregateOutputType = {
   id: number
   name: number
-  strategy: number
   status: number
-  targetPair: number
-  spendAllowance: number
-  sessionExpiresAt: number
-  sessionKeyPub: number
-  sessionKeyPriv: number
-  currentPnl: number
   userId: number
+  configuration: number
+  sessionKeyPriv: number
   createdAt: number
   updatedAt: number
   _all: number
 }
 
 
-export type AgentAvgAggregateInputType = {
-  spendAllowance?: true
-  currentPnl?: true
-}
-
-export type AgentSumAggregateInputType = {
-  spendAllowance?: true
-  currentPnl?: true
-}
-
 export type AgentMinAggregateInputType = {
   id?: true
   name?: true
-  strategy?: true
   status?: true
-  targetPair?: true
-  spendAllowance?: true
-  sessionExpiresAt?: true
-  sessionKeyPub?: true
-  sessionKeyPriv?: true
-  currentPnl?: true
   userId?: true
+  sessionKeyPriv?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -115,15 +70,9 @@ export type AgentMinAggregateInputType = {
 export type AgentMaxAggregateInputType = {
   id?: true
   name?: true
-  strategy?: true
   status?: true
-  targetPair?: true
-  spendAllowance?: true
-  sessionExpiresAt?: true
-  sessionKeyPub?: true
-  sessionKeyPriv?: true
-  currentPnl?: true
   userId?: true
+  sessionKeyPriv?: true
   createdAt?: true
   updatedAt?: true
 }
@@ -131,15 +80,10 @@ export type AgentMaxAggregateInputType = {
 export type AgentCountAggregateInputType = {
   id?: true
   name?: true
-  strategy?: true
   status?: true
-  targetPair?: true
-  spendAllowance?: true
-  sessionExpiresAt?: true
-  sessionKeyPub?: true
-  sessionKeyPriv?: true
-  currentPnl?: true
   userId?: true
+  configuration?: true
+  sessionKeyPriv?: true
   createdAt?: true
   updatedAt?: true
   _all?: true
@@ -183,18 +127,6 @@ export type AgentAggregateArgs<ExtArgs extends runtime.Types.Extensions.Internal
   /**
    * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
    * 
-   * Select which fields to average
-  **/
-  _avg?: AgentAvgAggregateInputType
-  /**
-   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
-   * 
-   * Select which fields to sum
-  **/
-  _sum?: AgentSumAggregateInputType
-  /**
-   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
-   * 
    * Select which fields to find the minimum value
   **/
   _min?: AgentMinAggregateInputType
@@ -225,8 +157,6 @@ export type AgentGroupByArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
   take?: number
   skip?: number
   _count?: AgentCountAggregateInputType | true
-  _avg?: AgentAvgAggregateInputType
-  _sum?: AgentSumAggregateInputType
   _min?: AgentMinAggregateInputType
   _max?: AgentMaxAggregateInputType
 }
@@ -234,20 +164,13 @@ export type AgentGroupByArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
 export type AgentGroupByOutputType = {
   id: string
   name: string
-  strategy: $Enums.StrategyType
   status: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date
-  sessionKeyPub: string | null
-  sessionKeyPriv: string | null
-  currentPnl: number
   userId: string
+  configuration: runtime.JsonValue | null
+  sessionKeyPriv: string | null
   createdAt: Date
   updatedAt: Date
   _count: AgentCountAggregateOutputType | null
-  _avg: AgentAvgAggregateOutputType | null
-  _sum: AgentSumAggregateOutputType | null
   _min: AgentMinAggregateOutputType | null
   _max: AgentMaxAggregateOutputType | null
 }
@@ -273,37 +196,29 @@ export type AgentWhereInput = {
   NOT?: Prisma.AgentWhereInput | Prisma.AgentWhereInput[]
   id?: Prisma.StringFilter<"Agent"> | string
   name?: Prisma.StringFilter<"Agent"> | string
-  strategy?: Prisma.EnumStrategyTypeFilter<"Agent"> | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFilter<"Agent"> | $Enums.AgentStatus
-  targetPair?: Prisma.StringFilter<"Agent"> | string
-  spendAllowance?: Prisma.FloatFilter<"Agent"> | number
-  sessionExpiresAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
-  sessionKeyPub?: Prisma.StringNullableFilter<"Agent"> | string | null
-  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
-  currentPnl?: Prisma.FloatFilter<"Agent"> | number
   userId?: Prisma.StringFilter<"Agent"> | string
+  configuration?: Prisma.JsonNullableFilter<"Agent">
+  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
-  logs?: Prisma.TradeLogListRelationFilter
+  tradeLogs?: Prisma.TradeLogListRelationFilter
+  files?: Prisma.AgentFileListRelationFilter
 }
 
 export type AgentOrderByWithRelationInput = {
   id?: Prisma.SortOrder
   name?: Prisma.SortOrder
-  strategy?: Prisma.SortOrder
   status?: Prisma.SortOrder
-  targetPair?: Prisma.SortOrder
-  spendAllowance?: Prisma.SortOrder
-  sessionExpiresAt?: Prisma.SortOrder
-  sessionKeyPub?: Prisma.SortOrderInput | Prisma.SortOrder
-  sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
-  currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  configuration?: Prisma.SortOrderInput | Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   user?: Prisma.UserOrderByWithRelationInput
-  logs?: Prisma.TradeLogOrderByRelationAggregateInput
+  tradeLogs?: Prisma.TradeLogOrderByRelationAggregateInput
+  files?: Prisma.AgentFileOrderByRelationAggregateInput
 }
 
 export type AgentWhereUniqueInput = Prisma.AtLeast<{
@@ -312,40 +227,29 @@ export type AgentWhereUniqueInput = Prisma.AtLeast<{
   OR?: Prisma.AgentWhereInput[]
   NOT?: Prisma.AgentWhereInput | Prisma.AgentWhereInput[]
   name?: Prisma.StringFilter<"Agent"> | string
-  strategy?: Prisma.EnumStrategyTypeFilter<"Agent"> | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFilter<"Agent"> | $Enums.AgentStatus
-  targetPair?: Prisma.StringFilter<"Agent"> | string
-  spendAllowance?: Prisma.FloatFilter<"Agent"> | number
-  sessionExpiresAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
-  sessionKeyPub?: Prisma.StringNullableFilter<"Agent"> | string | null
-  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
-  currentPnl?: Prisma.FloatFilter<"Agent"> | number
   userId?: Prisma.StringFilter<"Agent"> | string
+  configuration?: Prisma.JsonNullableFilter<"Agent">
+  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   user?: Prisma.XOR<Prisma.UserScalarRelationFilter, Prisma.UserWhereInput>
-  logs?: Prisma.TradeLogListRelationFilter
+  tradeLogs?: Prisma.TradeLogListRelationFilter
+  files?: Prisma.AgentFileListRelationFilter
 }, "id">
 
 export type AgentOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
   name?: Prisma.SortOrder
-  strategy?: Prisma.SortOrder
   status?: Prisma.SortOrder
-  targetPair?: Prisma.SortOrder
-  spendAllowance?: Prisma.SortOrder
-  sessionExpiresAt?: Prisma.SortOrder
-  sessionKeyPub?: Prisma.SortOrderInput | Prisma.SortOrder
-  sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
-  currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  configuration?: Prisma.SortOrderInput | Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
   _count?: Prisma.AgentCountOrderByAggregateInput
-  _avg?: Prisma.AgentAvgOrderByAggregateInput
   _max?: Prisma.AgentMaxOrderByAggregateInput
   _min?: Prisma.AgentMinOrderByAggregateInput
-  _sum?: Prisma.AgentSumOrderByAggregateInput
 }
 
 export type AgentScalarWhereWithAggregatesInput = {
@@ -354,15 +258,10 @@ export type AgentScalarWhereWithAggregatesInput = {
   NOT?: Prisma.AgentScalarWhereWithAggregatesInput | Prisma.AgentScalarWhereWithAggregatesInput[]
   id?: Prisma.StringWithAggregatesFilter<"Agent"> | string
   name?: Prisma.StringWithAggregatesFilter<"Agent"> | string
-  strategy?: Prisma.EnumStrategyTypeWithAggregatesFilter<"Agent"> | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusWithAggregatesFilter<"Agent"> | $Enums.AgentStatus
-  targetPair?: Prisma.StringWithAggregatesFilter<"Agent"> | string
-  spendAllowance?: Prisma.FloatWithAggregatesFilter<"Agent"> | number
-  sessionExpiresAt?: Prisma.DateTimeWithAggregatesFilter<"Agent"> | Date | string
-  sessionKeyPub?: Prisma.StringNullableWithAggregatesFilter<"Agent"> | string | null
-  sessionKeyPriv?: Prisma.StringNullableWithAggregatesFilter<"Agent"> | string | null
-  currentPnl?: Prisma.FloatWithAggregatesFilter<"Agent"> | number
   userId?: Prisma.StringWithAggregatesFilter<"Agent"> | string
+  configuration?: Prisma.JsonNullableWithAggregatesFilter<"Agent">
+  sessionKeyPriv?: Prisma.StringNullableWithAggregatesFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"Agent"> | Date | string
 }
@@ -370,83 +269,62 @@ export type AgentScalarWhereWithAggregatesInput = {
 export type AgentCreateInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: string | null
-  currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutAgentsInput
-  logs?: Prisma.TradeLogCreateNestedManyWithoutAgentInput
+  tradeLogs?: Prisma.TradeLogCreateNestedManyWithoutAgentInput
+  files?: Prisma.AgentFileCreateNestedManyWithoutAgentInput
 }
 
 export type AgentUncheckedCreateInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
-  sessionKeyPriv?: string | null
-  currentPnl?: number
   userId: string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
-  logs?: Prisma.TradeLogUncheckedCreateNestedManyWithoutAgentInput
+  tradeLogs?: Prisma.TradeLogUncheckedCreateNestedManyWithoutAgentInput
+  files?: Prisma.AgentFileUncheckedCreateNestedManyWithoutAgentInput
 }
 
 export type AgentUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutAgentsNestedInput
-  logs?: Prisma.TradeLogUpdateManyWithoutAgentNestedInput
+  tradeLogs?: Prisma.TradeLogUpdateManyWithoutAgentNestedInput
+  files?: Prisma.AgentFileUpdateManyWithoutAgentNestedInput
 }
 
 export type AgentUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   userId?: Prisma.StringFieldUpdateOperationsInput | string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  logs?: Prisma.TradeLogUncheckedUpdateManyWithoutAgentNestedInput
+  tradeLogs?: Prisma.TradeLogUncheckedUpdateManyWithoutAgentNestedInput
+  files?: Prisma.AgentFileUncheckedUpdateManyWithoutAgentNestedInput
 }
 
 export type AgentCreateManyInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
-  sessionKeyPriv?: string | null
-  currentPnl?: number
   userId: string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -454,14 +332,9 @@ export type AgentCreateManyInput = {
 export type AgentUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -469,15 +342,10 @@ export type AgentUpdateManyMutationInput = {
 export type AgentUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   userId?: Prisma.StringFieldUpdateOperationsInput | string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -495,36 +363,20 @@ export type AgentOrderByRelationAggregateInput = {
 export type AgentCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
   name?: Prisma.SortOrder
-  strategy?: Prisma.SortOrder
   status?: Prisma.SortOrder
-  targetPair?: Prisma.SortOrder
-  spendAllowance?: Prisma.SortOrder
-  sessionExpiresAt?: Prisma.SortOrder
-  sessionKeyPub?: Prisma.SortOrder
-  sessionKeyPriv?: Prisma.SortOrder
-  currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  configuration?: Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
-}
-
-export type AgentAvgOrderByAggregateInput = {
-  spendAllowance?: Prisma.SortOrder
-  currentPnl?: Prisma.SortOrder
 }
 
 export type AgentMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
   name?: Prisma.SortOrder
-  strategy?: Prisma.SortOrder
   status?: Prisma.SortOrder
-  targetPair?: Prisma.SortOrder
-  spendAllowance?: Prisma.SortOrder
-  sessionExpiresAt?: Prisma.SortOrder
-  sessionKeyPub?: Prisma.SortOrder
-  sessionKeyPriv?: Prisma.SortOrder
-  currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
 }
@@ -532,22 +384,11 @@ export type AgentMaxOrderByAggregateInput = {
 export type AgentMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
   name?: Prisma.SortOrder
-  strategy?: Prisma.SortOrder
   status?: Prisma.SortOrder
-  targetPair?: Prisma.SortOrder
-  spendAllowance?: Prisma.SortOrder
-  sessionExpiresAt?: Prisma.SortOrder
-  sessionKeyPub?: Prisma.SortOrder
-  sessionKeyPriv?: Prisma.SortOrder
-  currentPnl?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  sessionKeyPriv?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
-}
-
-export type AgentSumOrderByAggregateInput = {
-  spendAllowance?: Prisma.SortOrder
-  currentPnl?: Prisma.SortOrder
 }
 
 export type AgentScalarRelationFilter = {
@@ -597,66 +438,60 @@ export type AgentUncheckedUpdateManyWithoutUserNestedInput = {
   deleteMany?: Prisma.AgentScalarWhereInput | Prisma.AgentScalarWhereInput[]
 }
 
-export type EnumStrategyTypeFieldUpdateOperationsInput = {
-  set?: $Enums.StrategyType
-}
-
 export type EnumAgentStatusFieldUpdateOperationsInput = {
   set?: $Enums.AgentStatus
 }
 
-export type FloatFieldUpdateOperationsInput = {
-  set?: number
-  increment?: number
-  decrement?: number
-  multiply?: number
-  divide?: number
-}
-
-export type AgentCreateNestedOneWithoutLogsInput = {
-  create?: Prisma.XOR<Prisma.AgentCreateWithoutLogsInput, Prisma.AgentUncheckedCreateWithoutLogsInput>
-  connectOrCreate?: Prisma.AgentCreateOrConnectWithoutLogsInput
+export type AgentCreateNestedOneWithoutFilesInput = {
+  create?: Prisma.XOR<Prisma.AgentCreateWithoutFilesInput, Prisma.AgentUncheckedCreateWithoutFilesInput>
+  connectOrCreate?: Prisma.AgentCreateOrConnectWithoutFilesInput
   connect?: Prisma.AgentWhereUniqueInput
 }
 
-export type AgentUpdateOneRequiredWithoutLogsNestedInput = {
-  create?: Prisma.XOR<Prisma.AgentCreateWithoutLogsInput, Prisma.AgentUncheckedCreateWithoutLogsInput>
-  connectOrCreate?: Prisma.AgentCreateOrConnectWithoutLogsInput
-  upsert?: Prisma.AgentUpsertWithoutLogsInput
+export type AgentUpdateOneRequiredWithoutFilesNestedInput = {
+  create?: Prisma.XOR<Prisma.AgentCreateWithoutFilesInput, Prisma.AgentUncheckedCreateWithoutFilesInput>
+  connectOrCreate?: Prisma.AgentCreateOrConnectWithoutFilesInput
+  upsert?: Prisma.AgentUpsertWithoutFilesInput
   connect?: Prisma.AgentWhereUniqueInput
-  update?: Prisma.XOR<Prisma.XOR<Prisma.AgentUpdateToOneWithWhereWithoutLogsInput, Prisma.AgentUpdateWithoutLogsInput>, Prisma.AgentUncheckedUpdateWithoutLogsInput>
+  update?: Prisma.XOR<Prisma.XOR<Prisma.AgentUpdateToOneWithWhereWithoutFilesInput, Prisma.AgentUpdateWithoutFilesInput>, Prisma.AgentUncheckedUpdateWithoutFilesInput>
+}
+
+export type AgentCreateNestedOneWithoutTradeLogsInput = {
+  create?: Prisma.XOR<Prisma.AgentCreateWithoutTradeLogsInput, Prisma.AgentUncheckedCreateWithoutTradeLogsInput>
+  connectOrCreate?: Prisma.AgentCreateOrConnectWithoutTradeLogsInput
+  connect?: Prisma.AgentWhereUniqueInput
+}
+
+export type AgentUpdateOneRequiredWithoutTradeLogsNestedInput = {
+  create?: Prisma.XOR<Prisma.AgentCreateWithoutTradeLogsInput, Prisma.AgentUncheckedCreateWithoutTradeLogsInput>
+  connectOrCreate?: Prisma.AgentCreateOrConnectWithoutTradeLogsInput
+  upsert?: Prisma.AgentUpsertWithoutTradeLogsInput
+  connect?: Prisma.AgentWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.AgentUpdateToOneWithWhereWithoutTradeLogsInput, Prisma.AgentUpdateWithoutTradeLogsInput>, Prisma.AgentUncheckedUpdateWithoutTradeLogsInput>
 }
 
 export type AgentCreateWithoutUserInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: string | null
-  currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
-  logs?: Prisma.TradeLogCreateNestedManyWithoutAgentInput
+  tradeLogs?: Prisma.TradeLogCreateNestedManyWithoutAgentInput
+  files?: Prisma.AgentFileCreateNestedManyWithoutAgentInput
 }
 
 export type AgentUncheckedCreateWithoutUserInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: string | null
-  currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
-  logs?: Prisma.TradeLogUncheckedCreateNestedManyWithoutAgentInput
+  tradeLogs?: Prisma.TradeLogUncheckedCreateNestedManyWithoutAgentInput
+  files?: Prisma.AgentFileUncheckedCreateNestedManyWithoutAgentInput
 }
 
 export type AgentCreateOrConnectWithoutUserInput = {
@@ -691,110 +526,148 @@ export type AgentScalarWhereInput = {
   NOT?: Prisma.AgentScalarWhereInput | Prisma.AgentScalarWhereInput[]
   id?: Prisma.StringFilter<"Agent"> | string
   name?: Prisma.StringFilter<"Agent"> | string
-  strategy?: Prisma.EnumStrategyTypeFilter<"Agent"> | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFilter<"Agent"> | $Enums.AgentStatus
-  targetPair?: Prisma.StringFilter<"Agent"> | string
-  spendAllowance?: Prisma.FloatFilter<"Agent"> | number
-  sessionExpiresAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
-  sessionKeyPub?: Prisma.StringNullableFilter<"Agent"> | string | null
-  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
-  currentPnl?: Prisma.FloatFilter<"Agent"> | number
   userId?: Prisma.StringFilter<"Agent"> | string
+  configuration?: Prisma.JsonNullableFilter<"Agent">
+  sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
 }
 
-export type AgentCreateWithoutLogsInput = {
+export type AgentCreateWithoutFilesInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: string | null
-  currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
   user: Prisma.UserCreateNestedOneWithoutAgentsInput
+  tradeLogs?: Prisma.TradeLogCreateNestedManyWithoutAgentInput
 }
 
-export type AgentUncheckedCreateWithoutLogsInput = {
+export type AgentUncheckedCreateWithoutFilesInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
-  sessionKeyPriv?: string | null
-  currentPnl?: number
   userId: string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
+  tradeLogs?: Prisma.TradeLogUncheckedCreateNestedManyWithoutAgentInput
 }
 
-export type AgentCreateOrConnectWithoutLogsInput = {
+export type AgentCreateOrConnectWithoutFilesInput = {
   where: Prisma.AgentWhereUniqueInput
-  create: Prisma.XOR<Prisma.AgentCreateWithoutLogsInput, Prisma.AgentUncheckedCreateWithoutLogsInput>
+  create: Prisma.XOR<Prisma.AgentCreateWithoutFilesInput, Prisma.AgentUncheckedCreateWithoutFilesInput>
 }
 
-export type AgentUpsertWithoutLogsInput = {
-  update: Prisma.XOR<Prisma.AgentUpdateWithoutLogsInput, Prisma.AgentUncheckedUpdateWithoutLogsInput>
-  create: Prisma.XOR<Prisma.AgentCreateWithoutLogsInput, Prisma.AgentUncheckedCreateWithoutLogsInput>
+export type AgentUpsertWithoutFilesInput = {
+  update: Prisma.XOR<Prisma.AgentUpdateWithoutFilesInput, Prisma.AgentUncheckedUpdateWithoutFilesInput>
+  create: Prisma.XOR<Prisma.AgentCreateWithoutFilesInput, Prisma.AgentUncheckedCreateWithoutFilesInput>
   where?: Prisma.AgentWhereInput
 }
 
-export type AgentUpdateToOneWithWhereWithoutLogsInput = {
+export type AgentUpdateToOneWithWhereWithoutFilesInput = {
   where?: Prisma.AgentWhereInput
-  data: Prisma.XOR<Prisma.AgentUpdateWithoutLogsInput, Prisma.AgentUncheckedUpdateWithoutLogsInput>
+  data: Prisma.XOR<Prisma.AgentUpdateWithoutFilesInput, Prisma.AgentUncheckedUpdateWithoutFilesInput>
 }
 
-export type AgentUpdateWithoutLogsInput = {
+export type AgentUpdateWithoutFilesInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   user?: Prisma.UserUpdateOneRequiredWithoutAgentsNestedInput
+  tradeLogs?: Prisma.TradeLogUpdateManyWithoutAgentNestedInput
 }
 
-export type AgentUncheckedUpdateWithoutLogsInput = {
+export type AgentUncheckedUpdateWithoutFilesInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   userId?: Prisma.StringFieldUpdateOperationsInput | string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  tradeLogs?: Prisma.TradeLogUncheckedUpdateManyWithoutAgentNestedInput
+}
+
+export type AgentCreateWithoutTradeLogsInput = {
+  id?: string
+  name: string
+  status?: $Enums.AgentStatus
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  user: Prisma.UserCreateNestedOneWithoutAgentsInput
+  files?: Prisma.AgentFileCreateNestedManyWithoutAgentInput
+}
+
+export type AgentUncheckedCreateWithoutTradeLogsInput = {
+  id?: string
+  name: string
+  status?: $Enums.AgentStatus
+  userId: string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: string | null
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  files?: Prisma.AgentFileUncheckedCreateNestedManyWithoutAgentInput
+}
+
+export type AgentCreateOrConnectWithoutTradeLogsInput = {
+  where: Prisma.AgentWhereUniqueInput
+  create: Prisma.XOR<Prisma.AgentCreateWithoutTradeLogsInput, Prisma.AgentUncheckedCreateWithoutTradeLogsInput>
+}
+
+export type AgentUpsertWithoutTradeLogsInput = {
+  update: Prisma.XOR<Prisma.AgentUpdateWithoutTradeLogsInput, Prisma.AgentUncheckedUpdateWithoutTradeLogsInput>
+  create: Prisma.XOR<Prisma.AgentCreateWithoutTradeLogsInput, Prisma.AgentUncheckedCreateWithoutTradeLogsInput>
+  where?: Prisma.AgentWhereInput
+}
+
+export type AgentUpdateToOneWithWhereWithoutTradeLogsInput = {
+  where?: Prisma.AgentWhereInput
+  data: Prisma.XOR<Prisma.AgentUpdateWithoutTradeLogsInput, Prisma.AgentUncheckedUpdateWithoutTradeLogsInput>
+}
+
+export type AgentUpdateWithoutTradeLogsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  user?: Prisma.UserUpdateOneRequiredWithoutAgentsNestedInput
+  files?: Prisma.AgentFileUpdateManyWithoutAgentNestedInput
+}
+
+export type AgentUncheckedUpdateWithoutTradeLogsInput = {
+  id?: Prisma.StringFieldUpdateOperationsInput | string
+  name?: Prisma.StringFieldUpdateOperationsInput | string
+  status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
+  userId?: Prisma.StringFieldUpdateOperationsInput | string
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  files?: Prisma.AgentFileUncheckedUpdateManyWithoutAgentNestedInput
 }
 
 export type AgentCreateManyUserInput = {
   id?: string
   name: string
-  strategy: $Enums.StrategyType
   status?: $Enums.AgentStatus
-  targetPair: string
-  spendAllowance: number
-  sessionExpiresAt: Date | string
-  sessionKeyPub?: string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: string | null
-  currentPnl?: number
   createdAt?: Date | string
   updatedAt?: Date | string
 }
@@ -802,46 +675,33 @@ export type AgentCreateManyUserInput = {
 export type AgentUpdateWithoutUserInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  logs?: Prisma.TradeLogUpdateManyWithoutAgentNestedInput
+  tradeLogs?: Prisma.TradeLogUpdateManyWithoutAgentNestedInput
+  files?: Prisma.AgentFileUpdateManyWithoutAgentNestedInput
 }
 
 export type AgentUncheckedUpdateWithoutUserInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  logs?: Prisma.TradeLogUncheckedUpdateManyWithoutAgentNestedInput
+  tradeLogs?: Prisma.TradeLogUncheckedUpdateManyWithoutAgentNestedInput
+  files?: Prisma.AgentFileUncheckedUpdateManyWithoutAgentNestedInput
 }
 
 export type AgentUncheckedUpdateManyWithoutUserInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
-  strategy?: Prisma.EnumStrategyTypeFieldUpdateOperationsInput | $Enums.StrategyType
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
-  targetPair?: Prisma.StringFieldUpdateOperationsInput | string
-  spendAllowance?: Prisma.FloatFieldUpdateOperationsInput | number
-  sessionExpiresAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  sessionKeyPub?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  currentPnl?: Prisma.FloatFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
@@ -852,11 +712,13 @@ export type AgentUncheckedUpdateManyWithoutUserInput = {
  */
 
 export type AgentCountOutputType = {
-  logs: number
+  tradeLogs: number
+  files: number
 }
 
 export type AgentCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
-  logs?: boolean | AgentCountOutputTypeCountLogsArgs
+  tradeLogs?: boolean | AgentCountOutputTypeCountTradeLogsArgs
+  files?: boolean | AgentCountOutputTypeCountFilesArgs
 }
 
 /**
@@ -872,42 +734,40 @@ export type AgentCountOutputTypeDefaultArgs<ExtArgs extends runtime.Types.Extens
 /**
  * AgentCountOutputType without action
  */
-export type AgentCountOutputTypeCountLogsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+export type AgentCountOutputTypeCountTradeLogsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   where?: Prisma.TradeLogWhereInput
+}
+
+/**
+ * AgentCountOutputType without action
+ */
+export type AgentCountOutputTypeCountFilesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.AgentFileWhereInput
 }
 
 
 export type AgentSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   name?: boolean
-  strategy?: boolean
   status?: boolean
-  targetPair?: boolean
-  spendAllowance?: boolean
-  sessionExpiresAt?: boolean
-  sessionKeyPub?: boolean
-  sessionKeyPriv?: boolean
-  currentPnl?: boolean
   userId?: boolean
+  configuration?: boolean
+  sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
-  logs?: boolean | Prisma.Agent$logsArgs<ExtArgs>
+  tradeLogs?: boolean | Prisma.Agent$tradeLogsArgs<ExtArgs>
+  files?: boolean | Prisma.Agent$filesArgs<ExtArgs>
   _count?: boolean | Prisma.AgentCountOutputTypeDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["agent"]>
 
 export type AgentSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   name?: boolean
-  strategy?: boolean
   status?: boolean
-  targetPair?: boolean
-  spendAllowance?: boolean
-  sessionExpiresAt?: boolean
-  sessionKeyPub?: boolean
-  sessionKeyPriv?: boolean
-  currentPnl?: boolean
   userId?: boolean
+  configuration?: boolean
+  sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -916,15 +776,10 @@ export type AgentSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensi
 export type AgentSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   name?: boolean
-  strategy?: boolean
   status?: boolean
-  targetPair?: boolean
-  spendAllowance?: boolean
-  sessionExpiresAt?: boolean
-  sessionKeyPub?: boolean
-  sessionKeyPriv?: boolean
-  currentPnl?: boolean
   userId?: boolean
+  configuration?: boolean
+  sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
@@ -933,23 +788,19 @@ export type AgentSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensi
 export type AgentSelectScalar = {
   id?: boolean
   name?: boolean
-  strategy?: boolean
   status?: boolean
-  targetPair?: boolean
-  spendAllowance?: boolean
-  sessionExpiresAt?: boolean
-  sessionKeyPub?: boolean
-  sessionKeyPriv?: boolean
-  currentPnl?: boolean
   userId?: boolean
+  configuration?: boolean
+  sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type AgentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "strategy" | "status" | "targetPair" | "spendAllowance" | "sessionExpiresAt" | "sessionKeyPub" | "sessionKeyPriv" | "currentPnl" | "userId" | "createdAt" | "updatedAt", ExtArgs["result"]["agent"]>
+export type AgentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "status" | "userId" | "configuration" | "sessionKeyPriv" | "createdAt" | "updatedAt", ExtArgs["result"]["agent"]>
 export type AgentInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
-  logs?: boolean | Prisma.Agent$logsArgs<ExtArgs>
+  tradeLogs?: boolean | Prisma.Agent$tradeLogsArgs<ExtArgs>
+  files?: boolean | Prisma.Agent$filesArgs<ExtArgs>
   _count?: boolean | Prisma.AgentCountOutputTypeDefaultArgs<ExtArgs>
 }
 export type AgentIncludeCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
@@ -963,20 +814,16 @@ export type $AgentPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   name: "Agent"
   objects: {
     user: Prisma.$UserPayload<ExtArgs>
-    logs: Prisma.$TradeLogPayload<ExtArgs>[]
+    tradeLogs: Prisma.$TradeLogPayload<ExtArgs>[]
+    files: Prisma.$AgentFilePayload<ExtArgs>[]
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
     name: string
-    strategy: $Enums.StrategyType
     status: $Enums.AgentStatus
-    targetPair: string
-    spendAllowance: number
-    sessionExpiresAt: Date
-    sessionKeyPub: string | null
-    sessionKeyPriv: string | null
-    currentPnl: number
     userId: string
+    configuration: runtime.JsonValue | null
+    sessionKeyPriv: string | null
     createdAt: Date
     updatedAt: Date
   }, ExtArgs["result"]["agent"]>
@@ -1374,7 +1221,8 @@ readonly fields: AgentFieldRefs;
 export interface Prisma__AgentClient<T, Null = never, ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
   readonly [Symbol.toStringTag]: "PrismaPromise"
   user<T extends Prisma.UserDefaultArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.UserDefaultArgs<ExtArgs>>): Prisma.Prisma__UserClient<runtime.Types.Result.GetResult<Prisma.$UserPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
-  logs<T extends Prisma.Agent$logsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Agent$logsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TradeLogPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  tradeLogs<T extends Prisma.Agent$tradeLogsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Agent$tradeLogsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TradeLogPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  files<T extends Prisma.Agent$filesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Agent$filesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$AgentFilePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
    * Attaches callbacks for the resolution and/or rejection of the Promise.
    * @param onfulfilled The callback to execute when the Promise is resolved.
@@ -1406,15 +1254,10 @@ export interface Prisma__AgentClient<T, Null = never, ExtArgs extends runtime.Ty
 export interface AgentFieldRefs {
   readonly id: Prisma.FieldRef<"Agent", 'String'>
   readonly name: Prisma.FieldRef<"Agent", 'String'>
-  readonly strategy: Prisma.FieldRef<"Agent", 'StrategyType'>
   readonly status: Prisma.FieldRef<"Agent", 'AgentStatus'>
-  readonly targetPair: Prisma.FieldRef<"Agent", 'String'>
-  readonly spendAllowance: Prisma.FieldRef<"Agent", 'Float'>
-  readonly sessionExpiresAt: Prisma.FieldRef<"Agent", 'DateTime'>
-  readonly sessionKeyPub: Prisma.FieldRef<"Agent", 'String'>
-  readonly sessionKeyPriv: Prisma.FieldRef<"Agent", 'String'>
-  readonly currentPnl: Prisma.FieldRef<"Agent", 'Float'>
   readonly userId: Prisma.FieldRef<"Agent", 'String'>
+  readonly configuration: Prisma.FieldRef<"Agent", 'Json'>
+  readonly sessionKeyPriv: Prisma.FieldRef<"Agent", 'String'>
   readonly createdAt: Prisma.FieldRef<"Agent", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"Agent", 'DateTime'>
 }
@@ -1818,9 +1661,9 @@ export type AgentDeleteManyArgs<ExtArgs extends runtime.Types.Extensions.Interna
 }
 
 /**
- * Agent.logs
+ * Agent.tradeLogs
  */
-export type Agent$logsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+export type Agent$tradeLogsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   /**
    * Select specific fields to fetch from the TradeLog
    */
@@ -1839,6 +1682,30 @@ export type Agent$logsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs
   take?: number
   skip?: number
   distinct?: Prisma.TradeLogScalarFieldEnum | Prisma.TradeLogScalarFieldEnum[]
+}
+
+/**
+ * Agent.files
+ */
+export type Agent$filesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the AgentFile
+   */
+  select?: Prisma.AgentFileSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the AgentFile
+   */
+  omit?: Prisma.AgentFileOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.AgentFileInclude<ExtArgs> | null
+  where?: Prisma.AgentFileWhereInput
+  orderBy?: Prisma.AgentFileOrderByWithRelationInput | Prisma.AgentFileOrderByWithRelationInput[]
+  cursor?: Prisma.AgentFileWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.AgentFileScalarFieldEnum | Prisma.AgentFileScalarFieldEnum[]
 }
 
 /**

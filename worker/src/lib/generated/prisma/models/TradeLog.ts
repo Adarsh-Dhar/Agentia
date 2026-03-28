@@ -27,91 +27,105 @@ export type AggregateTradeLog = {
 }
 
 export type TradeLogAvgAggregateOutputType = {
-  price: number | null
-  amount: number | null
+  executionTimeMs: number | null
 }
 
 export type TradeLogSumAggregateOutputType = {
-  price: number | null
-  amount: number | null
+  executionTimeMs: number | null
 }
 
 export type TradeLogMinAggregateOutputType = {
   id: string | null
-  type: $Enums.LogType | null
-  message: string | null
-  txHash: string | null
-  price: number | null
-  amount: number | null
   agentId: string | null
-  timestamp: Date | null
+  txHash: string | null
+  tokenIn: string | null
+  tokenOut: string | null
+  amountIn: string | null
+  amountOut: string | null
+  profitEth: string | null
+  profitUsd: string | null
+  executionTimeMs: number | null
+  createdAt: Date | null
 }
 
 export type TradeLogMaxAggregateOutputType = {
   id: string | null
-  type: $Enums.LogType | null
-  message: string | null
-  txHash: string | null
-  price: number | null
-  amount: number | null
   agentId: string | null
-  timestamp: Date | null
+  txHash: string | null
+  tokenIn: string | null
+  tokenOut: string | null
+  amountIn: string | null
+  amountOut: string | null
+  profitEth: string | null
+  profitUsd: string | null
+  executionTimeMs: number | null
+  createdAt: Date | null
 }
 
 export type TradeLogCountAggregateOutputType = {
   id: number
-  type: number
-  message: number
-  txHash: number
-  price: number
-  amount: number
   agentId: number
-  timestamp: number
+  txHash: number
+  tokenIn: number
+  tokenOut: number
+  amountIn: number
+  amountOut: number
+  profitEth: number
+  profitUsd: number
+  executionTimeMs: number
+  createdAt: number
   _all: number
 }
 
 
 export type TradeLogAvgAggregateInputType = {
-  price?: true
-  amount?: true
+  executionTimeMs?: true
 }
 
 export type TradeLogSumAggregateInputType = {
-  price?: true
-  amount?: true
+  executionTimeMs?: true
 }
 
 export type TradeLogMinAggregateInputType = {
   id?: true
-  type?: true
-  message?: true
-  txHash?: true
-  price?: true
-  amount?: true
   agentId?: true
-  timestamp?: true
+  txHash?: true
+  tokenIn?: true
+  tokenOut?: true
+  amountIn?: true
+  amountOut?: true
+  profitEth?: true
+  profitUsd?: true
+  executionTimeMs?: true
+  createdAt?: true
 }
 
 export type TradeLogMaxAggregateInputType = {
   id?: true
-  type?: true
-  message?: true
-  txHash?: true
-  price?: true
-  amount?: true
   agentId?: true
-  timestamp?: true
+  txHash?: true
+  tokenIn?: true
+  tokenOut?: true
+  amountIn?: true
+  amountOut?: true
+  profitEth?: true
+  profitUsd?: true
+  executionTimeMs?: true
+  createdAt?: true
 }
 
 export type TradeLogCountAggregateInputType = {
   id?: true
-  type?: true
-  message?: true
-  txHash?: true
-  price?: true
-  amount?: true
   agentId?: true
-  timestamp?: true
+  txHash?: true
+  tokenIn?: true
+  tokenOut?: true
+  amountIn?: true
+  amountOut?: true
+  profitEth?: true
+  profitUsd?: true
+  executionTimeMs?: true
+  createdAt?: true
   _all?: true
 }
 
@@ -203,13 +217,16 @@ export type TradeLogGroupByArgs<ExtArgs extends runtime.Types.Extensions.Interna
 
 export type TradeLogGroupByOutputType = {
   id: string
-  type: $Enums.LogType
-  message: string
-  txHash: string | null
-  price: number | null
-  amount: number | null
   agentId: string
-  timestamp: Date
+  txHash: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  profitEth: string
+  profitUsd: string
+  executionTimeMs: number
+  createdAt: Date
   _count: TradeLogCountAggregateOutputType | null
   _avg: TradeLogAvgAggregateOutputType | null
   _sum: TradeLogSumAggregateOutputType | null
@@ -237,52 +254,64 @@ export type TradeLogWhereInput = {
   OR?: Prisma.TradeLogWhereInput[]
   NOT?: Prisma.TradeLogWhereInput | Prisma.TradeLogWhereInput[]
   id?: Prisma.StringFilter<"TradeLog"> | string
-  type?: Prisma.EnumLogTypeFilter<"TradeLog"> | $Enums.LogType
-  message?: Prisma.StringFilter<"TradeLog"> | string
-  txHash?: Prisma.StringNullableFilter<"TradeLog"> | string | null
-  price?: Prisma.FloatNullableFilter<"TradeLog"> | number | null
-  amount?: Prisma.FloatNullableFilter<"TradeLog"> | number | null
   agentId?: Prisma.StringFilter<"TradeLog"> | string
-  timestamp?: Prisma.DateTimeFilter<"TradeLog"> | Date | string
+  txHash?: Prisma.StringFilter<"TradeLog"> | string
+  tokenIn?: Prisma.StringFilter<"TradeLog"> | string
+  tokenOut?: Prisma.StringFilter<"TradeLog"> | string
+  amountIn?: Prisma.StringFilter<"TradeLog"> | string
+  amountOut?: Prisma.StringFilter<"TradeLog"> | string
+  profitEth?: Prisma.StringFilter<"TradeLog"> | string
+  profitUsd?: Prisma.StringFilter<"TradeLog"> | string
+  executionTimeMs?: Prisma.IntFilter<"TradeLog"> | number
+  createdAt?: Prisma.DateTimeFilter<"TradeLog"> | Date | string
   agent?: Prisma.XOR<Prisma.AgentScalarRelationFilter, Prisma.AgentWhereInput>
 }
 
 export type TradeLogOrderByWithRelationInput = {
   id?: Prisma.SortOrder
-  type?: Prisma.SortOrder
-  message?: Prisma.SortOrder
-  txHash?: Prisma.SortOrderInput | Prisma.SortOrder
-  price?: Prisma.SortOrderInput | Prisma.SortOrder
-  amount?: Prisma.SortOrderInput | Prisma.SortOrder
   agentId?: Prisma.SortOrder
-  timestamp?: Prisma.SortOrder
+  txHash?: Prisma.SortOrder
+  tokenIn?: Prisma.SortOrder
+  tokenOut?: Prisma.SortOrder
+  amountIn?: Prisma.SortOrder
+  amountOut?: Prisma.SortOrder
+  profitEth?: Prisma.SortOrder
+  profitUsd?: Prisma.SortOrder
+  executionTimeMs?: Prisma.SortOrder
+  createdAt?: Prisma.SortOrder
   agent?: Prisma.AgentOrderByWithRelationInput
 }
 
 export type TradeLogWhereUniqueInput = Prisma.AtLeast<{
   id?: string
+  txHash?: string
   AND?: Prisma.TradeLogWhereInput | Prisma.TradeLogWhereInput[]
   OR?: Prisma.TradeLogWhereInput[]
   NOT?: Prisma.TradeLogWhereInput | Prisma.TradeLogWhereInput[]
-  type?: Prisma.EnumLogTypeFilter<"TradeLog"> | $Enums.LogType
-  message?: Prisma.StringFilter<"TradeLog"> | string
-  txHash?: Prisma.StringNullableFilter<"TradeLog"> | string | null
-  price?: Prisma.FloatNullableFilter<"TradeLog"> | number | null
-  amount?: Prisma.FloatNullableFilter<"TradeLog"> | number | null
   agentId?: Prisma.StringFilter<"TradeLog"> | string
-  timestamp?: Prisma.DateTimeFilter<"TradeLog"> | Date | string
+  tokenIn?: Prisma.StringFilter<"TradeLog"> | string
+  tokenOut?: Prisma.StringFilter<"TradeLog"> | string
+  amountIn?: Prisma.StringFilter<"TradeLog"> | string
+  amountOut?: Prisma.StringFilter<"TradeLog"> | string
+  profitEth?: Prisma.StringFilter<"TradeLog"> | string
+  profitUsd?: Prisma.StringFilter<"TradeLog"> | string
+  executionTimeMs?: Prisma.IntFilter<"TradeLog"> | number
+  createdAt?: Prisma.DateTimeFilter<"TradeLog"> | Date | string
   agent?: Prisma.XOR<Prisma.AgentScalarRelationFilter, Prisma.AgentWhereInput>
-}, "id">
+}, "id" | "txHash">
 
 export type TradeLogOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
-  type?: Prisma.SortOrder
-  message?: Prisma.SortOrder
-  txHash?: Prisma.SortOrderInput | Prisma.SortOrder
-  price?: Prisma.SortOrderInput | Prisma.SortOrder
-  amount?: Prisma.SortOrderInput | Prisma.SortOrder
   agentId?: Prisma.SortOrder
-  timestamp?: Prisma.SortOrder
+  txHash?: Prisma.SortOrder
+  tokenIn?: Prisma.SortOrder
+  tokenOut?: Prisma.SortOrder
+  amountIn?: Prisma.SortOrder
+  amountOut?: Prisma.SortOrder
+  profitEth?: Prisma.SortOrder
+  profitUsd?: Prisma.SortOrder
+  executionTimeMs?: Prisma.SortOrder
+  createdAt?: Prisma.SortOrder
   _count?: Prisma.TradeLogCountOrderByAggregateInput
   _avg?: Prisma.TradeLogAvgOrderByAggregateInput
   _max?: Prisma.TradeLogMaxOrderByAggregateInput
@@ -295,89 +324,113 @@ export type TradeLogScalarWhereWithAggregatesInput = {
   OR?: Prisma.TradeLogScalarWhereWithAggregatesInput[]
   NOT?: Prisma.TradeLogScalarWhereWithAggregatesInput | Prisma.TradeLogScalarWhereWithAggregatesInput[]
   id?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
-  type?: Prisma.EnumLogTypeWithAggregatesFilter<"TradeLog"> | $Enums.LogType
-  message?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
-  txHash?: Prisma.StringNullableWithAggregatesFilter<"TradeLog"> | string | null
-  price?: Prisma.FloatNullableWithAggregatesFilter<"TradeLog"> | number | null
-  amount?: Prisma.FloatNullableWithAggregatesFilter<"TradeLog"> | number | null
   agentId?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
-  timestamp?: Prisma.DateTimeWithAggregatesFilter<"TradeLog"> | Date | string
+  txHash?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
+  tokenIn?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
+  tokenOut?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
+  amountIn?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
+  amountOut?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
+  profitEth?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
+  profitUsd?: Prisma.StringWithAggregatesFilter<"TradeLog"> | string
+  executionTimeMs?: Prisma.IntWithAggregatesFilter<"TradeLog"> | number
+  createdAt?: Prisma.DateTimeWithAggregatesFilter<"TradeLog"> | Date | string
 }
 
 export type TradeLogCreateInput = {
   id?: string
-  type: $Enums.LogType
-  message: string
-  txHash?: string | null
-  price?: number | null
-  amount?: number | null
-  timestamp?: Date | string
-  agent: Prisma.AgentCreateNestedOneWithoutLogsInput
+  txHash: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  profitEth: string
+  profitUsd: string
+  executionTimeMs: number
+  createdAt?: Date | string
+  agent: Prisma.AgentCreateNestedOneWithoutTradeLogsInput
 }
 
 export type TradeLogUncheckedCreateInput = {
   id?: string
-  type: $Enums.LogType
-  message: string
-  txHash?: string | null
-  price?: number | null
-  amount?: number | null
   agentId: string
-  timestamp?: Date | string
+  txHash: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  profitEth: string
+  profitUsd: string
+  executionTimeMs: number
+  createdAt?: Date | string
 }
 
 export type TradeLogUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  type?: Prisma.EnumLogTypeFieldUpdateOperationsInput | $Enums.LogType
-  message?: Prisma.StringFieldUpdateOperationsInput | string
-  txHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  price?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  amount?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  timestamp?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
-  agent?: Prisma.AgentUpdateOneRequiredWithoutLogsNestedInput
+  txHash?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenIn?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenOut?: Prisma.StringFieldUpdateOperationsInput | string
+  amountIn?: Prisma.StringFieldUpdateOperationsInput | string
+  amountOut?: Prisma.StringFieldUpdateOperationsInput | string
+  profitEth?: Prisma.StringFieldUpdateOperationsInput | string
+  profitUsd?: Prisma.StringFieldUpdateOperationsInput | string
+  executionTimeMs?: Prisma.IntFieldUpdateOperationsInput | number
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  agent?: Prisma.AgentUpdateOneRequiredWithoutTradeLogsNestedInput
 }
 
 export type TradeLogUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  type?: Prisma.EnumLogTypeFieldUpdateOperationsInput | $Enums.LogType
-  message?: Prisma.StringFieldUpdateOperationsInput | string
-  txHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  price?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  amount?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
   agentId?: Prisma.StringFieldUpdateOperationsInput | string
-  timestamp?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  txHash?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenIn?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenOut?: Prisma.StringFieldUpdateOperationsInput | string
+  amountIn?: Prisma.StringFieldUpdateOperationsInput | string
+  amountOut?: Prisma.StringFieldUpdateOperationsInput | string
+  profitEth?: Prisma.StringFieldUpdateOperationsInput | string
+  profitUsd?: Prisma.StringFieldUpdateOperationsInput | string
+  executionTimeMs?: Prisma.IntFieldUpdateOperationsInput | number
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TradeLogCreateManyInput = {
   id?: string
-  type: $Enums.LogType
-  message: string
-  txHash?: string | null
-  price?: number | null
-  amount?: number | null
   agentId: string
-  timestamp?: Date | string
+  txHash: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  profitEth: string
+  profitUsd: string
+  executionTimeMs: number
+  createdAt?: Date | string
 }
 
 export type TradeLogUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  type?: Prisma.EnumLogTypeFieldUpdateOperationsInput | $Enums.LogType
-  message?: Prisma.StringFieldUpdateOperationsInput | string
-  txHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  price?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  amount?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  timestamp?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  txHash?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenIn?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenOut?: Prisma.StringFieldUpdateOperationsInput | string
+  amountIn?: Prisma.StringFieldUpdateOperationsInput | string
+  amountOut?: Prisma.StringFieldUpdateOperationsInput | string
+  profitEth?: Prisma.StringFieldUpdateOperationsInput | string
+  profitUsd?: Prisma.StringFieldUpdateOperationsInput | string
+  executionTimeMs?: Prisma.IntFieldUpdateOperationsInput | number
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TradeLogUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  type?: Prisma.EnumLogTypeFieldUpdateOperationsInput | $Enums.LogType
-  message?: Prisma.StringFieldUpdateOperationsInput | string
-  txHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  price?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  amount?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
   agentId?: Prisma.StringFieldUpdateOperationsInput | string
-  timestamp?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  txHash?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenIn?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenOut?: Prisma.StringFieldUpdateOperationsInput | string
+  amountIn?: Prisma.StringFieldUpdateOperationsInput | string
+  amountOut?: Prisma.StringFieldUpdateOperationsInput | string
+  profitEth?: Prisma.StringFieldUpdateOperationsInput | string
+  profitUsd?: Prisma.StringFieldUpdateOperationsInput | string
+  executionTimeMs?: Prisma.IntFieldUpdateOperationsInput | number
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TradeLogListRelationFilter = {
@@ -392,45 +445,52 @@ export type TradeLogOrderByRelationAggregateInput = {
 
 export type TradeLogCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
-  type?: Prisma.SortOrder
-  message?: Prisma.SortOrder
-  txHash?: Prisma.SortOrder
-  price?: Prisma.SortOrder
-  amount?: Prisma.SortOrder
   agentId?: Prisma.SortOrder
-  timestamp?: Prisma.SortOrder
+  txHash?: Prisma.SortOrder
+  tokenIn?: Prisma.SortOrder
+  tokenOut?: Prisma.SortOrder
+  amountIn?: Prisma.SortOrder
+  amountOut?: Prisma.SortOrder
+  profitEth?: Prisma.SortOrder
+  profitUsd?: Prisma.SortOrder
+  executionTimeMs?: Prisma.SortOrder
+  createdAt?: Prisma.SortOrder
 }
 
 export type TradeLogAvgOrderByAggregateInput = {
-  price?: Prisma.SortOrder
-  amount?: Prisma.SortOrder
+  executionTimeMs?: Prisma.SortOrder
 }
 
 export type TradeLogMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
-  type?: Prisma.SortOrder
-  message?: Prisma.SortOrder
-  txHash?: Prisma.SortOrder
-  price?: Prisma.SortOrder
-  amount?: Prisma.SortOrder
   agentId?: Prisma.SortOrder
-  timestamp?: Prisma.SortOrder
+  txHash?: Prisma.SortOrder
+  tokenIn?: Prisma.SortOrder
+  tokenOut?: Prisma.SortOrder
+  amountIn?: Prisma.SortOrder
+  amountOut?: Prisma.SortOrder
+  profitEth?: Prisma.SortOrder
+  profitUsd?: Prisma.SortOrder
+  executionTimeMs?: Prisma.SortOrder
+  createdAt?: Prisma.SortOrder
 }
 
 export type TradeLogMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
-  type?: Prisma.SortOrder
-  message?: Prisma.SortOrder
-  txHash?: Prisma.SortOrder
-  price?: Prisma.SortOrder
-  amount?: Prisma.SortOrder
   agentId?: Prisma.SortOrder
-  timestamp?: Prisma.SortOrder
+  txHash?: Prisma.SortOrder
+  tokenIn?: Prisma.SortOrder
+  tokenOut?: Prisma.SortOrder
+  amountIn?: Prisma.SortOrder
+  amountOut?: Prisma.SortOrder
+  profitEth?: Prisma.SortOrder
+  profitUsd?: Prisma.SortOrder
+  executionTimeMs?: Prisma.SortOrder
+  createdAt?: Prisma.SortOrder
 }
 
 export type TradeLogSumOrderByAggregateInput = {
-  price?: Prisma.SortOrder
-  amount?: Prisma.SortOrder
+  executionTimeMs?: Prisma.SortOrder
 }
 
 export type TradeLogCreateNestedManyWithoutAgentInput = {
@@ -475,12 +535,8 @@ export type TradeLogUncheckedUpdateManyWithoutAgentNestedInput = {
   deleteMany?: Prisma.TradeLogScalarWhereInput | Prisma.TradeLogScalarWhereInput[]
 }
 
-export type EnumLogTypeFieldUpdateOperationsInput = {
-  set?: $Enums.LogType
-}
-
-export type NullableFloatFieldUpdateOperationsInput = {
-  set?: number | null
+export type IntFieldUpdateOperationsInput = {
+  set?: number
   increment?: number
   decrement?: number
   multiply?: number
@@ -489,22 +545,28 @@ export type NullableFloatFieldUpdateOperationsInput = {
 
 export type TradeLogCreateWithoutAgentInput = {
   id?: string
-  type: $Enums.LogType
-  message: string
-  txHash?: string | null
-  price?: number | null
-  amount?: number | null
-  timestamp?: Date | string
+  txHash: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  profitEth: string
+  profitUsd: string
+  executionTimeMs: number
+  createdAt?: Date | string
 }
 
 export type TradeLogUncheckedCreateWithoutAgentInput = {
   id?: string
-  type: $Enums.LogType
-  message: string
-  txHash?: string | null
-  price?: number | null
-  amount?: number | null
-  timestamp?: Date | string
+  txHash: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  profitEth: string
+  profitUsd: string
+  executionTimeMs: number
+  createdAt?: Date | string
 }
 
 export type TradeLogCreateOrConnectWithoutAgentInput = {
@@ -538,105 +600,132 @@ export type TradeLogScalarWhereInput = {
   OR?: Prisma.TradeLogScalarWhereInput[]
   NOT?: Prisma.TradeLogScalarWhereInput | Prisma.TradeLogScalarWhereInput[]
   id?: Prisma.StringFilter<"TradeLog"> | string
-  type?: Prisma.EnumLogTypeFilter<"TradeLog"> | $Enums.LogType
-  message?: Prisma.StringFilter<"TradeLog"> | string
-  txHash?: Prisma.StringNullableFilter<"TradeLog"> | string | null
-  price?: Prisma.FloatNullableFilter<"TradeLog"> | number | null
-  amount?: Prisma.FloatNullableFilter<"TradeLog"> | number | null
   agentId?: Prisma.StringFilter<"TradeLog"> | string
-  timestamp?: Prisma.DateTimeFilter<"TradeLog"> | Date | string
+  txHash?: Prisma.StringFilter<"TradeLog"> | string
+  tokenIn?: Prisma.StringFilter<"TradeLog"> | string
+  tokenOut?: Prisma.StringFilter<"TradeLog"> | string
+  amountIn?: Prisma.StringFilter<"TradeLog"> | string
+  amountOut?: Prisma.StringFilter<"TradeLog"> | string
+  profitEth?: Prisma.StringFilter<"TradeLog"> | string
+  profitUsd?: Prisma.StringFilter<"TradeLog"> | string
+  executionTimeMs?: Prisma.IntFilter<"TradeLog"> | number
+  createdAt?: Prisma.DateTimeFilter<"TradeLog"> | Date | string
 }
 
 export type TradeLogCreateManyAgentInput = {
   id?: string
-  type: $Enums.LogType
-  message: string
-  txHash?: string | null
-  price?: number | null
-  amount?: number | null
-  timestamp?: Date | string
+  txHash: string
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  profitEth: string
+  profitUsd: string
+  executionTimeMs: number
+  createdAt?: Date | string
 }
 
 export type TradeLogUpdateWithoutAgentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  type?: Prisma.EnumLogTypeFieldUpdateOperationsInput | $Enums.LogType
-  message?: Prisma.StringFieldUpdateOperationsInput | string
-  txHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  price?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  amount?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  timestamp?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  txHash?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenIn?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenOut?: Prisma.StringFieldUpdateOperationsInput | string
+  amountIn?: Prisma.StringFieldUpdateOperationsInput | string
+  amountOut?: Prisma.StringFieldUpdateOperationsInput | string
+  profitEth?: Prisma.StringFieldUpdateOperationsInput | string
+  profitUsd?: Prisma.StringFieldUpdateOperationsInput | string
+  executionTimeMs?: Prisma.IntFieldUpdateOperationsInput | number
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TradeLogUncheckedUpdateWithoutAgentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  type?: Prisma.EnumLogTypeFieldUpdateOperationsInput | $Enums.LogType
-  message?: Prisma.StringFieldUpdateOperationsInput | string
-  txHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  price?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  amount?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  timestamp?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  txHash?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenIn?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenOut?: Prisma.StringFieldUpdateOperationsInput | string
+  amountIn?: Prisma.StringFieldUpdateOperationsInput | string
+  amountOut?: Prisma.StringFieldUpdateOperationsInput | string
+  profitEth?: Prisma.StringFieldUpdateOperationsInput | string
+  profitUsd?: Prisma.StringFieldUpdateOperationsInput | string
+  executionTimeMs?: Prisma.IntFieldUpdateOperationsInput | number
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TradeLogUncheckedUpdateManyWithoutAgentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  type?: Prisma.EnumLogTypeFieldUpdateOperationsInput | $Enums.LogType
-  message?: Prisma.StringFieldUpdateOperationsInput | string
-  txHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
-  price?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  amount?: Prisma.NullableFloatFieldUpdateOperationsInput | number | null
-  timestamp?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  txHash?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenIn?: Prisma.StringFieldUpdateOperationsInput | string
+  tokenOut?: Prisma.StringFieldUpdateOperationsInput | string
+  amountIn?: Prisma.StringFieldUpdateOperationsInput | string
+  amountOut?: Prisma.StringFieldUpdateOperationsInput | string
+  profitEth?: Prisma.StringFieldUpdateOperationsInput | string
+  profitUsd?: Prisma.StringFieldUpdateOperationsInput | string
+  executionTimeMs?: Prisma.IntFieldUpdateOperationsInput | number
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 
 
 export type TradeLogSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
-  type?: boolean
-  message?: boolean
-  txHash?: boolean
-  price?: boolean
-  amount?: boolean
   agentId?: boolean
-  timestamp?: boolean
+  txHash?: boolean
+  tokenIn?: boolean
+  tokenOut?: boolean
+  amountIn?: boolean
+  amountOut?: boolean
+  profitEth?: boolean
+  profitUsd?: boolean
+  executionTimeMs?: boolean
+  createdAt?: boolean
   agent?: boolean | Prisma.AgentDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["tradeLog"]>
 
 export type TradeLogSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
-  type?: boolean
-  message?: boolean
-  txHash?: boolean
-  price?: boolean
-  amount?: boolean
   agentId?: boolean
-  timestamp?: boolean
+  txHash?: boolean
+  tokenIn?: boolean
+  tokenOut?: boolean
+  amountIn?: boolean
+  amountOut?: boolean
+  profitEth?: boolean
+  profitUsd?: boolean
+  executionTimeMs?: boolean
+  createdAt?: boolean
   agent?: boolean | Prisma.AgentDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["tradeLog"]>
 
 export type TradeLogSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
-  type?: boolean
-  message?: boolean
-  txHash?: boolean
-  price?: boolean
-  amount?: boolean
   agentId?: boolean
-  timestamp?: boolean
+  txHash?: boolean
+  tokenIn?: boolean
+  tokenOut?: boolean
+  amountIn?: boolean
+  amountOut?: boolean
+  profitEth?: boolean
+  profitUsd?: boolean
+  executionTimeMs?: boolean
+  createdAt?: boolean
   agent?: boolean | Prisma.AgentDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["tradeLog"]>
 
 export type TradeLogSelectScalar = {
   id?: boolean
-  type?: boolean
-  message?: boolean
-  txHash?: boolean
-  price?: boolean
-  amount?: boolean
   agentId?: boolean
-  timestamp?: boolean
+  txHash?: boolean
+  tokenIn?: boolean
+  tokenOut?: boolean
+  amountIn?: boolean
+  amountOut?: boolean
+  profitEth?: boolean
+  profitUsd?: boolean
+  executionTimeMs?: boolean
+  createdAt?: boolean
 }
 
-export type TradeLogOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "type" | "message" | "txHash" | "price" | "amount" | "agentId" | "timestamp", ExtArgs["result"]["tradeLog"]>
+export type TradeLogOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "agentId" | "txHash" | "tokenIn" | "tokenOut" | "amountIn" | "amountOut" | "profitEth" | "profitUsd" | "executionTimeMs" | "createdAt", ExtArgs["result"]["tradeLog"]>
 export type TradeLogInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   agent?: boolean | Prisma.AgentDefaultArgs<ExtArgs>
 }
@@ -654,13 +743,16 @@ export type $TradeLogPayload<ExtArgs extends runtime.Types.Extensions.InternalAr
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
-    type: $Enums.LogType
-    message: string
-    txHash: string | null
-    price: number | null
-    amount: number | null
     agentId: string
-    timestamp: Date
+    txHash: string
+    tokenIn: string
+    tokenOut: string
+    amountIn: string
+    amountOut: string
+    profitEth: string
+    profitUsd: string
+    executionTimeMs: number
+    createdAt: Date
   }, ExtArgs["result"]["tradeLog"]>
   composites: {}
 }
@@ -1086,13 +1178,16 @@ export interface Prisma__TradeLogClient<T, Null = never, ExtArgs extends runtime
  */
 export interface TradeLogFieldRefs {
   readonly id: Prisma.FieldRef<"TradeLog", 'String'>
-  readonly type: Prisma.FieldRef<"TradeLog", 'LogType'>
-  readonly message: Prisma.FieldRef<"TradeLog", 'String'>
-  readonly txHash: Prisma.FieldRef<"TradeLog", 'String'>
-  readonly price: Prisma.FieldRef<"TradeLog", 'Float'>
-  readonly amount: Prisma.FieldRef<"TradeLog", 'Float'>
   readonly agentId: Prisma.FieldRef<"TradeLog", 'String'>
-  readonly timestamp: Prisma.FieldRef<"TradeLog", 'DateTime'>
+  readonly txHash: Prisma.FieldRef<"TradeLog", 'String'>
+  readonly tokenIn: Prisma.FieldRef<"TradeLog", 'String'>
+  readonly tokenOut: Prisma.FieldRef<"TradeLog", 'String'>
+  readonly amountIn: Prisma.FieldRef<"TradeLog", 'String'>
+  readonly amountOut: Prisma.FieldRef<"TradeLog", 'String'>
+  readonly profitEth: Prisma.FieldRef<"TradeLog", 'String'>
+  readonly profitUsd: Prisma.FieldRef<"TradeLog", 'String'>
+  readonly executionTimeMs: Prisma.FieldRef<"TradeLog", 'Int'>
+  readonly createdAt: Prisma.FieldRef<"TradeLog", 'DateTime'>
 }
     
 

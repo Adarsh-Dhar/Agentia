@@ -10,10 +10,11 @@
 */
 
 export const AgentStatus = {
+  STARTING: 'STARTING',
   RUNNING: 'RUNNING',
-  PAUSED: 'PAUSED',
-  REVOKED: 'REVOKED',
-  EXPIRED: 'EXPIRED'
+  STOPPING: 'STOPPING',
+  STOPPED: 'STOPPED',
+  ERROR: 'ERROR'
 } as const
 
 export type AgentStatus = (typeof AgentStatus)[keyof typeof AgentStatus]

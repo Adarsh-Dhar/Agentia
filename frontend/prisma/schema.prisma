@@ -14,10 +14,11 @@ datasource db {
 
 // Enums to keep your data strictly typed
 enum AgentStatus {
+  STARTING
   RUNNING
-  PAUSED
-  REVOKED
-  EXPIRED
+  STOPPING
+  STOPPED
+  ERROR
 }
 
 enum StrategyType {
@@ -34,58 +35,54 @@ enum LogType {
   ERROR
 }
 
-// 1. The User Table
 model User {
-  id            String   @id @default(uuid())
-  email         String?  @unique // Captured via InterwovenKit social login
-  walletAddress String   @unique // The primary Initia wallet address
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // A user can deploy multiple AI agents
-  agents        Agent[]
+  id        String   @id // Clerk User ID
+  email     String   @unique
+  name      String?
+  agents    Agent[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
-// 2. The Agent Table (The "Corporate Credit Card" configs)
 model Agent {
-  id             String       @id @default(uuid())
-  name           String       // e.g., "INIT Sniffer"
-  strategy       StrategyType
-  status         AgentStatus  @default(RUNNING)
-  targetPair     String       // e.g., "INIT/USDC"
-  
-  // Session Key Parameters
-  spendAllowance Float        // The max USDC the bot is allowed to use
-  sessionExpiresAt DateTime   // When the Initia session key mathematically expires
-  sessionKeyPub  String?      // The public key of the AI's temporary session wallet
-  sessionKeyPriv String?      // The private key of the AI's temporary session wallet (hex encoded, MVP only)
-  
-  // Performance Tracking
-  currentPnl     Float        @default(0.0)
-
-  // Relations
-  userId         String
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  logs           TradeLog[]
-
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id               String       @id @default(cuid())
+  name             String
+  status           AgentStatus  @default(STOPPED)
+  userId           String
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  configuration    Json?
+  sessionKeyPriv   String?      
+  tradeLogs        TradeLog[]
+  files            AgentFile[]  // <-- NEW: Relation to bot code files
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 }
 
-// 3. The Live Logs Table (For the Terminal UI)
-model TradeLog {
-  id          String   @id @default(uuid())
-  type        LogType
-  message     String   // e.g., "AI identified arbitrage on INIT/USDC"
-  
-  // Optional execution details
-  txHash      String?  // The Initia transaction hash (if a trade occurred)
-  price       Float?   // Price at execution
-  amount      Float?   // Amount of tokens traded
-  
-  // Relations
-  agentId     String
-  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+// NEW MODEL: Stores the generated code files for the agent
+model AgentFile {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  filepath  String   // File route (e.g., "src/index.ts")
+  content   String   @db.Text // Text content of the file
+  language  String   @default("plaintext") // e.g., "typescript", "json"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  timestamp   DateTime @default(now())
+  @@unique([agentId, filepath])
+}
+
+model TradeLog {
+  id              String   @id @default(cuid())
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  txHash          String   @unique
+  tokenIn         String
+  tokenOut        String
+  amountIn        String
+  amountOut       String
+  profitEth       String
+  profitUsd       String
+  executionTimeMs Int
+  createdAt       DateTime @default(now())
 }

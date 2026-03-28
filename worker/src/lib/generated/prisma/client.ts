@@ -52,6 +52,11 @@ export type User = Prisma.UserModel
  */
 export type Agent = Prisma.AgentModel
 /**
+ * Model AgentFile
+ * 
+ */
+export type AgentFile = Prisma.AgentFileModel
+/**
  * Model TradeLog
  * 
  */

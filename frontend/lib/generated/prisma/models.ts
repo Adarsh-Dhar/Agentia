@@ -10,5 +10,6 @@
  */
 export type * from './models/User.ts'
 export type * from './models/Agent.ts'
+export type * from './models/AgentFile.ts'
 export type * from './models/TradeLog.ts'
 export type * from './commonInputTypes.ts'
