@@ -51,8 +51,6 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
         { filepath: ".npmrc", content: NPMRC_CONTENT },
       ];
       
-      // REMOVED webcontainerRef.current = globalWebContainerInstance FROM HERE
-      
       const { WebContainer } = await import("@webcontainer/api");
       if (!globalWebContainerInstance) {
         try {
@@ -68,7 +66,7 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
         }
       }
       
-      // ✅ MOVED HERE: Sync the ref AFTER the container has successfully booted
+      // ✅ Sync the ref AFTER the container has successfully booted
       webcontainerRef.current = globalWebContainerInstance;
       
       await new Promise(r => setTimeout(r, 500));
@@ -128,5 +126,20 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
     }
   };
 
-  return { bootAndRun, phase, status, setPhase, setStatus };
+  // ✅ ADDED: Function to sync live edits to the running container
+  const updateFileInSandbox = async (filepath: string, content: string) => {
+    if (webcontainerRef.current) {
+      const wc = webcontainerRef.current as any;
+      try {
+        // Strip leading slashes to prevent root file system errors
+        const safePath = filepath.replace(/^[./]+/, "");
+        await wc.fs.writeFile(safePath, content);
+      } catch (err) {
+        console.error(`Failed to write ${filepath} to sandbox FS:`, err);
+      }
+    }
+  };
+
+  // ✅ EXPORTED updateFileInSandbox
+  return { bootAndRun, phase, status, setPhase, setStatus, updateFileInSandbox };
 }

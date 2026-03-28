@@ -6,14 +6,15 @@ import { useTerminal } from "../hooks/use-terminal";
 import { useSandbox } from "../hooks/use-sandbox";
 import { useCodeGen } from "../hooks/use-code-gen";
 import { FileExplorer } from "./ui/FileExplorer";
-import { CodeEditor } from "./ui/code-editor";
+import { CodeEditor } from "./ui/code-editor"; // ✅ Correct lowercase import
 import { EnvConfigModal } from "./ui/EnvConfigModal";
 import { TerminalPanel } from "./ui/TerminalPanel";
-// ADD Settings to your lucide-react imports
 import { Zap, Play, Settings } from "lucide-react"; 
 
 export function WebContainerRunner() {
   const [envConfig, setEnvConfig] = useState({ ...DEFAULT_ENV_CONFIG });
+  const [fileEdits, setFileEdits] = useState<Record<string, string>>({}); // ✅ Added state for edits
+  
   const { terminalRef, termRef } = useTerminal();
   const {
     generateFiles,
@@ -21,15 +22,34 @@ export function WebContainerRunner() {
     selectedFile,
     setSelectedFile
   } = useCodeGen(termRef);
+
+  // ✅ Merge original files with active edits
+  const currentFiles = generatedFiles.map(f => ({
+    ...f,
+    content: fileEdits[f.filepath] !== undefined ? fileEdits[f.filepath] : f.content
+  }));
+
   const {
     bootAndRun,
     phase,
     status,
     setPhase,
-    setStatus
-  } = useSandbox({ generatedFiles, envConfig, termRef });
+    setStatus,
+    updateFileInSandbox // ✅ Destructured the sync function
+  } = useSandbox({ generatedFiles: currentFiles, envConfig, termRef });
 
-  const selectedContent = generatedFiles.find(f => f.filepath === selectedFile)?.content;
+  const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content;
+
+  // ✅ Handler to actually update the text when you type
+  const handleEditorChange = (newContent: string) => {
+    if (selectedFile) {
+      setFileEdits(prev => ({ ...prev, [selectedFile]: newContent }));
+      // Live sync to WebContainer if it is already running
+      if (phase === "running" && updateFileInSandbox) {
+        updateFileInSandbox(selectedFile, newContent);
+      }
+    }
+  };
 
   return (
     <div className="flex flex-col h-[700px] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden font-mono shadow-2xl text-slate-200">
@@ -43,7 +63,6 @@ export function WebContainerRunner() {
           </span>
         </div>
         
-        {/* FIXED SECTION: Dynamic Buttons based on state */}
         <div className="flex items-center gap-3">
           <span className="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 border border-slate-700">
             {status.toUpperCase()}
@@ -71,10 +90,9 @@ export function WebContainerRunner() {
       
       <div className="flex flex-1 overflow-hidden">
         {/* File Explorer */}
-        <FileExplorer files={generatedFiles} selectedFile={selectedFile} onSelect={setSelectedFile} />
+        <FileExplorer files={currentFiles} selectedFile={selectedFile} onSelect={setSelectedFile} />
         {/* Editor + Config + Terminal Container */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Top Section: Editor and Overlay (Scoped together) */}
           <div className="flex-1 relative flex flex-col min-h-0">
             {phase === "env-setup" && (
               <EnvConfigModal
@@ -84,7 +102,8 @@ export function WebContainerRunner() {
                 isDryRun={envConfig.DRY_RUN === "true"}
               />
             )}
-            <CodeEditor content={selectedContent} />
+            {/* ✅ Passed the onChange handler to the editor component */}
+            <CodeEditor content={selectedContent} onChange={handleEditorChange} />
           </div>
           <TerminalPanel terminalRef={terminalRef} onClear={() => termRef.current?.clear()} />
         </div>
