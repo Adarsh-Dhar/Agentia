@@ -1,39 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// ─── POST /api/users/sync ─────────────────────────────────────────────────────
+// Upserts a user record by email (Clerk user ID is the primary key).
+// Called after Clerk authentication to ensure the user exists in our DB.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { walletAddress, email } = body;
+    const { id, email, name } = body;
 
-    // 1. Guard: wallet address is required
-    if (!walletAddress || typeof walletAddress !== "string") {
+    if (!id || typeof id !== "string" || !id.trim()) {
       return NextResponse.json(
-        { error: "walletAddress is required." },
+        { error: "id (Clerk user ID) is required." },
         { status: 400 }
       );
     }
 
-    // 2 & 3 & 4. Upsert: update email if user exists, create row if new
+    if (!email || typeof email !== "string" || !email.trim()) {
+      return NextResponse.json(
+        { error: "email is required." },
+        { status: 400 }
+      );
+    }
+
     const user = await prisma.user.upsert({
-      where: { walletAddress },
+      where: { id },
       update: {
-        // Only overwrite email if the social login actually provided one
-        ...(email ? { email } : {}),
+        email,
+        ...(name ? { name } : {}),
       },
       create: {
-        walletAddress,
-        ...(email ? { email } : {}),
+        id,
+        email,
+        ...(name ? { name } : {}),
       },
     });
 
-    // 5. Return the full User object so the frontend knows who is logged in
     return NextResponse.json(user, { status: 200 });
   } catch (error: unknown) {
+    // Unique constraint on email — another account already uses it
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "P2002"
+    ) {
+      return NextResponse.json(
+        { error: "This email address is already associated with another account." },
+        { status: 409 }
+      );
+    }
     console.error("[/api/users/sync] Error:", error);
-    return NextResponse.json(
-      { error: "Internal server error." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }

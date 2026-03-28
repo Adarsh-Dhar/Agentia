@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { VALID_STRATEGIES } from "@/lib/constant";
 
 // ─── GET: List all agents for a user ─────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -15,14 +14,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Query all agents for the user, newest first
     const agents = await prisma.agent.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
       include: {
-        // Include the last log entry so the dashboard card has something to show
-        logs: {
-          orderBy: { timestamp: "desc" },
+        files: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        tradeLogs: {
+          orderBy: { createdAt: "desc" },
           take: 1,
         },
       },
@@ -45,57 +46,37 @@ export async function POST(req: NextRequest) {
     const {
       userId,
       name,
-      strategy,
-      targetPair,
-      spendAllowance,
-      sessionExpiresAt,
-      sessionKeyPub,
+      configuration,
       sessionKeyPriv,
     } = body;
 
-    // Guard: validate required fields
-    if (!userId || !name || !strategy || !targetPair || spendAllowance == null || !sessionExpiresAt) {
+    if (!userId || !name) {
       return NextResponse.json(
-        {
-          error:
-            "Missing required fields: userId, name, strategy, targetPair, spendAllowance, sessionExpiresAt.",
-        },
+        { error: "Missing required fields: userId, name." },
         { status: 400 }
       );
     }
 
-    if (!VALID_STRATEGIES.includes(strategy)) {
+    const userExists = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!userExists) {
       return NextResponse.json(
-        { error: `Invalid strategy. Must be one of: ${VALID_STRATEGIES.join(", ")}` },
-        { status: 400 }
+        { error: `User "${userId}" not found.` },
+        { status: 404 }
       );
     }
 
-    // 2. Write the new Agent row and its boot log in a single transaction
-    const agent = await prisma.$transaction(async (tx) => {
-      const newAgent = await tx.agent.create({
-        data: {
-          userId,
-          name,
-          strategy, // Prisma accepts the string literal directly
-          status: "RUNNING", 
-          targetPair,
-          spendAllowance: Number(spendAllowance),
-          sessionExpiresAt: new Date(sessionExpiresAt),
-          sessionKeyPub: sessionKeyPub ?? null,
-          sessionKeyPriv: sessionKeyPriv ?? null,
-        },
-      });
-
-      await tx.tradeLog.create({
-        data: {
-          agentId: newAgent.id,
-          type: "INFO",
-          message: `System Boot: Agent "${newAgent.name}" deployed securely on Initia. Session key active. Awaiting first market signal.`,
-        },
-      });
-
-      return newAgent;
+    const agent = await prisma.agent.create({
+      data: {
+        userId,
+        name,
+        status: "STOPPED",
+        configuration: configuration ?? null,
+        sessionKeyPriv: sessionKeyPriv ?? null,
+      },
     });
 
     return NextResponse.json(agent, { status: 201 });

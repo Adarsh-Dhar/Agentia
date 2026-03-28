@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma.ts";
-import { MissionPlan, CreateAgentRequestBody, Strategy, Confidence } from "@/lib/types.ts";
-import { VALID_STRATEGIES, VALID_CONFIDENCE } from "@/lib/constant.ts";
+import { prisma } from "@/lib/prisma";
 
-
-const SYSTEM_PROMPT = `You are an expert AI trading strategy architect for the Initia blockchain ecosystem.
+const SYSTEM_PROMPT = `You are an expert AI trading strategy architect for the Base Sepolia blockchain ecosystem.
 Your job is to interpret a user's natural language trading intent and produce a precise, executable Mission Plan.
 
 AVAILABLE STRATEGIES:
-- MEME_SNIPER: Identifies and trades emerging meme tokens on Initia DEXes. Best for: high-risk/high-reward, trending tokens.
-- ARBITRAGE: Exploits price differences between trading pairs or DEX pools. Best for: lower risk, consistent small gains.
+- FLASH_LOAN_ARB: Borrows an asset via Aave flash loan, swaps via 1inch (asset→WETH→asset), repays with fee, keeps profit. Best for: low-risk, capital-efficient, sub-second execution.
 - SENTIMENT_TRADER: Trades based on social media signals and on-chain sentiment. Best for: narrative-driven moves.
+- MEME_SNIPER: Identifies and trades emerging meme tokens. Best for: high-risk/high-reward, trending tokens.
 
-AVAILABLE TRADING PAIRS (Initia ecosystem):
-INIT/USDC, MEME/INIT, INIT/USDT, ARB/INIT, SOL/INIT, BTC/INIT
+AVAILABLE TRADING PAIRS: USDC/WETH, WETH/USDC, USDC/WBTC, WETH/WBTC
 
 OUTPUT RULES:
 - Respond ONLY with a valid JSON object. No markdown fences, no explanation, no preamble.
@@ -22,26 +18,38 @@ OUTPUT RULES:
 - exitConditions: exactly 2-3 specific, actionable conditions.
 - riskNotes: 1-3 honest risk disclosures relevant to the strategy.
 - warnings: 0-2 critical warnings if the intent is risky, vague, or contradictory. Empty array if none.
-- sessionDurationHours: integer 1-168 (max 1 week).
-- recommendedSpendAllowance: number in USD, reasonable and proportionate to the stated risk tolerance.
+- pollIntervalSeconds: integer 3-60 (how often to check for opportunities).
+- borrowAmountHuman: number representing the token amount to borrow (e.g., 1000 for 1000 USDC).
 - confidence: HIGH if intent is clear and complete, MEDIUM if some ambiguity exists, LOW if very vague.
 
 JSON SCHEMA (return exactly this shape, no extra keys):
 {
   "agentName": string,
-  "strategy": "MEME_SNIPER" | "ARBITRAGE" | "SENTIMENT_TRADER",
+  "strategy": "FLASH_LOAN_ARB" | "SENTIMENT_TRADER" | "MEME_SNIPER",
   "targetPair": string,
   "description": string,
   "entryConditions": string[],
   "exitConditions": string[],
   "riskNotes": string[],
-  "sessionDurationHours": number,
-  "recommendedSpendAllowance": number,
+  "pollIntervalSeconds": number,
+  "borrowAmountHuman": number,
   "confidence": "HIGH" | "MEDIUM" | "LOW",
   "warnings": string[]
 }`;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+interface MissionPlan {
+  agentName: string;
+  strategy: string;
+  targetPair: string;
+  description: string;
+  entryConditions: string[];
+  exitConditions: string[];
+  riskNotes: string[];
+  pollIntervalSeconds: number;
+  borrowAmountHuman: number;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  warnings: string[];
+}
 
 function errorResponse(message: string, status: number, details?: unknown) {
   return NextResponse.json(
@@ -54,8 +62,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-// ─── GitHub Models → gpt-4o ───────────────────────────────────────────────────
-
 async function interpretIntent(intent: string): Promise<MissionPlan> {
   const githubToken = process.env.GITHUB_TOKEN;
   if (!githubToken) {
@@ -63,28 +69,28 @@ async function interpretIntent(intent: string): Promise<MissionPlan> {
   }
 
   const controller = new AbortController();
-  const timeoutId  = setTimeout(() => controller.abort(), 30_000); // 30s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
   let response: Response;
   try {
     response = await fetch(
       "https://models.inference.ai.azure.com/chat/completions",
       {
-        method:  "POST",
-        signal:  controller.signal,
+        method: "POST",
+        signal: controller.signal,
         headers: {
           "Content-Type": "application/json",
-          Authorization:  `Bearer ${githubToken}`,
+          Authorization: `Bearer ${githubToken}`,
         },
         body: JSON.stringify({
-          model:           "gpt-4o",
-          temperature:     0.3,
-          max_tokens:      900,
+          model: "gpt-4o",
+          temperature: 0.3,
+          max_tokens: 900,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             {
-              role:    "user",
+              role: "user",
               content: `Parse this trading intent into a Mission Plan:\n\n"${intent}"`,
             },
           ],
@@ -95,22 +101,17 @@ async function interpretIntent(intent: string): Promise<MissionPlan> {
     if ((err as Error).name === "AbortError") {
       throw new Error("AI model request timed out after 30 seconds. Please try again.");
     }
-    throw new Error(
-      `Failed to reach GitHub Models API: ${(err as Error).message}`
-    );
+    throw new Error(`Failed to reach GitHub Models API: ${(err as Error).message}`);
   } finally {
     clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
-    // Try to extract a useful message from the GitHub Models error body
     let apiErrorMsg = `GitHub Models API returned ${response.status}`;
     try {
       const errBody = await response.json();
       if (errBody?.error?.message) apiErrorMsg += `: ${errBody.error.message}`;
-    } catch {
-      // swallow JSON parse error on error body
-    }
+    } catch { /* ignore */ }
     throw new Error(apiErrorMsg);
   }
 
@@ -129,38 +130,26 @@ async function interpretIntent(intent: string): Promise<MissionPlan> {
     throw new Error("AI model returned an empty response. Please retry.");
   }
 
-  // Parse JSON — try directly first, then regex-extract if needed
   let parsed: Partial<MissionPlan>;
   try {
     parsed = JSON.parse(rawContent);
   } catch {
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error(
-        "AI returned malformed JSON. Please rephrase your trading intent."
-      );
+      throw new Error("AI returned malformed JSON. Please rephrase your trading intent.");
     }
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch {
-      throw new Error(
-        "Could not parse AI response after extraction. Try a clearer description."
-      );
+      throw new Error("Could not parse AI response after extraction. Try a clearer description.");
     }
   }
 
-  // ── Validate required fields ──────────────────────────────────────────────
-
+  // ── Validate required fields ───────────────────────────────────────────────
   const requiredFields: (keyof MissionPlan)[] = [
-    "agentName",
-    "strategy",
-    "targetPair",
-    "description",
-    "entryConditions",
-    "exitConditions",
-    "sessionDurationHours",
-    "recommendedSpendAllowance",
-    "confidence",
+    "agentName", "strategy", "targetPair", "description",
+    "entryConditions", "exitConditions", "pollIntervalSeconds",
+    "borrowAmountHuman", "confidence",
   ];
 
   const missingFields = requiredFields.filter(
@@ -172,83 +161,53 @@ async function interpretIntent(intent: string): Promise<MissionPlan> {
     );
   }
 
-  // ── Coerce and sanitise values ────────────────────────────────────────────
-
-  if (!VALID_STRATEGIES.includes(parsed.strategy as Strategy)) {
-    throw new Error(
-      `AI returned an invalid strategy "${parsed.strategy}". Please retry.`
-    );
+  const validStrategies = ["FLASH_LOAN_ARB", "SENTIMENT_TRADER", "MEME_SNIPER"];
+  if (!validStrategies.includes(parsed.strategy as string)) {
+    throw new Error(`AI returned an invalid strategy "${parsed.strategy}". Please retry.`);
   }
 
-  if (!VALID_CONFIDENCE.includes(parsed.confidence as Confidence)) {
+  const validConfidence = ["HIGH", "MEDIUM", "LOW"];
+  if (!validConfidence.includes(parsed.confidence as string)) {
     parsed.confidence = "MEDIUM";
   }
 
-  // Clamp numeric fields to safe ranges
-  const sessionHours = clamp(
-    Number(parsed.sessionDurationHours) || 24,
-    1,
-    168
-  );
-  const spendAllowance = clamp(
-    Number(parsed.recommendedSpendAllowance) || 500,
-    10,
-    1_000_000
-  );
-
-  // Ensure arrays are actually arrays and within length limits
   const toArray = (v: unknown, limit: number): string[] =>
     Array.isArray(v) ? (v as string[]).slice(0, limit) : [];
 
   return {
-    agentName:                 String(parsed.agentName).slice(0, 60),
-    strategy:                  parsed.strategy as Strategy,
-    targetPair:                String(parsed.targetPair).slice(0, 30),
-    description:               String(parsed.description).slice(0, 400),
-    entryConditions:           toArray(parsed.entryConditions, 3),
-    exitConditions:            toArray(parsed.exitConditions, 3),
-    riskNotes:                 toArray(parsed.riskNotes, 3),
-    sessionDurationHours:      sessionHours,
-    recommendedSpendAllowance: spendAllowance,
-    confidence:                parsed.confidence as Confidence,
-    warnings:                  toArray(parsed.warnings, 2),
+    agentName:          String(parsed.agentName).slice(0, 60),
+    strategy:           parsed.strategy as string,
+    targetPair:         String(parsed.targetPair).slice(0, 30),
+    description:        String(parsed.description).slice(0, 400),
+    entryConditions:    toArray(parsed.entryConditions, 3),
+    exitConditions:     toArray(parsed.exitConditions, 3),
+    riskNotes:          toArray(parsed.riskNotes, 3),
+    pollIntervalSeconds: clamp(Number(parsed.pollIntervalSeconds) || 5, 3, 60),
+    borrowAmountHuman:  clamp(Number(parsed.borrowAmountHuman) || 1000, 1, 1_000_000),
+    confidence:         parsed.confidence as "HIGH" | "MEDIUM" | "LOW",
+    warnings:           toArray(parsed.warnings, 2),
   };
 }
 
-// ─── POST /api/agent ──────────────────────────────────────────────────────────
+// ─── POST /api/agent-creation ─────────────────────────────────────────────────
 //
 // Body (JSON):
-//   userId               string   required — must exist in DB
-//   intent               string   required — natural language trading goal (20-1000 chars)
-//   spendAllowance?      number   optional override (Tier 3 guardrail)
-//   sessionDurationHours? number  optional override (Tier 3 guardrail)
-//   maxDailyLoss?        number   optional — stored in boot log for worker reference
-//   sessionKeyPub?       string   optional — if generated client-side
-//   sessionKeyPriv?      string   optional — if generated client-side
+//   userId      string   required — must exist in DB (Clerk user ID)
+//   intent      string   required — natural language trading goal (20-1000 chars)
 //
 // Returns 201 with { agent, plan } on success.
-// Returns 4xx/5xx with { error, details? } on failure.
-
 export async function POST(req: NextRequest) {
-  // ── 1. Parse request body ────────────────────────────────────────────────
-  let body: CreateAgentRequestBody;
+  // ── 1. Parse request body ──────────────────────────────────────────────────
+  let body: { userId?: string; intent?: string };
   try {
     body = await req.json();
   } catch {
     return errorResponse("Request body must be valid JSON.", 400);
   }
 
-  const {
-    userId,
-    intent,
-    spendAllowance:      spendOverride,
-    sessionDurationHours: hoursOverride,
-    maxDailyLoss,
-    sessionKeyPub,
-    sessionKeyPriv,
-  } = body;
+  const { userId, intent } = body;
 
-  // ── 2. Validate required inputs ──────────────────────────────────────────
+  // ── 2. Validate inputs ─────────────────────────────────────────────────────
   if (!userId || typeof userId !== "string" || !userId.trim()) {
     return errorResponse("userId is required.", 400);
   }
@@ -268,47 +227,15 @@ export async function POST(req: NextRequest) {
     return errorResponse("intent must be 1000 characters or fewer.", 400);
   }
 
-  // Validate optional numeric overrides
-  if (spendOverride !== undefined) {
-    if (typeof spendOverride !== "number" || spendOverride <= 0) {
-      return errorResponse("spendAllowance must be a positive number.", 400);
-    }
-    if (spendOverride > 1_000_000) {
-      return errorResponse("spendAllowance cannot exceed $1,000,000.", 400);
-    }
-  }
-
-  if (hoursOverride !== undefined) {
-    if (typeof hoursOverride !== "number" || hoursOverride < 1) {
-      return errorResponse("sessionDurationHours must be at least 1.", 400);
-    }
-    if (hoursOverride > 168) {
-      return errorResponse("sessionDurationHours cannot exceed 168 (1 week).", 400);
-    }
-  }
-
-  if (maxDailyLoss !== undefined) {
-    if (typeof maxDailyLoss !== "number" || maxDailyLoss <= 0) {
-      return errorResponse("maxDailyLoss must be a positive number.", 400);
-    }
-    const effectiveSpend = spendOverride ?? 1_000_000;
-    if (maxDailyLoss > effectiveSpend) {
-      return errorResponse(
-        "maxDailyLoss cannot exceed the total spendAllowance.",
-        400
-      );
-    }
-  }
-
-  // ── 3. Confirm user exists ────────────────────────────────────────────────
+  // ── 3. Confirm user exists ─────────────────────────────────────────────────
   let userExists: { id: string } | null;
   try {
     userExists = await prisma.user.findUnique({
-      where:  { id: userId },
+      where: { id: userId },
       select: { id: true },
     });
   } catch (err) {
-    console.error("[POST /api/agent] DB user lookup error:", err);
+    console.error("[POST /api/agent-creation] DB user lookup error:", err);
     return errorResponse("Database error while verifying user.", 500);
   }
 
@@ -316,16 +243,13 @@ export async function POST(req: NextRequest) {
     return errorResponse(`User "${userId}" not found.`, 404);
   }
 
-  // ── 4. Call GitHub Models gpt-4o to interpret intent ─────────────────────
+  // ── 4. Interpret intent via AI ─────────────────────────────────────────────
   let plan: MissionPlan;
   try {
     plan = await interpretIntent(trimmedIntent);
   } catch (err) {
-    const msg =
-      err instanceof Error ? err.message : "Unknown AI interpretation error.";
-    console.error("[POST /api/agent] AI interpretation error:", err);
-
-    // Distinguish between config errors (500) and retry-able model errors (502)
+    const msg = err instanceof Error ? err.message : "Unknown AI interpretation error.";
+    console.error("[POST /api/agent-creation] AI interpretation error:", err);
     const isConfigError = msg.includes("GITHUB_TOKEN");
     return errorResponse(
       isConfigError ? "Server configuration error." : "Failed to interpret trading intent.",
@@ -334,74 +258,38 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 5. Apply Tier 3 guardrail overrides ──────────────────────────────────
-  const finalSpendAllowance     = spendOverride    ?? plan.recommendedSpendAllowance;
-  const finalSessionHours       = hoursOverride    ?? plan.sessionDurationHours;
-  const finalMaxDailyLoss       = maxDailyLoss     ?? Math.round(finalSpendAllowance * 0.1);
-  const sessionExpiresAt        = new Date(Date.now() + finalSessionHours * 3_600_000);
-
-  // ── 6. Write Agent + boot TradeLog in one atomic transaction ──────────────
+  // ── 5. Persist agent with configuration derived from the plan ──────────────
   let agent: Awaited<ReturnType<typeof prisma.agent.create>>;
   try {
-    agent = await prisma.$transaction(async (tx) => {
-      const newAgent = await tx.agent.create({
-        data: {
-          userId,
-          name:            plan.agentName,
-          strategy:        plan.strategy,
-          status:          "RUNNING",
-          targetPair:      plan.targetPair,
-          spendAllowance:  finalSpendAllowance,
-          sessionExpiresAt,
-          sessionKeyPub:   sessionKeyPub  ?? null,
-          sessionKeyPriv:  sessionKeyPriv ?? null,
+    agent = await prisma.agent.create({
+      data: {
+        userId,
+        name: plan.agentName,
+        status: "STOPPED",
+        configuration: {
+          strategy:           plan.strategy,
+          targetPair:         plan.targetPair,
+          description:        plan.description,
+          entryConditions:    plan.entryConditions,
+          exitConditions:     plan.exitConditions,
+          riskNotes:          plan.riskNotes,
+          pollIntervalSeconds: plan.pollIntervalSeconds,
+          borrowAmountHuman:  plan.borrowAmountHuman,
+          confidence:         plan.confidence,
+          warnings:           plan.warnings,
+          intent:             trimmedIntent,
+          generatedAt:        new Date().toISOString(),
         },
-      });
-
-      // Structured boot log — the off-chain worker reads this to configure itself
-      const bootMessage = JSON.stringify({
-        event:           "SYSTEM_BOOT",
-        description:     plan.description,
-        entryConditions: plan.entryConditions,
-        exitConditions:  plan.exitConditions,
-        riskNotes:       plan.riskNotes,
-        maxDailyLoss:    finalMaxDailyLoss,
-        confidence:      plan.confidence,
-        warnings:        plan.warnings,
-        intent:          trimmedIntent,
-        generatedAt:     new Date().toISOString(),
-      });
-
-      await tx.tradeLog.create({
-        data: {
-          agentId: newAgent.id,
-          type:    "INFO",
-          message: `System Boot: Agent "${newAgent.name}" deployed. ${bootMessage}`,
-        },
-      });
-
-      return newAgent;
+      },
     });
   } catch (err) {
-    console.error("[POST /api/agent] DB transaction error:", err);
+    console.error("[POST /api/agent-creation] DB transaction error:", err);
     return errorResponse(
       "Failed to persist agent to the database. Please try again.",
       500
     );
   }
 
-  // ── 7. Return created agent + the full plan so the client can display it ──
-  return NextResponse.json(
-    {
-      agent,
-      plan: {
-        ...plan,
-        appliedSpendAllowance:     finalSpendAllowance,
-        appliedSessionHours:       finalSessionHours,
-        appliedMaxDailyLoss:       finalMaxDailyLoss,
-        sessionExpiresAt:          sessionExpiresAt.toISOString(),
-      },
-    },
-    { status: 201 }
-  );
+  // ── 6. Return created agent + full plan ────────────────────────────────────
+  return NextResponse.json({ agent, plan }, { status: 201 });
 }

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 
+// ─── POST /api/agents/save-bot ────────────────────────────────────────────────
+// Creates an Agent with associated AgentFile records for the WebContainer bot.
 export async function POST(req: Request) {
   try {
     const { userId } = await auth();
@@ -10,41 +12,61 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { name = "Base Sepolia Arbitrage Bot", files } = body;
+    const { name = "Base Sepolia Arbitrage Bot", files, configuration } = body;
 
     if (!files || !Array.isArray(files) || files.length === 0) {
-      return NextResponse.json({ error: "No files provided" }, { status: 400 });
+      return NextResponse.json({ error: "No files provided." }, { status: 400 });
     }
 
-    // Ensure the User exists in our DB (handles cases where sync hasn't occurred)
+    // Validate each file entry
+    for (const f of files) {
+      if (!f.filepath || typeof f.filepath !== "string") {
+        return NextResponse.json(
+          { error: "Each file must have a filepath string." },
+          { status: 400 }
+        );
+      }
+      if (typeof f.content !== "string") {
+        return NextResponse.json(
+          { error: `File "${f.filepath}" is missing content.` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Ensure the User row exists (Clerk may not have triggered the sync webhook yet)
     await prisma.user.upsert({
       where: { id: userId },
       update: {},
-      create: { id: userId, email: "placeholder@email.com", name: "User" },
+      create: {
+        id: userId,
+        email: `${userId}@placeholder.agentia`,
+        name: "User",
+      },
     });
 
-    // Create the Agent and save all associated files
     const agent = await prisma.agent.create({
       data: {
         name,
         userId,
         status: "STOPPED",
+        configuration: configuration ?? null,
         files: {
-          create: files.map((f: { filepath: string; content: string; language: string }) => ({
-            filepath: f.filepath,
-            content: f.content,
-            language: f.language || "plaintext",
-          })),
+          create: files.map(
+            (f: { filepath: string; content: string; language?: string }) => ({
+              filepath: f.filepath,
+              content: f.content,
+              language: f.language ?? "plaintext",
+            })
+          ),
         },
       },
+      include: { files: true },
     });
 
-    return NextResponse.json({ success: true, agentId: agent.id });
+    return NextResponse.json({ success: true, agentId: agent.id, agent });
   } catch (error) {
-    console.error("Failed to save bot:", error);
-    return NextResponse.json(
-      { error: "Internal Server Error" },
-      { status: 500 }
-    );
+    console.error("[POST /api/agents/save-bot] Error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

@@ -1,53 +1,75 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { ACTION_LOG_TYPE_MAP } from "@/lib/constant";
-import { LogType } from "@/lib/generated/prisma/enums";
 
-
-
-
-// ─── POST: Receive trade reports from the off-chain AI worker ─────────────────
-// This route is NEVER called by the frontend. It is the private channel
-// through which the background worker pushes results back to the dashboard.
+// ─── POST /api/internal/webhooks ─────────────────────────────────────────────
+// Private channel for the off-chain worker to push completed trade results.
+// Requires a shared secret in the Authorization header.
 export async function POST(req: NextRequest) {
   try {
-    // ── 1. Security Gate ──────────────────────────────────────────────────────
-    // The worker must send the shared secret in the Authorization header.
-    // Without this check, anyone could forge profitable trades on the dashboard.
-
+    // ── 1. Security gate ──────────────────────────────────────────────────────
     const authHeader = req.headers.get("authorization");
     const expectedToken = `Bearer ${process.env.INTERNAL_WEBHOOK_SECRET}`;
-    console.log("Expected:", expectedToken);
-    console.log("Received:", authHeader);
 
     if (!authHeader || authHeader !== expectedToken) {
       console.warn("[/api/internal/webhooks] Unauthorized attempt blocked.");
-      return NextResponse.json(
-        { error: "Unauthorized." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
     // ── 2. Parse & validate payload ───────────────────────────────────────────
     const body = await req.json();
-    const { agentId, action, txHash, profit, price, amount, message } = body;
+    const {
+      agentId,
+      txHash,
+      tokenIn,
+      tokenOut,
+      amountIn,
+      amountOut,
+      profitEth,
+      profitUsd,
+      executionTimeMs,
+      status, // optional: update agent status alongside the log
+    } = body;
 
-    if (!agentId || !action) {
+    if (!agentId) {
+      return NextResponse.json({ error: "agentId is required." }, { status: 400 });
+    }
+
+    // All TradeLog fields are required
+    const requiredTradeFields = [
+      "txHash", "tokenIn", "tokenOut",
+      "amountIn", "amountOut", "profitEth", "profitUsd", "executionTimeMs",
+    ] as const;
+
+    const missingFields = requiredTradeFields.filter(
+      (k) => body[k] === undefined || body[k] === null
+    );
+    if (missingFields.length > 0) {
       return NextResponse.json(
-        { error: "agentId and action are required." },
+        { error: `Missing required fields: ${missingFields.join(", ")}.` },
         { status: 400 }
       );
     }
 
-    const logType = ACTION_LOG_TYPE_MAP[action.toUpperCase()];
-    if (!logType) {
-      return NextResponse.json({ error: `Invalid action "${action}".` }, { status: 400 });
+    if (typeof executionTimeMs !== "number" || executionTimeMs < 0) {
+      return NextResponse.json(
+        { error: "executionTimeMs must be a non-negative integer." },
+        { status: 400 }
+      );
     }
 
-    // Confirm the agent exists before writing anything
+    // Validate optional status update
+    const validStatuses = ["STARTING", "RUNNING", "STOPPING", "STOPPED", "ERROR"];
+    if (status !== undefined && !validStatuses.includes(status)) {
+      return NextResponse.json(
+        { error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` },
+        { status: 400 }
+      );
+    }
+
+    // ── 3. Confirm agent exists ───────────────────────────────────────────────
     const agent = await prisma.agent.findUnique({
       where: { id: agentId },
-      select: { id: true, currentPnl: true },
+      select: { id: true },
     });
 
     if (!agent) {
@@ -57,51 +79,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── 3 & 4. Update PnL and write the trade log atomically ─────────────────
+    // ── 4. Write trade log (+ optionally update agent status) atomically ──────
     await prisma.$transaction(async (tx) => {
-      if (typeof profit === "number" && profit !== 0) {
-        await tx.agent.update({
-          where: { id: agentId },
-          data: { currentPnl: { increment: profit } },
-        });
-      }
-
-      const logMessage = message ?? buildDefaultMessage(action.toUpperCase(), txHash, profit);
-
       await tx.tradeLog.create({
         data: {
           agentId,
-          type: logType as LogType, // Passes the string directly to Prisma
-          message: logMessage,
-          txHash:  txHash  ?? null,
-          price:   typeof price  === "number" ? price  : null,
-          amount:  typeof amount === "number" ? amount : null,
+          txHash,
+          tokenIn,
+          tokenOut,
+          amountIn:       String(amountIn),
+          amountOut:      String(amountOut),
+          profitEth:      String(profitEth),
+          profitUsd:      String(profitUsd),
+          executionTimeMs: Math.round(executionTimeMs),
         },
       });
+
+      if (status) {
+        await tx.agent.update({
+          where: { id: agentId },
+          data: { status },
+        });
+      }
     });
 
-    // ── 5. Acknowledge receipt ────────────────────────────────────────────────
+    // ── 5. Acknowledge ────────────────────────────────────────────────────────
     return NextResponse.json({ success: true }, { status: 200 });
-  } catch {
-    return NextResponse.json(
-      { error: "Internal server error." },
-      { status: 500 }
-    );
-  }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function buildDefaultMessage(action: string, txHash?: string, profit?: number): string {
-  const txPart = txHash ? ` | TX: ${txHash}` : "";
-  const profitPart = typeof profit === "number" && profit !== 0 
-    ? ` | PnL Δ: ${profit >= 0 ? "+" : ""}${profit.toFixed(4)} USDC` : "";
-
-  switch (action) {
-    case "BUY": return `Execution: BUY order placed on Initia.${txPart}${profitPart}`;
-    case "SELL": return `Execution: SELL order placed on Initia.${txPart}${profitPart}`;
-    case "PROFIT_SECURED": return `Profit secured on Initia.${txPart}${profitPart}`;
-    case "ERROR": return `Worker reported an error.${txPart}`;
-    default: return `Worker update: ${action}.${txPart}${profitPart}`;
+  } catch (error: unknown) {
+    // Duplicate txHash
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "P2002"
+    ) {
+      return NextResponse.json(
+        { error: "A trade log with this txHash already exists." },
+        { status: 409 }
+      );
+    }
+    console.error("[/api/internal/webhooks] Error:", error);
+    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }
