@@ -13,8 +13,10 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState("Idle");
   const webcontainerRef = useRef<unknown>(null);
+  
+  // ✅ ADDED: Track the active running process so we can kill it
+  const activeProcessRef = useRef<any>(null);
 
-  // ADDED: Automatically trigger the EnvConfigModal when files are generated
   useEffect(() => {
     if (generatedFiles.length > 0 && phase === "idle") {
       setPhase("env-setup");
@@ -24,18 +26,22 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
   const bootAndRun = async () => {
     const term = termRef.current;
     if (!term) return;
+    
     setPhase("running");
     setStatus("Booting sandbox...");
     term.writeln("\x1b[36m[System]\x1b[0m Injecting environment and booting WebContainer...");
+    
     try {
       if (!envConfig.EVM_RPC_URL || !envConfig.CONTRACT_ADDRESS) {
         term.writeln("\x1b[31m[Error]\x1b[0m Please fill in the RPC URL and Contract Address.");
         setPhase("env-setup");
         return;
       }
+      
       const validHexKey = /^[0-9a-fA-F]{64}$/.test(envConfig.EVM_PRIVATE_KEY.replace('0x', '')) 
         ? envConfig.EVM_PRIVATE_KEY 
         : "0000000000000000000000000000000000000000000000000000000000000000";
+        
       const envContent = [
         `DRY_RUN=${envConfig.DRY_RUN}`,
         `EVM_RPC_URL=${envConfig.EVM_RPC_URL}`,
@@ -45,6 +51,7 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
         `MIN_PROFIT_USD=${envConfig.MIN_PROFIT_USD}`,
         `POLL_MS=3000`,
       ].join("\n");
+      
       const finalFiles = [
         ...generatedFiles.filter(f => f.filepath !== ".env" && f.filepath !== ".npmrc"),
         { filepath: ".env",   content: envContent },
@@ -66,80 +73,112 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
         }
       }
       
-      // ✅ Sync the ref AFTER the container has successfully booted
       webcontainerRef.current = globalWebContainerInstance;
       
       await new Promise(r => setTimeout(r, 500));
       const wc = webcontainerRef.current as any;
+      
       try {
         await wc.mount(parseFilesToTree(finalFiles));
       } catch (mountErr: any) {
-        throw new Error(`Failed to mount files. The LLM likely generated invalid paths or used native FS modules. Details: ${mountErr.message}`);
+        throw new Error(`Failed to mount files. Details: ${mountErr.message}`);
       }
+      
       setStatus("Installing packages...");
       term.writeln("\x1b[36m[System]\x1b[0m npm install --legacy-peer-deps");
+      
       const install = await wc.spawn("jsh", ["-c", "npm install --loglevel=error --legacy-peer-deps --no-fund"], {
         env: { npm_config_yes: "true" },
+        terminal: { cols: term.cols, rows: term.rows }
       });
+      
+      const installInput = install.input.getWriter();
+      const installHook = term.onData((data: string) => { installInput.write(data).catch(() => {}); });
       install.output.pipeTo(new WritableStream({ write(chunk: any) { term.write(chunk); } }));
+      
       const installCode = await install.exit;
+      installHook.dispose();
+      installInput.releaseLock();
+
       if (installCode !== 0) {
         setStatus("Install failed");
-        term.writeln("\x1b[31m[Error]\x1b[0m npm install failed (exit " + installCode + ")");
+        term.writeln("\x1b[31m[Error]\x1b[0m npm install failed");
         setPhase("env-setup");
         return;
       }
+      
       const processEnv = {
         EVM_RPC_URL:      envConfig.EVM_RPC_URL,
         EVM_PRIVATE_KEY:  validHexKey,
         CONTRACT_ADDRESS: envConfig.CONTRACT_ADDRESS || "NOT_DEPLOYED_YET",
         MAX_LOAN_USD:     envConfig.MAX_LOAN_USD,
         MIN_PROFIT_USD:   envConfig.MIN_PROFIT_USD,
-        DRY_RUN:          envConfig.DRY_RUN,
-        POLL_MS:          "3000",
         ...TOKEN_ADDRESSES,
-        RPC_URL:          envConfig.EVM_RPC_URL,
-        PRIVATE_KEY:      validHexKey,
-        SOL_CONTRACT_PATH: "contracts/FlashLoanReceiver.sol"
       };
+      
       const actualFiles = finalFiles.map(f => (f.filepath || (f as any).path || "").replace(/^[./]+/, ""));
       const foundEntry = ENTRY_POINTS.find(p => actualFiles.includes(p)) || 
                          actualFiles.find(f => f.endsWith(".ts") && !f.includes("config") && !f.includes("types") && !f.includes("shared")) || 
                          "src/agent/index.ts";
+                         
       setStatus("Bot running...");
       term.writeln(`\n\x1b[36m[System]\x1b[0m Detected entry point: \x1b[1m${foundEntry}\x1b[0m`);
+      
+      // ✅ Track the running bot process
       const run = await wc.spawn("jsh", ["-c", `npx tsx ${foundEntry}`], {
-        env: processEnv
+        env: processEnv,
+        terminal: { cols: term.cols, rows: term.rows }
       });
+      activeProcessRef.current = run;
+      
+      const runInput = run.input.getWriter();
+      const runHook = term.onData((data: string) => { runInput.write(data).catch(() => {}); });
       run.output.pipeTo(new WritableStream({ write(chunk: any) { term.write(chunk); } }));
+      
       const exitCode = await run.exit;
-      if (exitCode !== 0) {
-        term.writeln(`\n\x1b[31m[Error]\x1b[0m Bot crashed with exit code ${exitCode}`);
-        setStatus("Crashed");
+      activeProcessRef.current = null; // Clear ref on exit
+      runHook.dispose();
+      runInput.releaseLock();
+
+      // Check if it was killed manually
+      if (exitCode !== 0 && exitCode !== 130 && exitCode !== 143) {
+         term.writeln(`\n\x1b[31m[Error]\x1b[0m Bot crashed with exit code ${exitCode}`);
+         setStatus("Crashed");
       } else {
+        term.writeln(`\n\x1b[32m[System]\x1b[0m Bot execution finished.`);
         setStatus("Finished");
       }
+      setPhase("env-setup");
+
     } catch (err: unknown) {
       setStatus("Error");
       term.writeln("\x1b[31m[Error]\x1b[0m " + String(err instanceof Error ? err.message : err));
       setPhase("env-setup");
+      activeProcessRef.current = null;
     }
   };
 
-  // ✅ ADDED: Function to sync live edits to the running container
+  // ✅ ADDED: Programmatic function to force kill the process
+  const stopProcess = () => {
+    if (activeProcessRef.current) {
+      activeProcessRef.current.kill();
+      activeProcessRef.current = null;
+      setStatus("Stopped");
+      setPhase("env-setup");
+      termRef.current?.writeln(`\n\x1b[33m[System]\x1b[0m Bot forcefully stopped by user.`);
+    }
+  };
+
   const updateFileInSandbox = async (filepath: string, content: string) => {
     if (webcontainerRef.current) {
-      const wc = webcontainerRef.current as any;
       try {
-        // Strip leading slashes to prevent root file system errors
         const safePath = filepath.replace(/^[./]+/, "");
-        await wc.fs.writeFile(safePath, content);
+        await (webcontainerRef.current as any).fs.writeFile(safePath, content);
       } catch (err) {
-        console.error(`Failed to write ${filepath} to sandbox FS:`, err);
+        console.error("Failed to sync file:", err);
       }
     }
   };
 
-  // ✅ EXPORTED updateFileInSandbox
-  return { bootAndRun, phase, status, setPhase, setStatus, updateFileInSandbox };
+  return { bootAndRun, phase, status, setPhase, setStatus, updateFileInSandbox, stopProcess };
 }

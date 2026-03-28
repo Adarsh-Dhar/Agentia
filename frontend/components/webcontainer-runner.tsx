@@ -6,24 +6,18 @@ import { useTerminal } from "../hooks/use-terminal";
 import { useSandbox } from "../hooks/use-sandbox";
 import { useCodeGen } from "../hooks/use-code-gen";
 import { FileExplorer } from "./ui/FileExplorer";
-import { CodeEditor } from "./ui/code-editor"; // ✅ Correct lowercase import
+import { CodeEditor } from "./ui/code-editor";
 import { EnvConfigModal } from "./ui/EnvConfigModal";
 import { TerminalPanel } from "./ui/TerminalPanel";
-import { Zap, Play, Settings } from "lucide-react"; 
+import { Zap, Play, Settings, Square } from "lucide-react"; // ✅ Added Square icon
 
 export function WebContainerRunner() {
   const [envConfig, setEnvConfig] = useState({ ...DEFAULT_ENV_CONFIG });
-  const [fileEdits, setFileEdits] = useState<Record<string, string>>({}); // ✅ Added state for edits
+  const [fileEdits, setFileEdits] = useState<Record<string, string>>({});
   
   const { terminalRef, termRef } = useTerminal();
-  const {
-    generateFiles,
-    generatedFiles,
-    selectedFile,
-    setSelectedFile
-  } = useCodeGen(termRef);
+  const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useCodeGen(termRef);
 
-  // ✅ Merge original files with active edits
   const currentFiles = generatedFiles.map(f => ({
     ...f,
     content: fileEdits[f.filepath] !== undefined ? fileEdits[f.filepath] : f.content
@@ -34,17 +28,15 @@ export function WebContainerRunner() {
     phase,
     status,
     setPhase,
-    setStatus,
-    updateFileInSandbox // ✅ Destructured the sync function
+    updateFileInSandbox,
+    stopProcess // ✅ Destructured stopProcess
   } = useSandbox({ generatedFiles: currentFiles, envConfig, termRef });
 
   const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content;
 
-  // ✅ Handler to actually update the text when you type
   const handleEditorChange = (newContent: string) => {
     if (selectedFile) {
       setFileEdits(prev => ({ ...prev, [selectedFile]: newContent }));
-      // Live sync to WebContainer if it is already running
       if (phase === "running" && updateFileInSandbox) {
         updateFileInSandbox(selectedFile, newContent);
       }
@@ -58,9 +50,6 @@ export function WebContainerRunner() {
         <div className="flex items-center gap-2">
           <Zap size={14} className="text-cyan-400" />
           <h2 className="text-xs font-bold text-slate-300">Flash Loan Arbitrageur IDE</h2>
-          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">
-            Aave V3 · Arbitrum
-          </span>
         </div>
         
         <div className="flex items-center gap-3">
@@ -68,7 +57,15 @@ export function WebContainerRunner() {
             {status.toUpperCase()}
           </span>
           
-          {generatedFiles.length === 0 ? (
+          {/* ✅ RENDER STOP BUTTON IF RUNNING */}
+          {phase === "running" ? (
+            <button
+              onClick={stopProcess}
+              className="flex items-center gap-1.5 bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded text-xs font-bold text-white transition-all active:scale-95"
+            >
+              <Square size={10} fill="currentColor" /> Stop Bot
+            </button>
+          ) : generatedFiles.length === 0 ? (
             <button
               onClick={generateFiles}
               disabled={phase !== "idle"}
@@ -89,9 +86,7 @@ export function WebContainerRunner() {
       </div>
       
       <div className="flex flex-1 overflow-hidden">
-        {/* File Explorer */}
         <FileExplorer files={currentFiles} selectedFile={selectedFile} onSelect={setSelectedFile} />
-        {/* Editor + Config + Terminal Container */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 relative flex flex-col min-h-0">
             {phase === "env-setup" && (
@@ -102,7 +97,6 @@ export function WebContainerRunner() {
                 isDryRun={envConfig.DRY_RUN === "true"}
               />
             )}
-            {/* ✅ Passed the onChange handler to the editor component */}
             <CodeEditor content={selectedContent} onChange={handleEditorChange} />
           </div>
           <TerminalPanel terminalRef={terminalRef} onClear={() => termRef.current?.clear()} />
