@@ -6,7 +6,7 @@ import { useTerminal } from "../hooks/use-terminal";
 import { useSandbox } from "../hooks/use-sandbox";
 import { useCodeGen } from "../hooks/use-code-gen";
 import { FileExplorer } from "./ui/FileExplorer";
-import { CodeEditor } from "./ui/CodeEditor";
+import { CodeEditor } from "./ui/code-editor";
 import { EnvConfigModal } from "./ui/EnvConfigModal";
 import { TerminalPanel } from "./ui/TerminalPanel";
 // ADD Settings to your lucide-react imports
