@@ -230,10 +230,10 @@ FILE SPECIFICATIONS
 
 ━━━ FILE 1 ── config.py  (constants only, zero logic) ━━━
 WETH_ADDRESS    = "0x4200000000000000000000000000000000000006"
-USDC_ADDRESS    = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+USDC_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 ARB_BOT_ADDRESS = "{self.arb_bot_address}"
 ONE_INCH_ROUTER = "0x111111125421cA6dc452d289314280a0f8842A65"
-CHAIN_ID           = 84532        # Base Sepolia
+CHAIN_ID           = 8453        # Base Sepolia
 USDC_DECIMALS      = 6
 WETH_DECIMALS      = 18
 AAVE_FEE_BPS       = 9            # 0.09 %
@@ -371,7 +371,7 @@ HARD RULES  ──  ANY VIOLATION = BROKEN BOT
 3.  NEVER use "contractAddress" in goat_evm — ONLY "address"
 4.  NEVER hardcode base-unit amounts — derive via convert_to_base_units at startup
 5.  ALL profit arithmetic must use integers — no float, no Decimal, no round()
-6.  Webacy chain MUST be the string "base-sepolia" — never integer 84532
+6.  Webacy chain MUST be the string "base-sepolia" — never integer 8453
 7.  mcp_bridge.py MUST include the sys.path parent-dir fix shown above
 8.  main.py MUST call setup_bot_connections() FIRST before any tool call
 9.  main.py MUST call mcp.shutdown() in a finally block

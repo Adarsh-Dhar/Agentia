@@ -36,7 +36,7 @@ function buildEnvFileContent(cfg: BotEnvConfig): string {
     `WALLET_PRIVATE_KEY=${cfg.WALLET_PRIVATE_KEY}`,
     `RPC_PROVIDER_URL=${cfg.RPC_PROVIDER_URL}`,
     `WEBACY_API_KEY=${cfg.WEBACY_API_KEY}`,
-    ...(cfg.GOAT_EVM_PATH ? [`GOAT_EVM_PATH=${cfg.GOAT_EVM_PATH}`] : []),
+    `ONEINCH_API_KEY=${cfg.ONEINCH_API_KEY}`,
     `BORROW_AMOUNT_HUMAN=${cfg.BORROW_AMOUNT_HUMAN || "1"}`,
     `POLL_INTERVAL=${cfg.POLL_INTERVAL || "5"}`,
   ].join("\n");
@@ -173,11 +173,9 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
         WALLET_PRIVATE_KEY:  envConfig.WALLET_PRIVATE_KEY,
         RPC_PROVIDER_URL:    envConfig.RPC_PROVIDER_URL,
         WEBACY_API_KEY:      envConfig.WEBACY_API_KEY,
+        ONEINCH_API_KEY:     envConfig.ONEINCH_API_KEY,
         BORROW_AMOUNT_HUMAN: envConfig.BORROW_AMOUNT_HUMAN || "1",
         POLL_INTERVAL:       envConfig.POLL_INTERVAL       || "5",
-        ...(envConfig.GOAT_EVM_PATH
-          ? { GOAT_EVM_PATH: envConfig.GOAT_EVM_PATH }
-          : {}),
       };
 
       const run = await wc.spawn("jsh", ["-c", `npx -y tsx ${BOT_ENTRY_POINT}`], {

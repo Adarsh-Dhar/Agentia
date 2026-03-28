@@ -107,10 +107,10 @@ import { ethers } from "ethers";
 
 // ── Addresses (Base Sepolia, all verified) ────────────────────────────────────
 export const WETH_ADDRESS    = "0x4200000000000000000000000000000000000006";
-export const USDC_ADDRESS    = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+export const USDC_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 export const ARB_BOT_ADDRESS = "0x6b7b81e04D024259b87a6C0F5ab5Eb04d9539102";
 export const ONE_INCH_ROUTER = "0x111111125421cA6dc452d289314280a0f8842A65";
-export const CHAIN_ID        = 84532; // Base Sepolia
+export const CHAIN_ID        = 8453; // Base Sepolia
 
 // ── Fee constants — all BigInt, no floats ─────────────────────────────────────
 export const AAVE_FEE_BPS    = 9n;         // 0.09 %
@@ -195,14 +195,14 @@ export const FLASHLOAN_ABI = [
 const ONEINCH_TS = `/**
  * src/oneinch.ts
  *
- * 1inch Swap API v6.0 — Base Sepolia (chain 84532)
+ * 1inch Swap API v6.0 — Base Sepolia (chain 8453)
  * Docs: https://portal.1inch.dev/documentation/apis/swap/swagger
  *
  * All amounts are BigInt in token base units.
  * Auth: Authorization: Bearer <ONEINCH_API_KEY>
  */
 
-const API_BASE = "https://api.1inch.dev/swap/v6.0/84532";
+const API_BASE = "https://api.1inch.dev/swap/v6.0/8453";
 
 // Shared fetch wrapper with auth + error handling
 async function oneInchFetch(path: string, apiKey: string): Promise<unknown> {
