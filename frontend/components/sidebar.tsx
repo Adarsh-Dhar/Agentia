@@ -1,9 +1,15 @@
 "use client"
 
+/**
+ * frontend/components/sidebar.tsx  — updated
+ *
+ * Adds "Bot IDE" nav item pointing to /dashboard/webcontainer.
+ */
+
 import React, { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bot, BarChart3, Zap, Wallet, Menu, X, LogOut, ShieldCheck, ShieldOff } from 'lucide-react'
+import { Bot, BarChart3, Zap, Wallet, Menu, X, LogOut, ShieldCheck, ShieldOff, Terminal } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { useInterwovenKit } from '@initia/interwovenkit-react'
@@ -42,10 +48,11 @@ export function Sidebar() {
   }
 
   const navItems = [
-    { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
-    { href: '/dashboard/deploy', label: 'Deploy Agent', icon: Zap },
-    { href: '/dashboard/agents', label: 'Active Agents', icon: Bot },
-    { href: '/dashboard/bridge', label: 'Bridge/Wallet', icon: Wallet },
+    { href: '/dashboard',                 label: 'Dashboard',    icon: BarChart3 },
+    { href: '/dashboard/deploy',          label: 'Deploy Agent', icon: Zap },
+    { href: '/dashboard/agents',          label: 'Active Agents',icon: Bot },
+    { href: '/dashboard/bridge',          label: 'Bridge/Wallet',icon: Wallet },
+    { href: '/dashboard/webcontainer',    label: 'Bot IDE',      icon: Terminal },
   ]
 
   return (
@@ -98,6 +105,11 @@ export function Sidebar() {
               >
                 <Icon size={20} />
                 <span className="font-medium">{item.label}</span>
+                {item.href === '/dashboard/webcontainer' && (
+                  <span className="ml-auto text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">
+                    NEW
+                  </span>
+                )}
               </Link>
             )
           })}
