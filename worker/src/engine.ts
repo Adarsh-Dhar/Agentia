@@ -3,6 +3,7 @@ import { promisify } from "util";
 import * as fs from "fs/promises";
 import * as path from "path";
 import prisma from "./lib/prisma.js";
+import { decryptEnvConfig } from "./crypto-env.js";
 
 const execAsync = promisify(exec);
 
@@ -74,17 +75,46 @@ export async function startAgent({
   });
 
   try {
+    // ── Decrypt encryptedEnv from configuration ──────────────────────────────
+    let decryptedEnv: Record<string, string> = {};
+
+    const encryptedEnv = configuration?.encryptedEnv;
+    if (typeof encryptedEnv === "string" && encryptedEnv.trim().length > 0) {
+      try {
+        decryptedEnv = decryptEnvConfig(encryptedEnv);
+        appendLog(
+          agentId,
+          `Decrypted ${Object.keys(decryptedEnv).length} env var(s) from encryptedEnv.`,
+          "stdout"
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        appendLog(agentId, `WARNING: Failed to decrypt encryptedEnv — ${msg}`, "stderr");
+        console.error(`[engine] decrypt error for agent ${agentId}:`, err);
+        // Don't throw — let the bot start so the error surfaces in its own logs
+      }
+    } else {
+      appendLog(
+        agentId,
+        "WARNING: No encryptedEnv found in configuration — API keys will be missing.",
+        "stderr"
+      );
+    }
+
+    // Write a .env file so dotenv picks up the vars at boot
+    const envFileContent = Object.entries(decryptedEnv)
+      .map(([k, v]) => `${k}=${v}`)
+      .join("\n");
+    await fs.writeFile(path.join(workspaceDir, ".env"), envFileContent, "utf-8");
+
     appendLog(agentId, "Running npm install...", "stdout");
     await execAsync("npm install --legacy-peer-deps", { cwd: workspaceDir });
     appendLog(agentId, "npm install complete.", "stdout");
 
-    const agentConfig = configuration && typeof configuration === "object"
-      ? (configuration as Record<string, string>)
-      : {};
-
+    // Merge decrypted vars into the child process environment
     const agentEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...agentConfig,
+      ...process.env,   // inherit PATH, NODE_PATH, etc.
+      ...decryptedEnv,  // overlay decrypted API keys (takes full precedence)
     };
 
     appendLog(agentId, "Spawning tsx src/index.ts...", "stdout");
