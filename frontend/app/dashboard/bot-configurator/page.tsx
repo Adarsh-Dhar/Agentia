@@ -236,6 +236,7 @@ export default function BotConfiguratorPage() {
     generatedAgentId,
     handleSend, handleKeyDown, handleInputChange,
     isBusy,
+    submitCredentials,
   } = useBotConfigChat()
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -325,6 +326,40 @@ export default function BotConfiguratorPage() {
                   )}
                   {msg.card?.type === 'success_card' && (
                     <SuccessCard agentId={msg.card.agentId} botName={msg.card.botName} />
+                  )}
+                  {/* Credentials Form Card */}
+                  {msg.card?.type === 'credentials_form' && (
+                    <div className="mt-3 bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-3 max-w-sm">
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400 font-semibold uppercase">RPC URL</label>
+                        <input id="rpcUrl" type="text" placeholder="https://mainnet.base.org" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400 font-semibold uppercase">Wallet Private Key</label>
+                        <input id="privateKey" type="password" placeholder="0x..." className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400 font-semibold uppercase">1inch API Key</label>
+                        <input id="oneInchKey" type="password" placeholder="Enter API Key" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-slate-400 font-semibold uppercase">Webacy API Key (Optional)</label>
+                        <input id="webacyKey" type="password" placeholder="Enter API Key" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-cyan-500" />
+                      </div>
+                      <button
+                        onClick={() => {
+                          submitCredentials({
+                            rpcUrl: (document.getElementById('rpcUrl') as HTMLInputElement).value,
+                            privateKey: (document.getElementById('privateKey') as HTMLInputElement).value,
+                            oneInchApiKey: (document.getElementById('oneInchKey') as HTMLInputElement).value,
+                            webacyApiKey: (document.getElementById('webacyKey') as HTMLInputElement).value,
+                          })
+                        }}
+                        className="w-full mt-2 bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 rounded-lg transition-colors text-sm"
+                      >
+                        Save & Review
+                      </button>
+                    </div>
                   )}
 
                   <p className="text-[10px] text-slate-600 mt-1 ml-1">

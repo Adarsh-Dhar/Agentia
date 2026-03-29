@@ -54,8 +54,11 @@ export function WebContainerBotRunner() {
   // On mount, fetch code and set phase to 'idle' so user can edit .env
   useEffect(() => {
     (async () => {
-      await generateFiles();
-      setPhase("idle"); // Changed from "env-setup" to "idle"
+      const result = await generateFiles();
+      if (result?.loadedEnvConfig) {
+        setEnvConfig(result.loadedEnvConfig);
+      }
+      setPhase("idle");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

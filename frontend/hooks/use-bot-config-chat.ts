@@ -460,12 +460,13 @@ export function useBotConfigChat() {
       }
 
       case 'ask_bot_name': {
-        const name = text.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'ArbitrageBot'
-        setConfig(c => {
-          const updated = { ...c, botName: name }
-          showReview(updated)
-          return updated
-        })
+        if (text.trim().length < 2) {
+          pushA(`Please provide a name with at least 2 characters.`)
+          return
+        }
+        setConfig(prev => ({ ...prev, botName: text.trim() }))
+        setInput('')
+        await askCredentials()
         break
       }
 
@@ -574,6 +575,22 @@ export function useBotConfigChat() {
     showReview, generateBot,
   ])
 
+  // ── credentials step ──────────────────────────────────────────────────────────
+
+  const askCredentials = useCallback(async () => {
+    setStep('ask_credentials')
+    pushA(
+      `Awesome name! Before we finalize, please provide your environment credentials. These will be AES-256 encrypted before saving.`,
+      { type: 'credentials_form' }
+    )
+  }, [pushA])
+
+  const submitCredentials = useCallback(async (creds: any) => {
+    setConfig(prev => ({ ...prev, ...creds }))
+    setInput('')
+    await showReview({ ...config, ...creds })
+  }, [showReview, config])
+
   // ── input handlers ────────────────────────────────────────────────────────────
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -605,5 +622,6 @@ export function useBotConfigChat() {
     handleKeyDown,
     handleInputChange,
     isBusy: isTyping || step === 'generating',
+    submitCredentials,
   }
 }

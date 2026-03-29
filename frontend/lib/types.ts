@@ -276,6 +276,7 @@ export type BotConfigStep =
   | "ask_polling"
   | "ask_sim_mode"
   | "ask_bot_name"
+  | "ask_credentials"
   | "review"
   | "generating"
   | "done"
@@ -297,4 +298,5 @@ export type BotConfigCard =
   | { type: "number_input";    field: keyof BotConfig; label: string; placeholder: string; min: number; step: number }
   | { type: "bool_toggle";     field: keyof BotConfig; label: string }
   | { type: "review_card";     config: BotConfig }
-  | { type: "success_card";    agentId: string; botName: string };
+  | { type: "success_card";    agentId: string; botName: string }
+  | { type: "credentials_form" };
