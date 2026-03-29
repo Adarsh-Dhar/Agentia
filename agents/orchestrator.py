@@ -1,7 +1,8 @@
 """
 agents/orchestrator.py
 
-Meta-Agent builder. Uses GPT-4o via Azure AI Inference to generate a complete,
+Meta-Agent builder — all 13 MCP servers wired in.
+Uses GPT-4o via Azure AI Inference to generate a complete,
 production-ready 4-file arbitrage bot from a plain-English prompt.
 """
 
@@ -65,10 +66,20 @@ class MetaAgentBuilder:
     def __init__(self):
         self.mcp_manager = MultiMCPClient()
 
-        self.token        = os.environ.get("GITHUB_TOKEN")
-        self.alchemy_key  = os.environ.get("ALCHEMY_API_KEY")
-        self.webacy_key   = os.environ.get("WEBACY_API_KEY")
-        self.oneinch_key  = os.environ.get("1INCH_API_KEY")
+        self.token          = os.environ.get("GITHUB_TOKEN")
+        self.alchemy_key    = os.environ.get("ALCHEMY_API_KEY")
+        self.webacy_key     = os.environ.get("WEBACY_API_KEY")
+        self.oneinch_key    = os.environ.get("1INCH_API_KEY")
+        self.coingecko_demo = os.environ.get("COINGECKO_DEMO_API_KEY")
+        self.coingecko_pro  = os.environ.get("COINGECKO_PRO_API_KEY")
+        self.lunarcrush_key = os.environ.get("LUNARCRUSH_API_KEY")
+        self.twitter_key    = os.environ.get("TWITTER_API_KEY")
+        self.twitter_secret = os.environ.get("TWITTER_API_SECRET")
+        self.twitter_token  = os.environ.get("TWITTER_ACCESS_TOKEN")
+        self.twitter_tsecret= os.environ.get("TWITTER_ACCESS_TOKEN_SECRET")
+        self.infura_key     = os.environ.get("INFURA_KEY")
+        self.uniswap_path   = os.environ.get("UNISWAP_MCP_PATH")
+        self.openai_key     = os.environ.get("OPENAI_API_KEY")
 
         if not self.token:
             raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
@@ -89,9 +100,14 @@ class MetaAgentBuilder:
     # -------------------------------------------------------------------------
 
     async def setup_environment(self):
-        """Connect the orchestrator's MCP client to all DeFi servers."""
+        """Connect to all DeFi MCP servers — core + extended."""
+        print("=" * 60)
         print("Connecting to MCP Servers...")
+        print("=" * 60)
 
+        # ── CORE MCPs ────────────────────────────────────────────────────────
+
+        # 1. 1inch — EVM swap quotes + calldata
         try:
             one_inch_args = [
                 "-y", "supergateway",
@@ -106,15 +122,18 @@ class MetaAgentBuilder:
         except Exception as e:
             print(f"⚠️ 1inch: {e}")
 
+        # 2. Jupiter — Solana swap quotes (no API key needed)
         try:
             await self.mcp_manager.connect_to_server(
                 "jupiter", "npx",
-                ["-y", "supergateway", "--streamableHttp",
-                 "https://dev.jup.ag/mcp", "--outputTransport", "stdio"],
+                ["-y", "supergateway",
+                 "--streamableHttp", "https://dev.jup.ag/mcp",
+                 "--outputTransport", "stdio"],
             )
         except Exception as e:
             print(f"⚠️ Jupiter: {e}")
 
+        # 3. Webacy — Token risk scoring
         if self.webacy_key:
             try:
                 await self.mcp_manager.connect_to_server(
@@ -129,6 +148,7 @@ class MetaAgentBuilder:
         else:
             print("⚠️ WEBACY_API_KEY missing. Skipping Webacy.")
 
+        # 4. Alchemy — RPC + mempool
         if self.alchemy_key:
             try:
                 await self.mcp_manager.connect_to_server(
@@ -141,6 +161,7 @@ class MetaAgentBuilder:
         else:
             print("⚠️ ALCHEMY_API_KEY missing. Skipping Alchemy.")
 
+        # 5. GOAT EVM — Transaction signing + execution
         wallet_key = os.environ.get("WALLET_PRIVATE_KEY")
         rpc_url    = os.environ.get("RPC_PROVIDER_URL")
         goat_path  = os.environ.get("GOAT_EVM_PATH")
@@ -160,6 +181,116 @@ class MetaAgentBuilder:
                 print(f"⚠️ GOAT_EVM_PATH not found: {goat_path}")
         else:
             print("⚠️ WALLET_PRIVATE_KEY / RPC_PROVIDER_URL / GOAT_EVM_PATH missing.")
+
+        # ── EXTENDED MCPs ────────────────────────────────────────────────────
+
+        # 6. CoinGecko — Market prices, trending coins
+        if self.coingecko_demo or self.coingecko_pro:
+            try:
+                cg_env = {}
+                if self.coingecko_demo:
+                    cg_env["COINGECKO_DEMO_API_KEY"] = self.coingecko_demo
+                if self.coingecko_pro:
+                    cg_env["COINGECKO_PRO_API_KEY"]  = self.coingecko_pro
+                    cg_env["COINGECKO_ENVIRONMENT"]  = "pro"
+                await self.mcp_manager.connect_to_server(
+                    "coingecko", "npx",
+                    ["-y", "@coingecko/coingecko-mcp"],
+                    custom_env=cg_env,
+                )
+            except Exception as e:
+                print(f"⚠️ CoinGecko: {e}")
+        else:
+            print("⚠️ COINGECKO_DEMO_API_KEY missing. Skipping CoinGecko.")
+
+        # 7. LunarCrush — Social sentiment signals
+        if self.lunarcrush_key:
+            try:
+                await self.mcp_manager.connect_to_server(
+                    "lunarcrush", "npx",
+                    ["-y", "supergateway",
+                     "--streamableHttp",
+                     f"https://lunarcrush.ai/mcp?key={self.lunarcrush_key}",
+                     "--outputTransport", "stdio"],
+                )
+            except Exception as e:
+                print(f"⚠️ LunarCrush: {e}")
+        else:
+            print("⚠️ LUNARCRUSH_API_KEY missing. Skipping LunarCrush.")
+
+        # 8. Twitter — Post trade alerts, scan market sentiment
+        if all([self.twitter_key, self.twitter_secret,
+                self.twitter_token, self.twitter_tsecret]):
+            try:
+                await self.mcp_manager.connect_to_server(
+                    "twitter", "npx",
+                    ["-y", "@enescinar/twitter-mcp"],
+                    custom_env={
+                        "API_KEY":              self.twitter_key,
+                        "API_SECRET_KEY":       self.twitter_secret,
+                        "ACCESS_TOKEN":         self.twitter_token,
+                        "ACCESS_TOKEN_SECRET":  self.twitter_tsecret,
+                    },
+                )
+            except Exception as e:
+                print(f"⚠️ Twitter: {e}")
+        else:
+            print("⚠️ Twitter API keys incomplete. Skipping Twitter.")
+
+        # 9. Hyperliquid — Perp market prices, L2 order books
+        try:
+            await self.mcp_manager.connect_to_server(
+                "hyperliquid", "npx",
+                ["-y", "@mektigboy/server-hyperliquid"],
+            )
+        except Exception as e:
+            print(f"⚠️ Hyperliquid: {e}")
+
+        # 10. LiFi — Cross-chain bridge route discovery
+        try:
+            await self.mcp_manager.connect_to_server(
+                "lifi", "/Users/adarsh/go/bin/lifi-mcp",
+                [],  # read-only mode (no keystore = no live bridging)
+            )
+        except Exception as e:
+            print(f"⚠️ LiFi (is it installed? run: go install github.com/lifinance/lifi-mcp@latest): {e}")
+
+        # 11. Uniswap — Direct Uniswap V3 swaps, multi-chain
+        if self.uniswap_path and self.infura_key:
+            if os.path.exists(self.uniswap_path):
+                try:
+                    await self.mcp_manager.connect_to_server(
+                        "uniswap", "node",
+                        [self.uniswap_path],
+                        custom_env={
+                            "INFURA_KEY":         self.infura_key,
+                            "WALLET_PRIVATE_KEY": os.environ.get("WALLET_PRIVATE_KEY", ""),
+                        },
+                    )
+                except Exception as e:
+                    print(f"⚠️ Uniswap: {e}")
+            else:
+                print(f"⚠️ UNISWAP_MCP_PATH not found: {self.uniswap_path}")
+        else:
+            print("⚠️ UNISWAP_MCP_PATH or INFURA_KEY missing. Skipping Uniswap.")
+
+        # 12. Chainlink — On-chain price feeds, CCIP documentation
+        if self.openai_key:
+            try:
+                await self.mcp_manager.connect_to_server(
+                    "chainlink", "npx",
+                    ["-y", "@chainlink/mcp-server"],
+                    custom_env={"OPENAI_API_KEY": self.openai_key},
+                )
+            except Exception as e:
+                print(f"⚠️ Chainlink: {e}")
+        else:
+            print("⚠️ OPENAI_API_KEY missing. Skipping Chainlink MCP.")
+
+        # Summary
+        connected = list(self.mcp_manager.sessions.keys())
+        print(f"\n✅ Connected servers ({len(connected)}): {', '.join(connected)}")
+        print("=" * 60)
 
     # -------------------------------------------------------------------------
     # Bot Generation
@@ -184,10 +315,6 @@ class MetaAgentBuilder:
         tools_str = json.dumps(compressed_tools, separators=(',', ':'))
         abi_str   = json.dumps(FLASHLOAN_ABI, separators=(',', ':'))
 
-        # ── SYSTEM PROMPT ────────────────────────────────────────────────────
-        # JSON schema is declared FIRST so the model locks onto the format
-        # before reading any constraints. Tool signatures are one-liners to
-        # reduce token pressure. Hard rules are short and numbered.
         system_instructions = f"""You are an expert DeFi arbitrage engineer.
 Generate a COMPLETE 4-file Python project for a Base Sepolia flash-loan arbitrage bot.
 
@@ -243,7 +370,7 @@ FLASHLOAN_ABI        = {abi_str}
 ```
 
 ## FILE 2 — mcp_bridge.py (path fix + module-level singleton)
-MUST include this exact sys.path fix at the top (bot runs in a subdirectory of agents/):
+MUST include this exact sys.path fix at the top:
 ```python
 import sys, os, json
 _PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -251,130 +378,39 @@ if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 from mcp_client import MultiMCPClient
 
-mcp = MultiMCPClient()   # module-level singleton — DO NOT create inside functions
+mcp = MultiMCPClient()   # module-level singleton
 
 async def call_mcp_tool(server: str, tool: str, args: dict) -> dict:
     raw = await mcp.call_tool(server=server, tool=tool, args=args)
     return json.loads(raw)
 ```
 
-## FILE 3 — arbitrage.py (all async strategy functions, import config + mcp_bridge only)
+## FILE 3 — arbitrage.py (all async strategy functions)
 Implement ALL of these functions completely — no stubs, no pass, no TODOs:
 
 async def convert_to_base_units(token_address: str, human_amount: str) -> int
-    → goat_evm convert_to_base_units → int(response["baseUnits"])
-
 async def get_quote(token_in: str, token_out: str, amount_base: int) -> int
-    → one_inch get_quote tokenIn/tokenOut → int(response["toTokenAmount"])
-
 async def calculate_profit(borrow_usdc_base: int) -> int
-    weth  = await get_quote(USDC_ADDRESS, WETH_ADDRESS, borrow_usdc_base)
-    gross = await get_quote(WETH_ADDRESS, USDC_ADDRESS, weth)
-    fee   = (borrow_usdc_base * AAVE_FEE_BPS) // 10_000
-    return gross - borrow_usdc_base - fee - GAS_BUFFER_USDC
-
-async def verify_tokens() -> bool
-    → webacy get_token_risk for USDC and WETH, chain="base-sepolia" (STRING)
-    → True only if BOTH pass: risk=="low" OR score<20
-
+async def verify_tokens() -> bool  (webacy risk check, chain="base-sepolia" STRING)
 async def get_swap_calldata(src: str, dst: str, amount_base: int, from_addr: str) -> str
-    → one_inch get_swap_data tokenIn/tokenOut → response["tx"]["data"]
-
 async def execute_arbitrage(calldata: str, borrow_base: int) -> str
-    → goat_evm write_contract key="address" functionName="requestArbitrage"
-    → response["transactionHash"]
 
 ## FILE 4 — main.py (entry point, full implementation)
-Implement exactly this structure:
-```python
-import asyncio, logging, os
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-from mcp_bridge import mcp
-from arbitrage import (convert_to_base_units, calculate_profit,
-                       verify_tokens, get_swap_calldata, execute_arbitrage)
-from config import *
+Must call setup_connections() before any tool call.
+Must call mcp.shutdown() in a finally block.
+Must implement SIMULATION_MODE.
+Must connect all available MCP servers listed in AVAILABLE MCP TOOLS.
 
-SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() == "true"
-
-async def setup_connections():
-    # mcp.sessions is EMPTY until this function runs — call connect_to_server for each
-    oneinch_key = os.getenv("ONEINCH_API_KEY", "")
-    one_inch_args = ["-y","supergateway","--streamableHttp",
-                     "https://api.1inch.com/mcp/protocol"]
-    if oneinch_key:
-        one_inch_args += ["--header", f"Authorization: Bearer {{oneinch_key}}"]
-    one_inch_args += ["--outputTransport","stdio"]
-    await mcp.connect_to_server("one_inch","npx",one_inch_args)
-
-    webacy_key = os.getenv("WEBACY_API_KEY")
-    if not webacy_key: raise RuntimeError("WEBACY_API_KEY not set")
-    await mcp.connect_to_server("webacy","npx",
-        ["-y","supergateway","--streamableHttp","https://api.webacy.com/mcp",
-         "--header",f"x-api-key: {{webacy_key}}","--outputTransport","stdio"])
-
-    wallet = os.getenv("WALLET_PRIVATE_KEY")
-    rpc    = os.getenv("RPC_PROVIDER_URL")
-    gpath  = os.getenv("GOAT_EVM_PATH")
-    if not all([wallet, rpc, gpath]):
-        raise RuntimeError("WALLET_PRIVATE_KEY, RPC_PROVIDER_URL, GOAT_EVM_PATH required")
-    await mcp.connect_to_server("goat_evm","npx",["tsx",gpath],
-        custom_env={{"WALLET_PRIVATE_KEY":wallet,"RPC_PROVIDER_URL":rpc}})
-
-async def run_bot():
-    logger.info("SIMULATION_MODE=%s", SIMULATION_MODE)
-    await setup_connections()
-    borrow_base = await convert_to_base_units(USDC_ADDRESS, BORROW_AMOUNT_HUMAN)
-    logger.info("Borrow amount: %d base units", borrow_base)
-    try:
-        while True:
-            try:
-                profit = await calculate_profit(borrow_base)
-                if profit > 0:
-                    logger.info("Opportunity: +%d base units (+%.6f USDC)",
-                                profit, profit / 1_000_000)
-                    if not await verify_tokens():
-                        logger.warning("Risk check failed. Skipping.")
-                    elif SIMULATION_MODE:
-                        logger.info("[SIM] Would execute. Profit: +%.6f USDC",
-                                    profit / 1_000_000)
-                    else:
-                        calldata = await get_swap_calldata(
-                            USDC_ADDRESS, WETH_ADDRESS, borrow_base, ARB_BOT_ADDRESS)
-                        tx = await execute_arbitrage(calldata, borrow_base)
-                        logger.info("Executed. TX: %s", tx)
-                else:
-                    logger.info("No opportunity. Net: %d base units", profit)
-            except Exception as e:
-                logger.error(str(e), exc_info=True)
-            await asyncio.sleep(POLL_INTERVAL)
-    except KeyboardInterrupt:
-        logger.info("Stopping bot...")
-    finally:
-        await mcp.shutdown()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
-
-if __name__ == "__main__":
-    asyncio.run(run_bot())
-```
-
-## HARD RULES — any violation produces a broken bot
+## HARD RULES
 1. NEVER use tool name "swap" — only "get_quote" or "get_swap_data"
 2. NEVER use "src"/"dst" as 1inch arg keys — only "tokenIn"/"tokenOut"
 3. NEVER use "contractAddress" in goat_evm write_contract — only "address"
-4. CHAIN_ID = 84532 for Base Sepolia — NOT 8453 (that is Base mainnet)
-5. Webacy chain MUST be the string "base-sepolia" — never the integer 84532
-6. mcp_bridge.py MUST include the sys.path parent-dir fix shown in FILE 2
+4. CHAIN_ID = 84532 for Base Sepolia — NOT 8453
+5. Webacy chain MUST be the string "base-sepolia" — never integer 84532
+6. mcp_bridge.py MUST include the sys.path parent-dir fix
 7. main.py MUST call setup_connections() before any tool call
 8. main.py MUST call mcp.shutdown() in a finally block
-9. main.py MUST implement SIMULATION_MODE
-10. No placeholder comments, no stubs — every function body must be complete
+9. No placeholder comments, no stubs — every function body must be complete
 
 ## AVAILABLE MCP TOOLS (discovered at runtime)
 {tools_str}
@@ -386,7 +422,7 @@ if __name__ == "__main__":
                 UserMessage(content=prompt),
             ],
             model=self.model_name,
-            temperature=0.1,   # deterministic — minimise hallucination
+            temperature=0.1,
             max_tokens=4096,
         )
 
