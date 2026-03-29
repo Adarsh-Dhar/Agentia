@@ -80,9 +80,11 @@ export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
 
                 {/* PnL */}
                 <td className={`px-6 py-4 font-semibold ${
-                  agent.currentPnl >= 0 ? 'text-green-400' : 'text-red-400'
+                  agent.currentPnl != null && !isNaN(agent.currentPnl) && agent.currentPnl >= 0 ? 'text-green-400' : 'text-red-400'
                 }`}>
-                  {agent.currentPnl >= 0 ? '+' : ''}{agent.currentPnl.toFixed(2)} USDC
+                  {agent.currentPnl != null && !isNaN(agent.currentPnl)
+                    ? `${agent.currentPnl >= 0 ? '+' : ''}${agent.currentPnl.toFixed(2)} USDC`
+                    : '-- USDC'}
                 </td>
 
                 {/* Session expiry */}

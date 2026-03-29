@@ -1,173 +1,147 @@
-import { Agent, PriceData } from "./types.js";
-import { executeTrade } from "./blockchain.js";
-import { notifyWebhook } from "./webhook_client.js";
+import { spawn, exec, ChildProcess } from "child_process";
+import { promisify } from "util";
+import * as fs from "fs/promises";
+import * as path from "path";
+import prisma from "./lib/prisma.js";
 
-// ─── Price Feed ───────────────────────────────────────────────────────────────
+const execAsync = promisify(exec);
 
-/**
- * Fetches the current price for the agent's target pair.
- *
- * Swap this for a real DEX/oracle call in production, e.g.:
- *   GET https://api.initia.xyz/prices/{pair}
- */
-async function getPrice(pair: string): Promise<PriceData> {
-  // MVP: simulated price centred around $0.50 with ±5 % noise
-  const base = 0.5;
-  const noise = (Math.random() * 0.1 - 0.05);
-  return {
-    pair,
-    price: parseFloat((base + noise).toFixed(6)),
-    timestamp: Date.now(),
-    volume24h: Math.random() * 1_000_000,
-    priceChange24h: (Math.random() * 10 - 5),
-  };
-}
+// In-memory registry of running bot processes
+const runningAgents: Map<string, ChildProcess> = new Map();
 
-// ─── Strategies ───────────────────────────────────────────────────────────────
-
-async function runMemeSniper(agent: Agent, priceData: PriceData): Promise<void> {
-  const BUY_THRESHOLD = 0.48;
-  const TAKE_PROFIT = 0.55;
-  const STOP_LOSS = 0.44;
-
-  const { price } = priceData;
-
-  if (price < BUY_THRESHOLD) {
-    console.log(`🎯 [MEME_SNIPER] "${agent.name}": price $${price} < threshold $${BUY_THRESHOLD} — executing BUY`);
-    const result = await executeTrade(agent, "BUY", price);
-    if (result.success) {
-      await notifyWebhook({
-        agentId: agent.id,
-        action: "BUY",
-        txHash: result.txHash,
-        profit: 0,
-        price,
-        message: `AI Sniper bought ${agent.targetPair} at $${price.toFixed(4)}`,
-      });
-    }
-    return;
+export async function startAgent(agentId: string) {
+  if (runningAgents.has(agentId)) {
+    throw new Error(`Agent ${agentId} is already running`);
   }
 
-  if (price >= TAKE_PROFIT) {
-    console.log(`💰 [MEME_SNIPER] "${agent.name}": price $${price} >= take-profit $${TAKE_PROFIT} — executing SELL`);
-    const result = await executeTrade(agent, "SELL", price);
-    if (result.success) {
-      const estimatedProfit = parseFloat((price - BUY_THRESHOLD).toFixed(6));
-      await notifyWebhook({
-        agentId: agent.id,
-        action: "SELL",
-        txHash: result.txHash,
-        profit: estimatedProfit,
-        price,
-        message: `AI Sniper took profit on ${agent.targetPair} at $${price.toFixed(4)} (+$${estimatedProfit})`,
-      });
-    }
-    return;
+  // 1. Fetch the Agent and its code files from the DB
+  const agent = await prisma.agent.findUnique({
+    where: { id: agentId },
+    include: { files: true },
+  });
+
+  if (!agent) throw new Error(`Agent ${agentId} not found`);
+  if (!agent.files || agent.files.length === 0) {
+    throw new Error(`No code files found for agent ${agentId} in the database`);
   }
 
-  if (price <= STOP_LOSS) {
-    console.log(`🛑 [MEME_SNIPER] "${agent.name}": price $${price} <= stop-loss $${STOP_LOSS} — executing SELL`);
-    const result = await executeTrade(agent, "SELL", price);
-    if (result.success) {
-      const loss = parseFloat((price - BUY_THRESHOLD).toFixed(6));
-      await notifyWebhook({
-        agentId: agent.id,
-        action: "SELL",
-        txHash: result.txHash,
-        profit: loss,
-        price,
-        message: `Stop-loss triggered on ${agent.targetPair} at $${price.toFixed(4)} ($${loss})`,
-      });
-    }
-    return;
+  // 2. Create a dedicated workspace directory for this bot
+  const workspaceDir = path.join(process.cwd(), ".workspaces", agentId);
+  await fs.mkdir(workspaceDir, { recursive: true });
+
+  // 3. Write all database files to disk
+  console.log(`[Agent ${agentId}] Rebuilding workspace from ${agent.files.length} file(s)...`);
+  for (const file of agent.files) {
+    const fullPath = path.join(workspaceDir, file.filepath);
+    // Ensure nested directories (e.g. src/) exist
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    await fs.writeFile(fullPath, file.content, "utf-8");
+    console.log(`[Agent ${agentId}]   wrote: ${file.filepath}`);
   }
 
-  console.log(`⏳ [MEME_SNIPER] "${agent.name}": price $${price} — holding`);
-}
+  // 4. Mark as STARTING
+  await prisma.agent.update({
+    where: { id: agentId },
+    data: { status: "STARTING" },
+  });
 
-async function runDCABot(agent: Agent, priceData: PriceData): Promise<void> {
-  // Dollar-Cost Averaging: buy a fixed amount every cycle regardless of price
-  const { price } = priceData;
-  console.log(`📅 [DCA_BOT] "${agent.name}": DCA buy at $${price}`);
-
-  const result = await executeTrade(agent, "BUY", price);
-  if (result.success) {
-    await notifyWebhook({
-      agentId: agent.id,
-      action: "BUY",
-      txHash: result.txHash,
-      profit: 0,
-      price,
-      message: `DCA bot purchased ${agent.targetPair} at $${price.toFixed(4)}`,
-    });
-  }
-}
-
-async function runGridTrader(agent: Agent, priceData: PriceData): Promise<void> {
-  // Grid trader: alternates BUY/SELL within a price band
-  const GRID_LOW = 0.46;
-  const GRID_HIGH = 0.54;
-  const { price } = priceData;
-
-  if (price <= GRID_LOW) {
-    console.log(`📊 [GRID_TRADER] "${agent.name}": buying at grid low $${price}`);
-    const result = await executeTrade(agent, "BUY", price);
-    if (result.success) {
-      await notifyWebhook({
-        agentId: agent.id,
-        action: "BUY",
-        txHash: result.txHash,
-        profit: 0,
-        price,
-        message: `Grid bot bought ${agent.targetPair} at grid low $${price.toFixed(4)}`,
-      });
-    }
-  } else if (price >= GRID_HIGH) {
-    console.log(`📊 [GRID_TRADER] "${agent.name}": selling at grid high $${price}`);
-    const result = await executeTrade(agent, "SELL", price);
-    if (result.success) {
-      const profit = parseFloat((GRID_HIGH - GRID_LOW).toFixed(6));
-      await notifyWebhook({
-        agentId: agent.id,
-        action: "SELL",
-        txHash: result.txHash,
-        profit,
-        price,
-        message: `Grid bot sold ${agent.targetPair} at grid high $${price.toFixed(4)} (+$${profit})`,
-      });
-    }
-  } else {
-    console.log(`📊 [GRID_TRADER] "${agent.name}": price $${price} inside grid — waiting`);
-  }
-}
-
-// ─── Dispatcher ───────────────────────────────────────────────────────────────
-
-/**
- * Entry point called by the worker loop for each active agent.
- * Fetches the latest price and routes to the correct strategy handler.
- */
-export async function runTradingEngine(agent: Agent): Promise<void> {
   try {
-    const priceData = await getPrice(agent.targetPair);
+    // 5. Install dependencies
+    console.log(`[Agent ${agentId}] Running npm install...`);
+    await execAsync("npm install --legacy-peer-deps", { cwd: workspaceDir });
 
-    switch (agent.strategy) {
-      case "MEME_SNIPER":
-        await runMemeSniper(agent, priceData);
-        break;
-      case "DCA_BOT":
-        await runDCABot(agent, priceData);
-        break;
-      case "GRID_TRADER":
-        await runGridTrader(agent, priceData);
-        break;
-      default:
-        console.warn(`⚠️  Unknown strategy "${agent.strategy}" for agent "${agent.name}" — skipping`);
-    }
+    // 6. Build environment — inherit worker env + any agent-specific config
+    const agentConfig =
+      agent.configuration && typeof agent.configuration === "object"
+        ? (agent.configuration as Record<string, string>)
+        : {};
+
+    const agentEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...agentConfig,
+      // Pass the private session key if present
+      ...(agent.sessionKeyPriv ? { SESSION_KEY_PRIV: agent.sessionKeyPriv } : {}),
+    };
+
+    // 7. Spawn the bot process
+    console.log(`[Agent ${agentId}] Spawning tsx src/index.ts ...`);
+    const botProcess = spawn("npx", ["tsx", "src/index.ts"], {
+      cwd: workspaceDir,
+      env: agentEnv,
+      shell: true,
+    });
+
+    runningAgents.set(agentId, botProcess);
+
+    await prisma.agent.update({
+      where: { id: agentId },
+      data: { status: "RUNNING" },
+    });
+
+    // 8. Pipe stdout / stderr
+    botProcess.stdout?.on("data", (data: Buffer) => {
+      console.log(`[Agent ${agentId} OUT] ${data.toString().trim()}`);
+    });
+
+    botProcess.stderr?.on("data", (data: Buffer) => {
+      console.error(`[Agent ${agentId} ERR] ${data.toString().trim()}`);
+    });
+
+    // 9. Handle process exit
+    botProcess.on("close", async (code) => {
+      console.log(`[Agent ${agentId}] Process exited with code ${code}`);
+      runningAgents.delete(agentId);
+
+      await prisma.agent.update({
+        where: { id: agentId },
+        data: { status: code === 0 ? "STOPPED" : "ERROR" },
+      });
+    });
+
+    return { success: true, message: "Agent started successfully" };
   } catch (error) {
-    console.error(`❌ Engine error for agent "${agent.name}" (${agent.id}):`, error);
+    console.error(`[Agent ${agentId}] Failed to start:`, error);
+    runningAgents.delete(agentId);
+    await prisma.agent.update({
+      where: { id: agentId },
+      data: { status: "ERROR" },
+    });
+    throw error;
   }
 }
 
-const CHAIN_ID = 421614; // Arbitrum Sepolia
-const provider = new ethers.JsonRpcProvider("https://sepolia-rollup.arbitrum.io/rpc");
+export async function stopAgent(agentId: string) {
+  const botProcess = runningAgents.get(agentId);
+
+  if (!botProcess) {
+    // Not running in memory — just sync the DB
+    await prisma.agent.update({
+      where: { id: agentId },
+      data: { status: "STOPPED" },
+    });
+    return { success: true, message: "Agent was not running; marked as STOPPED." };
+  }
+
+  await prisma.agent.update({
+    where: { id: agentId },
+    data: { status: "STOPPING" },
+  });
+
+  botProcess.kill("SIGTERM");
+  runningAgents.delete(agentId);
+
+  await prisma.agent.update({
+    where: { id: agentId },
+    data: { status: "STOPPED" },
+  });
+
+  return { success: true, message: "Agent stopped successfully" };
+}
+
+export function getAgentStatus(agentId: string) {
+  return { agentId, running: runningAgents.has(agentId) };
+}
+
+export function listRunningAgents() {
+  return Array.from(runningAgents.keys());
+}

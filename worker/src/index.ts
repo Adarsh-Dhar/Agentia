@@ -1,19 +1,21 @@
 import "dotenv/config";
-import { runTradingEngine } from "./engine.js";
 import prisma from "./lib/prisma.js";
-import type { Agent } from "./types.js";
+import { startServer } from "./server.js";
+import { stopAgent, listRunningAgents } from "./engine.js";
 
+const PORT = parseInt(process.env.WORKER_PORT ?? "4001", 10);
 
-const POLLING_INTERVAL = parseInt(process.env.POLLING_INTERVAL ?? process.env.POLLING_INTERVAL_MS ?? "5000", 10);
-const MAX_CONCURRENT_AGENTS = parseInt(process.env.MAX_CONCURRENT_AGENTS ?? "10", 10);
-
-// ─── Graceful shutdown ────────────────────────────────────────────────────────
-
-let isShuttingDown = false;
-
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
 async function shutdown(signal: string) {
-  console.log(`\n🛑 Received ${signal}. Shutting down gracefully...`);
-  isShuttingDown = true;
+  console.log(`\n🛑 Received ${signal}. Shutting down...`);
+
+  // Stop all in-memory agents cleanly
+  const running = listRunningAgents();
+  if (running.length > 0) {
+    console.log(`   Stopping ${running.length} running agent(s)...`);
+    await Promise.allSettled(running.map((id) => stopAgent(id)));
+  }
+
   await prisma.$disconnect();
   console.log("👋 Worker stopped.");
   process.exit(0);
@@ -22,63 +24,29 @@ async function shutdown(signal: string) {
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-// ─── Main loop ────────────────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────────────────────
+async function main() {
+  console.log("🚀 Agentia Worker starting...");
+  console.log(`   Port      : ${PORT}`);
+  console.log(`   Env       : ${process.env.NODE_ENV ?? "development"}\n`);
 
-async function tick(): Promise<void> {
-  const dbAgents = await prisma.agent.findMany({
-    where: { status: "RUNNING" },
-    take: MAX_CONCURRENT_AGENTS, // safety cap
-    select: {
-      id: true,
-      name: true,
-      strategy: true,
-      targetPair: true,
-      sessionKeyPriv: true,
-      status: true,
-      userId: true,
-      createdAt: true,
-      updatedAt: true
-    }
-  });
-
-  if (dbAgents.length === 0) {
-    console.log("💤 No active agents — waiting...");
-    return;
-  }
-
-  console.log(`\n🔍 Running engine for ${dbAgents.length} agent(s)...`);
-
-  // Map DB agents to full Agent type
-  await Promise.allSettled(dbAgents.map((agent) => runTradingEngine(agent as Agent)));
-}
-
-async function startWorker(): Promise<void> {
-  console.log("🚀 Agentia AI Worker started");
-  console.log(`   Polling interval : ${POLLING_INTERVAL}ms`);
-  console.log(`   Max concurrent   : ${MAX_CONCURRENT_AGENTS} agents`);
-  console.log(`   Env              : ${process.env.NODE_ENV ?? "development"}\n`);
-
-  // Verify DB connection
   await prisma.$connect();
   console.log("✅ Database connected\n");
 
-  while (!isShuttingDown) {
-    const start = Date.now();
-
-    try {
-      await tick();
-    } catch (error) {
-      console.error("❌ Worker loop error:", error);
-    }
-
-    // Sleep for whatever remains of the polling interval
-    const elapsed = Date.now() - start;
-    const sleepMs = Math.max(0, POLLING_INTERVAL - elapsed);
-    await new Promise((resolve) => setTimeout(resolve, sleepMs));
+  // Reset any agents that were left in STARTING/RUNNING/STOPPING
+  // from a previous crashed worker run
+  const stale = await prisma.agent.updateMany({
+    where: { status: { in: ["STARTING", "RUNNING", "STOPPING"] } },
+    data: { status: "STOPPED" },
+  });
+  if (stale.count > 0) {
+    console.log(`⚠️  Reset ${stale.count} stale agent(s) to STOPPED`);
   }
+
+  startServer(PORT);
 }
 
-startWorker().catch((err) => {
+main().catch((err) => {
   console.error("Fatal worker error:", err);
   process.exit(1);
 });

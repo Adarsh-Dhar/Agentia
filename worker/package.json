@@ -17,7 +17,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-      "ox": "0.14.8",
     "@initia/initia.js": "^1.0.21",
     "@initia/interwovenkit-react": "^2.4.6",
     "@prisma/adapter-pg": "^7.5.0",
@@ -26,7 +25,9 @@
     "clsx": "^2.1.1",
     "config": "link:@types/prisma/config",
     "dotenv": "^17.3.1",
+    "ethers": "^6.16.0",
     "express": "4.17.1",
+    "ox": "0.14.8",
     "pg": "^8.20.0",
     "tailwind-merge": "^3.5.0",
     "wagmi": "^3.5.0"

@@ -70,6 +70,7 @@
     "embla-carousel-react": "8.6.0",
     "eslint": "^10.1.0",
     "eslint-plugin-react": "^7.37.5",
+    "ethers": "^6.16.0",
     "globals": "^17.4.0",
     "input-otp": "1.4.2",
     "lucide-react": "^0.564.0",

@@ -7,35 +7,41 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, email, name } = body;
+    const { walletAddress } = body;
 
+    // If walletAddress is provided, use public-user logic
+    if (walletAddress && typeof walletAddress === "string" && walletAddress.trim()) {
+      const user = await prisma.user.upsert({
+        where: { id: "public-user" },
+        update: { walletAddress },
+        create: {
+          id: "public-user",
+          email: "public-user@placeholder.agentia",
+          walletAddress,
+        },
+      });
+      return NextResponse.json(user, { status: 200 });
+    }
+
+    // Fallback: require id/email for Clerk-authenticated users (legacy)
+    const { id, email, name } = body;
     if (!id || typeof id !== "string" || !id.trim()) {
       return NextResponse.json(
-        { error: "id (Clerk user ID) is required." },
+        { error: "id (Clerk user ID) is required if walletAddress is not provided." },
         { status: 400 }
       );
     }
-
     if (!email || typeof email !== "string" || !email.trim()) {
       return NextResponse.json(
-        { error: "email is required." },
+        { error: "email is required if walletAddress is not provided." },
         { status: 400 }
       );
     }
-
     const user = await prisma.user.upsert({
       where: { id },
-      update: {
-        email,
-        ...(name ? { name } : {}),
-      },
-      create: {
-        id,
-        email,
-        ...(name ? { name } : {}),
-      },
+      update: { email, ...(name ? { name } : {}) },
+      create: { id, email, ...(name ? { name } : {}) },
     });
-
     return NextResponse.json(user, { status: 200 });
   } catch (error: unknown) {
     // Unique constraint on email — another account already uses it

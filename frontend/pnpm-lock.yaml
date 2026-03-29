@@ -185,6 +185,9 @@ importers:
       eslint-plugin-react:
         specifier: ^7.37.5
         version: 7.37.5(eslint@10.1.0(jiti@2.6.1))
+      ethers:
+        specifier: ^6.16.0
+        version: 6.16.0
       globals:
         specifier: ^17.4.0
         version: 17.4.0
