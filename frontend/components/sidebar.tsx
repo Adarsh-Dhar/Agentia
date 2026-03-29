@@ -1,15 +1,18 @@
 "use client"
 
 /**
- * frontend/components/sidebar.tsx  — updated
+ * frontend/components/sidebar.tsx
  *
- * Adds "Bot IDE" nav item pointing to /dashboard/webcontainer.
+ * Updated to include the Bot Configurator nav item.
  */
 
 import React, { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bot, BarChart3, Zap, Wallet, Menu, X, LogOut, ShieldCheck, ShieldOff, Terminal } from 'lucide-react'
+import {
+  Bot, BarChart3, Zap, Wallet, Menu, X, LogOut,
+  ShieldCheck, ShieldOff, Terminal, Settings2,
+} from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { useInterwovenKit } from '@initia/interwovenkit-react'
@@ -18,41 +21,42 @@ import { TESTNET } from '@initia/interwovenkit-react'
 
 export function Sidebar() {
   const pathname = usePathname()
-  const router = useRouter()
+  const router   = useRouter()
   const [isOpen, setIsOpen] = useState(false)
 
   const { address, initiaAddress, disconnect, autoSign } = useInterwovenKit()
 
-  const connected = !!(address || initiaAddress)
+  const connected  = !!(address || initiaAddress)
   const displayAddr = initiaAddress ?? address
-  const shortAddr = displayAddr
+  const shortAddr  = displayAddr
     ? `${displayAddr.slice(0, 8)}...${displayAddr.slice(-4)}`
     : null
 
   const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
-  const autosignExpiry = autoSign?.expiredAtByChain?.[TESTNET.defaultChainId]
+  const autosignExpiry  = autoSign?.expiredAtByChain?.[TESTNET.defaultChainId]
 
-  const enableAutosign = useMutation({
-    mutationFn: () => autoSign.enable(TESTNET.defaultChainId),
-    onError: (e) => console.error('Enable autosign failed', e),
-  })
+  const enableAutosign  = useMutation({ mutationFn: () => autoSign.enable(TESTNET.defaultChainId) })
+  const disableAutosign = useMutation({ mutationFn: () => autoSign.disable(TESTNET.defaultChainId) })
 
-  const disableAutosign = useMutation({
-    mutationFn: () => autoSign.disable(TESTNET.defaultChainId),
-    onError: (e) => console.error('Disable autosign failed', e),
-  })
-
-  const handleDisconnect = () => {
-    disconnect()
-    router.push('/')
-  }
+  const handleDisconnect = () => { disconnect(); router.push('/') }
 
   const navItems = [
-    { href: '/dashboard',                 label: 'Dashboard',    icon: BarChart3 },
-    { href: '/dashboard/deploy',          label: 'Deploy Agent', icon: Zap },
-    { href: '/dashboard/agents',          label: 'Active Agents',icon: Bot },
-    { href: '/dashboard/bridge',          label: 'Bridge/Wallet',icon: Wallet },
-    { href: '/dashboard/webcontainer',    label: 'Bot IDE',      icon: Terminal },
+    { href: '/dashboard',                      label: 'Dashboard',        icon: BarChart3 },
+    { href: '/dashboard/deploy',               label: 'Deploy Agent',     icon: Zap },
+    { href: '/dashboard/agents',               label: 'Active Agents',    icon: Bot },
+    { href: '/dashboard/bridge',               label: 'Bridge/Wallet',    icon: Wallet },
+    {
+      href:   '/dashboard/bot-configurator',
+      label:  'Bot Configurator',
+      icon:   Settings2,
+      badge:  'NEW',
+      badgeColor: 'bg-cyan-500/20 text-cyan-400',
+    },
+    {
+      href:   '/dashboard/webcontainer',
+      label:  'Bot IDE',
+      icon:   Terminal,
+    },
   ]
 
   return (
@@ -87,9 +91,9 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-2">
+        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-1">
           {navItems.map((item) => {
-            const Icon = item.icon
+            const Icon     = item.icon
             const isActive = pathname === item.href
             return (
               <Link
@@ -103,11 +107,14 @@ export function Sidebar() {
                     : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                 )}
               >
-                <Icon size={20} />
-                <span className="font-medium">{item.label}</span>
-                {item.href === '/dashboard/webcontainer' && (
-                  <span className="ml-auto text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">
-                    NEW
+                <Icon size={18} />
+                <span className="font-medium text-sm">{item.label}</span>
+                {'badge' in item && item.badge && (
+                  <span className={cn(
+                    'ml-auto text-[10px] px-1.5 py-0.5 rounded font-semibold',
+                    (item as { badgeColor?: string }).badgeColor ?? 'bg-primary/20 text-primary'
+                  )}>
+                    {item.badge}
                   </span>
                 )}
               </Link>
@@ -117,7 +124,6 @@ export function Sidebar() {
 
         {/* Footer */}
         <div className="p-4 border-t border-sidebar-border space-y-3">
-          {/* Wallet info */}
           {connected && shortAddr && (
             <div className="px-3 py-2.5 rounded-lg bg-muted/20 border border-border/50">
               <p className="text-xs text-muted-foreground mb-0.5">Connected Wallet</p>
@@ -125,19 +131,10 @@ export function Sidebar() {
             </div>
           )}
 
-          {/* Autosign toggle */}
           {connected && autoSign && (
             <button
-              onClick={() =>
-                autosignEnabled
-                  ? disableAutosign.mutate()
-                  : enableAutosign.mutate()
-              }
-              disabled={
-                autoSign.isLoading ||
-                enableAutosign.isPending ||
-                disableAutosign.isPending
-              }
+              onClick={() => autosignEnabled ? disableAutosign.mutate() : enableAutosign.mutate()}
+              disabled={autoSign.isLoading || enableAutosign.isPending || disableAutosign.isPending}
               className={cn(
                 'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors border',
                 autosignEnabled
@@ -145,11 +142,7 @@ export function Sidebar() {
                   : 'bg-muted/20 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/40'
               )}
             >
-              {autosignEnabled ? (
-                <ShieldCheck size={16} className="flex-shrink-0" />
-              ) : (
-                <ShieldOff size={16} className="flex-shrink-0" />
-              )}
+              {autosignEnabled ? <ShieldCheck size={16} className="flex-shrink-0" /> : <ShieldOff size={16} className="flex-shrink-0" />}
               <div className="text-left min-w-0">
                 <div className="font-medium leading-none mb-0.5">
                   {autosignEnabled ? 'Autosign Active' : 'Enable Autosign'}
@@ -166,7 +159,6 @@ export function Sidebar() {
             </button>
           )}
 
-          {/* Disconnect */}
           <button
             onClick={handleDisconnect}
             className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors text-sm"

@@ -137,7 +137,7 @@ export function WebContainerBotRunner() {
             </button>
           ) : generatedFiles.length === 0 ? (
             <button
-              onClick={generateFiles}
+              // onClick={generateFiles}
               disabled={phase !== "idle"}
               style={{ display: "flex", alignItems: "center", gap: 5, background: phase !== "idle" ? "#1e293b" : "#0c4a6e", border: `1px solid ${phase !== "idle" ? "#334155" : "#0369a1"}`, borderRadius: 6, padding: "5px 12px", color: phase !== "idle" ? "#475569" : "#38bdf8", fontSize: 11, fontWeight: 700, cursor: phase !== "idle" ? "not-allowed" : "pointer", fontFamily: "inherit" }}
             >
