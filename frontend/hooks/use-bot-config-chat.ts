@@ -4,9 +4,6 @@
  * frontend/hooks/use-bot-config-chat.ts
  *
  * Drives the step-by-step bot configuration chat.
- * Each step asks one question, collects the answer, updates BotConfig,
- * and advances to the next step.  At the end it calls /api/generate-bot
- * with the fully-structured config.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react'
@@ -24,8 +21,6 @@ import {
   SUPPORTED_SECURITY,
 } from '@/lib/types'
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
 let _msgId = 0
 const uid = () => String(++_msgId)
 
@@ -42,8 +37,6 @@ function userMsg(content: string): BotConfigChatMessage {
 
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-// ─── hook ─────────────────────────────────────────────────────────────────────
-
 export function useBotConfigChat() {
   const [messages,   setMessages]   = useState<BotConfigChatMessage[]>([])
   const [step,       setStep]       = useState<BotConfigStep>('greeting')
@@ -55,15 +48,19 @@ export function useBotConfigChat() {
   const [generatedFiles,   setGeneratedFiles]   = useState<unknown[]>([])
   const [error,      setError]      = useState<string | null>(null)
 
+  // Use a ref to always have the latest config — avoids stale closure bugs
+  const configRef = useRef<BotConfig>(config)
+  useEffect(() => {
+    configRef.current = config
+  }, [config])
+
   const bottomRef   = useRef<HTMLDivElement>(null)
   const initialized = useRef(false)
 
-  // auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isTyping, chips])
 
-  // ── push helpers ────────────────────────────────────────────────────────────
   const pushA = useCallback((content: string, card?: BotConfigChatMessage['card']) => {
     setMessages(prev => [...prev, assistantMsg(content, card)])
   }, [])
@@ -93,8 +90,6 @@ export function useBotConfigChat() {
     })()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── step functions ──────────────────────────────────────────────────────────
-
   const askChain = useCallback(async () => {
     await think(400)
     pushA(
@@ -110,7 +105,7 @@ export function useBotConfigChat() {
   const askBaseToken = useCallback(async () => {
     await think(400)
     pushA(
-      `**Step 2 of 9 — Flash Loan Asset**\n\nWhich token should Aave lend to your bot? This is what gets borrowed and repaid (+ 0.09% fee) in one block.`,
+      `**Step 2 of 9 — Flash Loan Asset**\n\nWhich token should Aave lend to your bot?`,
       {
         type:    'token_picker',
         options: Object.keys(SUPPORTED_BASE_TOKENS),
@@ -126,7 +121,7 @@ export function useBotConfigChat() {
       .filter(([, v]) => v.address[chain as keyof typeof v.address])
       .map(([k]) => k)
     pushA(
-      `**Step 3 of 9 — Arbitrage Target**\n\nWhich token do you want to trade against? Your bot will try the round-trip: BaseToken → TargetToken → BaseToken.`,
+      `**Step 3 of 9 — Arbitrage Target**\n\nWhich token do you want to trade against?`,
       { type: 'token_picker', options: available, label: 'target' }
     )
     setChips(available)
@@ -135,7 +130,7 @@ export function useBotConfigChat() {
   const askDex = useCallback(async () => {
     await think(400)
     pushA(
-      `**Step 4 of 9 — DEX / Aggregator**\n\nWhich DEX or aggregator should your bot use for price quotes and swap calldata?`,
+      `**Step 4 of 9 — DEX / Aggregator**\n\nWhich DEX or aggregator should your bot use?`,
       {
         type:    'dex_picker',
         options: Object.entries(SUPPORTED_DEXES).map(
@@ -149,7 +144,7 @@ export function useBotConfigChat() {
   const askSecurity = useCallback(async () => {
     await think(400)
     pushA(
-      `**Step 5 of 9 — Security Provider**\n\nDo you want to run a token risk check before every trade? This adds ~200ms latency but prevents trading honeypot or blacklisted tokens.`,
+      `**Step 5 of 9 — Security Provider**\n\nDo you want to run a token risk check before every trade?`,
       {
         type:    'security_picker',
         options: Object.entries(SUPPORTED_SECURITY).map(
@@ -163,7 +158,7 @@ export function useBotConfigChat() {
   const askBorrowAmount = useCallback(async () => {
     await think(400)
     pushA(
-      `**Step 6 of 9 — Flash Loan Size**\n\nHow much should the bot borrow per cycle? (in human-readable units, e.g. \`1\` = 1 USDC)\n\nSmaller amounts = lower profit but lower risk. Larger = higher profit potential but more gas impact.`,
+      `**Step 6 of 9 — Flash Loan Size**\n\nHow much should the bot borrow per cycle?`,
       {
         type:        'number_input',
         field:       'borrowAmountHuman',
@@ -179,7 +174,7 @@ export function useBotConfigChat() {
   const askMinProfit = useCallback(async () => {
     await think(400)
     pushA(
-      `**Step 7 of 9 — Minimum Profit Threshold**\n\nWhat's the minimum net profit (in USD) required before executing a trade? This filters out unprofitable cycles after fees + gas.`,
+      `**Step 7 of 9 — Minimum Profit Threshold**\n\nWhat's the minimum net profit (in USD) required before executing a trade?`,
       {
         type:        'number_input',
         field:       'minProfitUsd',
@@ -195,7 +190,7 @@ export function useBotConfigChat() {
   const askPolling = useCallback(async () => {
     await think(400)
     pushA(
-      `**Step 8 of 9 — Polling Interval**\n\nHow often should the bot check for opportunities? (in seconds)\n\nFaster = more chances caught, but more API calls. Recommended: 3–10s.`,
+      `**Step 8 of 9 — Polling Interval**\n\nHow often should the bot check for opportunities? (seconds)`,
       {
         type:        'number_input',
         field:       'pollingIntervalSec',
@@ -211,24 +206,58 @@ export function useBotConfigChat() {
   const askSimMode = useCallback(async () => {
     await think(400)
     pushA(
-      `**Step 9 of 9 — Execution Mode**\n\nShould the bot run in **Simulation** mode (logs opportunities, no real transactions) or **Live** mode (actually executes trades on-chain)?`,
+      `**Step 9 of 9 — Execution Mode**\n\nShould the bot run in **Simulation** mode or **Live** mode?`,
       { type: 'bool_toggle', field: 'simulationMode', label: 'Simulation mode' }
     )
     setChips(['Simulation (Safe)', 'Live (Real trades)'])
   }, [pushA, think])
 
+  // ── credentials step ──────────────────────────────────────────────────────────
+  const askCredentials = useCallback(async () => {
+    setStep('ask_credentials')
+    await think(400)
+    pushA(
+      `Almost there! Please provide your API credentials. These will be **AES-256 encrypted** before saving to the database — never stored in plaintext.`,
+      { type: 'credentials_form' }
+    )
+  }, [pushA, think])
+
+  // submitCredentials receives creds, merges into config, then shows review
+  // We pass the merged config directly to showReview to avoid stale closure
+  const submitCredentials = useCallback(async (creds: {
+    rpcUrl: string
+    privateKey: string
+    oneInchApiKey: string
+    webacyApiKey: string
+  }) => {
+    // Build the merged config synchronously before any state updates
+    const mergedConfig: BotConfig = {
+      ...configRef.current,
+      rpcUrl:        creds.rpcUrl,
+      privateKey:    creds.privateKey,
+      oneInchApiKey: creds.oneInchApiKey,
+      webacyApiKey:  creds.webacyApiKey,
+    }
+
+    // Update state (for UI) AND the ref (for generateBot closure)
+    setConfig(mergedConfig)
+    configRef.current = mergedConfig
+
+    await showReview(mergedConfig)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const showReview = useCallback(async (finalConfig: BotConfig) => {
     await think(500)
     pushA(
-      `Almost there! Here's a summary of your bot. Review everything and hit **Generate Bot** when you're happy — or tell me what to change.`,
+      `Here's a summary of your bot. Review everything and hit **Generate Bot** when you're happy.`,
       { type: 'review_card', config: finalConfig }
     )
-    setChips(['Looks good, generate it!', 'Change the chain', 'Change the tokens', 'Change the DEX'])
+    setChips(['Looks good, generate it!', 'Change the chain', 'Change the tokens'])
     setStep('review')
   }, [pushA, think])
 
   // ── generate ─────────────────────────────────────────────────────────────────
-
+  // Accept config explicitly to avoid stale closure
   const generateBot = useCallback(async (finalConfig: BotConfig) => {
     setStep('generating')
     setChips([])
@@ -254,7 +283,7 @@ export function useBotConfigChat() {
 
       await think(300)
       pushA(
-        `✅ **${finalConfig.botName}** is ready!\n\nYour ${finalConfig.baseToken}→${finalConfig.targetToken} arbitrage bot has been generated with all your custom settings and saved to the Bot IDE. Head there to review the code, add your credentials, and launch it.`,
+        `✅ **${finalConfig.botName}** is ready!\n\nYour bot has been generated and saved to the Bot IDE.`,
         { type: 'success_card', agentId: data.agentId, botName: finalConfig.botName }
       )
       setChips(['Open Bot IDE', 'Create another bot'])
@@ -264,15 +293,12 @@ export function useBotConfigChat() {
       setError(msg)
       setStep('error')
       await think(300)
-      pushA(
-        `❌ Something went wrong generating your bot:\n\n_${msg}_\n\nWant to try again?`,
-      )
+      pushA(`❌ Something went wrong:\n\n_${msg}_\n\nWant to try again?`)
       setChips(['Try again', 'Start over'])
     }
   }, [pushA, think])
 
   // ── main send handler ─────────────────────────────────────────────────────────
-
   const handleSend = useCallback(async (rawInput?: string) => {
     const text = (rawInput ?? input).trim()
     if (!text) return
@@ -282,17 +308,15 @@ export function useBotConfigChat() {
 
     const lower = text.toLowerCase()
 
-    // ── Route by current step ──
     switch (step) {
 
       case 'ask_chain': {
-        // Match against chain labels or keys
         const match = Object.entries(SUPPORTED_CHAINS).find(([k, v]) =>
           lower.includes(k) ||
           lower.includes(v.label.toLowerCase()) ||
-          lower.includes('sepolia') && k === 'base-sepolia' ||
-          lower.includes('mainnet') && k === 'base-mainnet' ||
-          lower.includes('arbitrum') && k === 'arbitrum'
+          (lower.includes('sepolia') && k === 'base-sepolia') ||
+          (lower.includes('mainnet') && k === 'base-mainnet') ||
+          (lower.includes('arbitrum') && k === 'arbitrum')
         )
         if (!match) {
           await think(400)
@@ -325,7 +349,7 @@ export function useBotConfigChat() {
         await think(300)
         pushA(`**${match}** as the flash loan asset. ✓`)
         setStep('ask_target_token')
-        await askTargetToken(config.chain)
+        await askTargetToken(configRef.current.chain)
         break
       }
 
@@ -371,9 +395,9 @@ export function useBotConfigChat() {
         const match = Object.entries(SUPPORTED_SECURITY).find(([k, v]) =>
           lower.includes(k) ||
           lower.includes(v.label.toLowerCase().split(' ')[0]) ||
-          lower.includes('none') && k === 'none' ||
-          lower.includes('no') && k === 'none' ||
-          lower.includes('skip') && k === 'none'
+          (lower.includes('none') && k === 'none') ||
+          (lower.includes('no') && k === 'none') ||
+          (lower.includes('skip') && k === 'none')
         )
         if (!match) {
           await think(400)
@@ -399,7 +423,7 @@ export function useBotConfigChat() {
         }
         setConfig(c => ({ ...c, borrowAmountHuman: num }))
         await think(300)
-        pushA(`Flash loan size: **${num} ${config.baseToken}**. ✓`)
+        pushA(`Flash loan size: **${num} ${configRef.current.baseToken}**. ✓`)
         setStep('ask_min_profit')
         await askMinProfit()
         break
@@ -448,13 +472,12 @@ export function useBotConfigChat() {
         setConfig(c => ({ ...c, simulationMode: isSim }))
         await think(300)
         pushA(isSim
-          ? `**Simulation mode** — no real transactions. You can switch to live later. ✓`
-          : `**Live mode** — real on-chain transactions. Make sure you've tested thoroughly! ✓`
+          ? `**Simulation mode** — no real transactions. ✓`
+          : `**Live mode** — real on-chain transactions. ✓`
         )
-        // Ask for a bot name before review
         setStep('ask_bot_name')
         await think(400)
-        pushA(`Last thing — what do you want to name your bot? (e.g. \`MyArber\`, \`FlashHunter\`)`)
+        pushA(`Last thing — what do you want to name your bot?`)
         setChips(['ArbitrageBot', 'FlashHunter', 'ProfitSeeker'])
         break
       }
@@ -465,6 +488,7 @@ export function useBotConfigChat() {
           return
         }
         setConfig(prev => ({ ...prev, botName: text.trim() }))
+        configRef.current = { ...configRef.current, botName: text.trim() }
         setInput('')
         await askCredentials()
         break
@@ -479,45 +503,17 @@ export function useBotConfigChat() {
           lower.includes('go') ||
           lower.includes('build')
         ) {
-          await generateBot(config)
+          // Use configRef.current to get the latest config including credentials
+          await generateBot(configRef.current)
           return
         }
-        if (lower.includes('chain')) {
-          setStep('ask_chain')
-          await askChain()
-          return
-        }
-        if (lower.includes('token')) {
-          setStep('ask_base_token')
-          await askBaseToken()
-          return
-        }
-        if (lower.includes('dex')) {
-          setStep('ask_dex')
-          await askDex()
-          return
-        }
-        if (lower.includes('borrow') || lower.includes('amount')) {
-          setStep('ask_borrow_amount')
-          await askBorrowAmount()
-          return
-        }
-        if (lower.includes('profit')) {
-          setStep('ask_min_profit')
-          await askMinProfit()
-          return
-        }
-        if (lower.includes('poll') || lower.includes('interval')) {
-          setStep('ask_polling')
-          await askPolling()
-          return
-        }
-        if (lower.includes('security') || lower.includes('risk')) {
-          setStep('ask_security')
-          await askSecurity()
-          return
-        }
-        // Try to parse as generate intent
+        if (lower.includes('chain')) { setStep('ask_chain'); await askChain(); return }
+        if (lower.includes('token')) { setStep('ask_base_token'); await askBaseToken(); return }
+        if (lower.includes('dex'))   { setStep('ask_dex'); await askDex(); return }
+        if (lower.includes('borrow') || lower.includes('amount')) { setStep('ask_borrow_amount'); await askBorrowAmount(); return }
+        if (lower.includes('profit')) { setStep('ask_min_profit'); await askMinProfit(); return }
+        if (lower.includes('poll') || lower.includes('interval')) { setStep('ask_polling'); await askPolling(); return }
+        if (lower.includes('security') || lower.includes('risk')) { setStep('ask_security'); await askSecurity(); return }
         await think(300)
         pushA(`Ready to generate? Just say **"generate it"** or tell me which setting to change.`)
         setChips(['Generate it!', 'Change tokens', 'Change chain'])
@@ -525,13 +521,9 @@ export function useBotConfigChat() {
       }
 
       case 'done': {
-        if (lower.includes('ide') || lower.includes('open') || lower.includes('view')) {
-          // The UI will handle navigation
-          return
-        }
         if (lower.includes('another') || lower.includes('new') || lower.includes('start over')) {
-          // Reset
           setConfig({ ...DEFAULT_BOT_CONFIG })
+          configRef.current = { ...DEFAULT_BOT_CONFIG }
           setStep('ask_chain')
           setMessages([])
           initialized.current = false
@@ -541,22 +533,23 @@ export function useBotConfigChat() {
           return
         }
         await think(300)
-        pushA(`Your bot is ready in the Bot IDE. You can open it from the button above or navigate to Bot IDE in the sidebar.`)
+        pushA(`Your bot is ready in the Bot IDE.`)
         break
       }
 
       case 'error': {
         if (lower.includes('try again') || lower.includes('retry')) {
-          await generateBot(config)
+          await generateBot(configRef.current)
           return
         }
         if (lower.includes('start over') || lower.includes('restart')) {
           setConfig({ ...DEFAULT_BOT_CONFIG })
+          configRef.current = { ...DEFAULT_BOT_CONFIG }
           setStep('ask_chain')
           setMessages([])
           initialized.current = false
           await think(300)
-          pushA(`Starting fresh. Let's build your bot!`)
+          pushA(`Starting fresh.`)
           await askChain()
           return
         }
@@ -565,33 +558,15 @@ export function useBotConfigChat() {
 
       default:
         await think(300)
-        pushA(`Hmm, I'm not sure how to handle that right now. Try picking one of the options.`)
+        pushA(`Try picking one of the options.`)
     }
   }, [
-    input, step, config,
+    input, step,
     pushU, pushA, think,
     askChain, askBaseToken, askTargetToken, askDex,
     askSecurity, askBorrowAmount, askMinProfit, askPolling, askSimMode,
-    showReview, generateBot,
+    askCredentials, showReview, generateBot,
   ])
-
-  // ── credentials step ──────────────────────────────────────────────────────────
-
-  const askCredentials = useCallback(async () => {
-    setStep('ask_credentials')
-    pushA(
-      `Awesome name! Before we finalize, please provide your environment credentials. These will be AES-256 encrypted before saving.`,
-      { type: 'credentials_form' }
-    )
-  }, [pushA])
-
-  const submitCredentials = useCallback(async (creds: any) => {
-    setConfig(prev => ({ ...prev, ...creds }))
-    setInput('')
-    await showReview({ ...config, ...creds })
-  }, [showReview, config])
-
-  // ── input handlers ────────────────────────────────────────────────────────────
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

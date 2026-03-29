@@ -4,9 +4,6 @@
  * Receives a structured BotConfig from the configurator chat,
  * calls the Python Meta-Agent server to scaffold the bot code,
  * then saves it as an Agent + files in the database.
- *
- * POST /api/generate-bot
- * Body: { config: BotConfig }
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,6 +12,20 @@ import { encryptEnvConfig } from "@/lib/crypto-env";
 import type { BotConfig } from "@/lib/types";
 
 const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
+
+// ─── Build the env plaintext string from BotConfig ────────────────────────────
+// This is the single source of truth — used by BOTH the main path and fallback.
+function buildEnvPlaintext(config: BotConfig): string {
+  return [
+    `SIMULATION_MODE=${config.simulationMode}`,
+    `ONEINCH_API_KEY=${config.oneInchApiKey ?? ""}`,
+    `WEBACY_API_KEY=${config.webacyApiKey ?? ""}`,
+    `RPC_PROVIDER_URL=${config.rpcUrl ?? ""}`,
+    `WALLET_PRIVATE_KEY=${config.privateKey ?? ""}`,
+    `BORROW_AMOUNT_HUMAN=${config.borrowAmountHuman}`,
+    `POLL_INTERVAL=${config.pollingIntervalSec}`,
+  ].join("\n") + "\n";
+}
 
 // ─── Build the prompt from BotConfig ─────────────────────────────────────────
 
@@ -72,9 +83,9 @@ CONFIGURATION:
 - Target Token (arbitrage target): ${cfg.targetToken} (${targetAddr})
 - DEX / Aggregator: ${cfg.dex}
 - Flash Loan Provider: Aave V3
-- Borrow Amount: ${cfg.borrowAmountHuman} ${cfg.baseToken} (convert to base units at startup)
-- Minimum Net Profit to Execute: ${cfg.minProfitUsd} ${cfg.baseToken} (in human units; convert appropriately)
-- Gas Buffer: ${cfg.gasBufferUsdc} ${cfg.baseToken} (in human units; convert appropriately)
+- Borrow Amount: ${cfg.borrowAmountHuman} ${cfg.baseToken}
+- Minimum Net Profit to Execute: ${cfg.minProfitUsd} ${cfg.baseToken}
+- Gas Buffer: ${cfg.gasBufferUsdc} ${cfg.baseToken}
 - Loop Interval: Every ${cfg.pollingIntervalSec} seconds
 - Simulation Mode default: ${cfg.simulationMode ? "true (no real transactions)" : "false (live execution)"}
 
@@ -82,7 +93,7 @@ STRATEGY:
 Run a continuous async loop every ${cfg.pollingIntervalSec} seconds.
 Use ${cfg.dex} get_quote to check the ${cfg.baseToken}->${cfg.targetToken}->${cfg.baseToken} round-trip price.
 Calculate net profit after the 0.09% Aave flash loan fee and the gas buffer.
-All math must use integers (base units) only — no floats, no Decimal, no round().
+All math must use integers (base units) only.
 ${securityInstructions}
 Get swap calldata from ${cfg.dex} get_swap_data using tokenIn/tokenOut keys.
 Execute via goat_evm write_contract using the "address" key (not contractAddress).
@@ -102,44 +113,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid bot configuration." }, { status: 400 });
     }
 
-    // Build the natural-language prompt from the structured config
+    // Build and encrypt the .env content using REAL credentials from config
+    const envPlaintext = buildEnvPlaintext(config);
+    const encryptedEnv = encryptEnvConfig(envPlaintext);
+
     const prompt = buildPrompt(config);
 
-    // Call the Python Meta-Agent
-
+    // Try the Python Meta-Agent
     let metaResponse: Response | null = null;
     try {
       metaResponse = await fetch(`${META_AGENT_URL}/create-bot`, {
         method:  "POST",
         headers: { "Content-Type": "application/json", accept: "application/json" },
         body:    JSON.stringify({ prompt }),
-        signal:  AbortSignal.timeout(180_000), // 3 min
+        signal:  AbortSignal.timeout(180_000),
       });
     } catch {
-      // Network error or server unreachable
-      return generateWebContainerFallback(config);
+      return generateWebContainerFallback(config, envPlaintext, encryptedEnv);
     }
 
     if (!metaResponse || !metaResponse.ok) {
-      // Any non-OK response (404, 500, etc) triggers fallback
-      return generateWebContainerFallback(config);
+      return generateWebContainerFallback(config, envPlaintext, encryptedEnv);
     }
-
 
     const metaData = await metaResponse.json();
     const output   = metaData.output ?? {};
     let files: { filepath: string; content: string; language?: string }[] = output.files ?? [];
 
-    // Remove any .env or .env.example from files array (should not store secrets in files)
+    // Never store .env or .env.example in the files array
     files = files.filter(f => ![".env", ".env.example"].includes(f.filepath));
 
-    // Format the credentials into a standard .env string
-    const envPlaintext = `SIMULATION_MODE=${config.simulationMode}\nONEINCH_API_KEY=${config.oneInchApiKey || ''}\nWEBACY_API_KEY=${config.webacyApiKey || ''}\nRPC_PROVIDER_URL=${config.rpcUrl || ''}\nWALLET_PRIVATE_KEY=${config.privateKey || ''}\n`;
-
-    // Encrypt the string using AES-256-GCM
-    const encryptedEnv = encryptEnvConfig(envPlaintext);
-
-    // Persist to database
     const userId = "public-user";
     await prisma.user.upsert({
       where:  { id: userId },
@@ -168,7 +171,7 @@ export async function POST(req: NextRequest) {
         userId,
         status:        "STOPPED",
         configuration: configRecord,
-        envConfig:     encryptedEnv, // Save encrypted .env here
+        envConfig:     encryptedEnv,
         files: {
           create: files.map(f => ({
             filepath: f.filepath,
@@ -198,10 +201,14 @@ export async function POST(req: NextRequest) {
 }
 
 // ─── Fallback: WebContainer TypeScript Bot ────────────────────────────────────
-// Used when the Python Meta-Agent isn't running (e.g. local dev without the agent server).
-// Generates a fully functional TS bot that mirrors the Python architecture.
+// Now receives the already-built envPlaintext and encryptedEnv so credentials
+// from the config are ALWAYS saved — whether Meta-Agent runs or not.
 
-async function generateWebContainerFallback(config: BotConfig): Promise<NextResponse> {
+async function generateWebContainerFallback(
+  config: BotConfig,
+  envPlaintext: string,
+  encryptedEnv: string,
+): Promise<NextResponse> {
   const chainIds: Record<string, number> = {
     "base-sepolia": 84532,
     "base-mainnet": 8453,
@@ -243,14 +250,8 @@ async function generateWebContainerFallback(config: BotConfig): Promise<NextResp
                  : config.targetToken === "CBBTC" ? 8
                  : 6;
 
-  // ─── src/config.ts ──────────────────────────────────────────────────────────
   const configTs = `import "dotenv/config";
 import { ethers } from "ethers";
-
-// ── ${config.botName} — Generated Configuration ─────────────────────────────
-// Chain: ${config.chain} (${chainId})
-// Pair: ${config.baseToken} ↔ ${config.targetToken}
-// DEX: ${config.dex} | Security: ${config.securityProvider}
 
 export const BASE_TOKEN_ADDRESS   = "${baseAddr}";
 export const TARGET_TOKEN_ADDRESS = "${tgtAddr}";
@@ -260,14 +261,12 @@ export const CHAIN_ID             = ${chainId};
 export const BASE_DECIMALS        = ${baseDec};
 export const TARGET_DECIMALS      = ${tgtDec};
 
-// ── Financial constants (all BigInt) ─────────────────────────────────────────
 export const AAVE_FEE_BPS         = 9n;
 export const BORROW_AMOUNT_HUMAN  = process.env.BORROW_AMOUNT_HUMAN ?? "${config.borrowAmountHuman}";
 export const MIN_PROFIT_HUMAN     = ${config.minProfitUsd};
 export const GAS_BUFFER_BASE      = ${config.gasBufferUsdc}_000_000n;
 export const POLL_INTERVAL_MS     = ${config.pollingIntervalSec * 1000};
 
-// ── Runtime ──────────────────────────────────────────────────────────────────
 export const SIMULATION_MODE      = (process.env.SIMULATION_MODE ?? "${config.simulationMode}") !== "false";
 export const WEBACY_API_KEY       = process.env.WEBACY_API_KEY ?? "";
 export const ONEINCH_API_KEY      = process.env.ONEINCH_API_KEY ?? "";
@@ -295,76 +294,9 @@ export const FLASHLOAN_ABI = [
 ] as const;
 `;
 
-  // ─── src/index.ts ────────────────────────────────────────────────────────────
   const securityNote = config.securityProvider === "none"
-    ? `// Security checks disabled by user configuration`
-    : `// ${config.securityProvider === "webacy" ? "Webacy" : "GoPlus"} token risk check`;
-
-  const indexTs = `/**
- * src/index.ts — ${config.botName}
- * Chain: ${config.chain} (chainId read from config) | Pair: ${config.baseToken}→${config.targetToken}→${config.baseToken}
- * DEX: ${config.dex} | Security: ${config.securityProvider}
- * Generated by Agentia Bot Configurator
- */
-import "dotenv/config";
-import {
-  SIMULATION_MODE, BORROW_AMOUNT_HUMAN, POLL_INTERVAL_MS,
-  WALLET_PRIVATE_KEY, RPC_PROVIDER_URL, WEBACY_API_KEY, ONEINCH_API_KEY,
-  BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, ARB_BOT_ADDRESS, ONE_INCH_ROUTER,
-  AAVE_FEE_BPS, GAS_BUFFER_BASE, MIN_PROFIT_HUMAN, BASE_DECIMALS, CHAIN_ID,
-  FLASHLOAN_ABI, parseBaseUnits, createProvider, createSigner,
-} from "./config.js";
-
-// ── 1inch API — chain ID comes from config constant, never hardcoded ───────────
-const API_BASE = \`https://api.1inch.dev/swap/v6.0/\${CHAIN_ID}\`;
-
-const C = {
-  reset: "\\x1b[0m", cyan: "\\x1b[36m", green: "\\x1b[32m",
-  red: "\\x1b[31m", yellow: "\\x1b[33m", dim: "\\x1b[2m", bold: "\\x1b[1m",
-};
-
-function log(level: "INFO" | "WARN" | "ERROR" | "EXEC", msg: string) {
-  const ts  = new Date().toISOString().replace("T", " ").slice(0, 19);
-  const col = level === "INFO" ? C.cyan : level === "EXEC" ? C.green : level === "WARN" ? C.yellow : C.red;
-  console.log(\`\${C.dim}\${ts}\${C.reset} [\${col}\${level}\${C.reset}] \${msg}\`);
-}
-
-async function oneInchFetch(path: string): Promise<unknown> {
-  const res = await fetch(\`\${API_BASE}\${path}\`, {
-    headers: { Authorization: \`Bearer \${ONEINCH_API_KEY}\`, Accept: "application/json" },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    let msg = body.slice(0, 200);
-    try {
-      const parsed = JSON.parse(body) as { description?: string; error?: string };
-      msg = parsed.description ?? parsed.error ?? msg;
-    } catch {}
-    throw new Error(\`1inch \${res.status}: \${msg}\`);
-  }
-  return res.json();
-}
-
-async function getQuote(src: string, dst: string, amount: bigint): Promise<bigint> {
-  const qs   = new URLSearchParams({ src, dst, amount: amount.toString() });
-  const data = await oneInchFetch(\`/quote?\${qs}\`) as { dstAmount: string };
-  if (!data.dstAmount) throw new Error("1inch quote: missing dstAmount in response");
-  return BigInt(data.dstAmount);
-}
-
-async function getSwapData(src: string, dst: string, amount: bigint, from: string): Promise<string> {
-  const qs = new URLSearchParams({
-    src, dst, amount: amount.toString(), from,
-    slippage: "1", disableEstimate: "true", allowPartialFill: "false",
-  });
-  const d = await oneInchFetch(\`/swap?\${qs}\`) as { tx: { data: string } };
-  if (!d?.tx?.data) throw new Error("1inch swap: missing tx.data in response");
-  return d.tx.data;
-}
-
-${config.securityProvider !== "none" ? `
-${securityNote}
-async function isTokenSafe(addr: string): Promise<boolean> {
+    ? `async function verifyTokens(): Promise<boolean> { return true; }`
+    : `async function isTokenSafe(addr: string): Promise<boolean> {
   try {
     const res = await fetch(
       \`https://api.webacy.com/addresses/\${addr}?chain=${config.chain}\`,
@@ -375,34 +307,73 @@ async function isTokenSafe(addr: string): Promise<boolean> {
     return (d.risk ?? "unknown").toLowerCase() === "low" || (d.score ?? 100) < ${config.maxRiskScore ?? 20};
   } catch { return false; }
 }
-
 async function verifyTokens(): Promise<boolean> {
-  const [b, t] = await Promise.all([
-    isTokenSafe(BASE_TOKEN_ADDRESS),
-    isTokenSafe(TARGET_TOKEN_ADDRESS),
-  ]);
+  const [b, t] = await Promise.all([isTokenSafe(BASE_TOKEN_ADDRESS), isTokenSafe(TARGET_TOKEN_ADDRESS)]);
   return b && t;
-}` : `
-${securityNote}
-async function verifyTokens(): Promise<boolean> { return true; }`}
+}`;
 
-function validate(): void {
-  const errs: string[] = [];
-  if (!ONEINCH_API_KEY) errs.push("ONEINCH_API_KEY not set  →  https://portal.1inch.dev");
-  ${config.securityProvider === "webacy" ? `if (!WEBACY_API_KEY)    errs.push("WEBACY_API_KEY not set   →  https://webacy.com");` : ""}
-  if (!SIMULATION_MODE) {
-    if (!RPC_PROVIDER_URL)   errs.push("RPC_PROVIDER_URL required for live mode");
-    if (!WALLET_PRIVATE_KEY) errs.push("WALLET_PRIVATE_KEY required for live mode");
-  }
-  if (errs.length) { errs.forEach(e => log("ERROR", e)); process.exit(1); }
+  const indexTs = `import "dotenv/config";
+import {
+  SIMULATION_MODE, BORROW_AMOUNT_HUMAN, POLL_INTERVAL_MS,
+  WALLET_PRIVATE_KEY, RPC_PROVIDER_URL, WEBACY_API_KEY, ONEINCH_API_KEY,
+  BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, ARB_BOT_ADDRESS, ONE_INCH_ROUTER,
+  AAVE_FEE_BPS, GAS_BUFFER_BASE, MIN_PROFIT_HUMAN, BASE_DECIMALS, CHAIN_ID,
+  FLASHLOAN_ABI, parseBaseUnits, createProvider, createSigner,
+} from "./config.js";
+
+const API_BASE = \`https://api.1inch.dev/swap/v6.0/\${CHAIN_ID}\`;
+const C = { reset:"\\x1b[0m",cyan:"\\x1b[36m",green:"\\x1b[32m",red:"\\x1b[31m",yellow:"\\x1b[33m",dim:"\\x1b[2m",bold:"\\x1b[1m" };
+
+function log(level: "INFO"|"WARN"|"ERROR"|"EXEC", msg: string) {
+  const ts  = new Date().toISOString().replace("T"," ").slice(0,19);
+  const col = level==="INFO"?C.cyan:level==="EXEC"?C.green:level==="WARN"?C.yellow:C.red;
+  console.log(\`\${C.dim}\${ts}\${C.reset} [\${col}\${level}\${C.reset}] \${msg}\`);
 }
 
-console.log(\`
-\${C.bold}\${C.cyan}╔══════════════════════════════════════════════════════╗
-║  ${config.botName.substring(0, 50).padEnd(50)}  ║
-║  Chain: ${config.chain.padEnd(14)} | Pair: ${config.baseToken}→${config.targetToken}${" ".repeat(Math.max(0, 22 - config.baseToken.length - config.targetToken.length))}  ║
-╚══════════════════════════════════════════════════════╝\${C.reset}
-\`);
+async function oneInchFetch(path: string): Promise<unknown> {
+  const res = await fetch(\`\${API_BASE}\${path}\`, {
+    headers: { Authorization: \`Bearer \${ONEINCH_API_KEY}\`, Accept: "application/json" },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(()=>"");
+    let msg = body.slice(0,200);
+    try { const p = JSON.parse(body) as {description?:string;error?:string}; msg=p.description??p.error??msg; } catch {}
+    throw new Error(\`1inch \${res.status}: \${msg}\`);
+  }
+  return res.json();
+}
+
+async function getQuote(src:string,dst:string,amount:bigint):Promise<bigint>{
+  const qs=new URLSearchParams({src,dst,amount:amount.toString()});
+  const data=await oneInchFetch(\`/quote?\${qs}\`) as {dstAmount:string};
+  if(!data.dstAmount) throw new Error("1inch quote: missing dstAmount");
+  return BigInt(data.dstAmount);
+}
+
+async function getSwapData(src:string,dst:string,amount:bigint,from:string):Promise<string>{
+  const qs=new URLSearchParams({src,dst,amount:amount.toString(),from,slippage:"1",disableEstimate:"true",allowPartialFill:"false"});
+  const d=await oneInchFetch(\`/swap?\${qs}\`) as {tx:{data:string}};
+  if(!d?.tx?.data) throw new Error("1inch swap: missing tx.data");
+  return d.tx.data;
+}
+
+${securityNote}
+
+function validate():void{
+  const errs:string[]=[];
+  if(!ONEINCH_API_KEY) errs.push("ONEINCH_API_KEY not set  →  https://portal.1inch.dev");
+  ${config.securityProvider==="webacy" ? 'if(!WEBACY_API_KEY) errs.push("WEBACY_API_KEY not set   →  https://webacy.com");' : ""}
+  if(!SIMULATION_MODE){
+    if(!RPC_PROVIDER_URL)   errs.push("RPC_PROVIDER_URL required for live mode");
+    if(!WALLET_PRIVATE_KEY) errs.push("WALLET_PRIVATE_KEY required for live mode");
+  }
+  if(errs.length){ errs.forEach(e=>log("ERROR",e)); process.exit(1); }
+}
+
+console.log(\`\\n\${C.bold}\${C.cyan}╔══════════════════════════════════════════════════════╗
+║  ${config.botName.substring(0,50).padEnd(50)}  ║
+║  Chain: ${config.chain.padEnd(14)} | Pair: ${config.baseToken}→${config.targetToken}${" ".repeat(Math.max(0,22-config.baseToken.length-config.targetToken.length))}  ║
+╚══════════════════════════════════════════════════════╝\${C.reset}\\n\`);
 
 validate();
 
@@ -411,91 +382,52 @@ const MIN_PROFIT  = parseBaseUnits(String(MIN_PROFIT_HUMAN), BASE_DECIMALS);
 const provider    = !SIMULATION_MODE ? createProvider() : null;
 const signer      = !SIMULATION_MODE && provider ? createSigner(provider) : null;
 
-if (SIMULATION_MODE) log("WARN", "SIMULATION MODE — no real transactions will broadcast");
-else                 log("WARN", \`LIVE MODE — real transactions on ${config.chain} (chainId \${CHAIN_ID})\`);
+if(SIMULATION_MODE) log("WARN","SIMULATION MODE — no real transactions will broadcast");
+else                log("WARN",\`LIVE MODE on ${config.chain} (chainId \${CHAIN_ID})\`);
+log("INFO",\`Borrow: \${BORROW_BASE.toLocaleString()} base units (\${BORROW_AMOUNT_HUMAN} ${config.baseToken})\`);
+log("INFO",\`Min profit: \${MIN_PROFIT.toLocaleString()} base units\`);
+log("INFO",\`Polling every \${POLL_INTERVAL_MS/1000}s\`);
 
-log("INFO", \`Borrow:     \${BORROW_BASE.toLocaleString()} base units (\${BORROW_AMOUNT_HUMAN} ${config.baseToken})\`);
-log("INFO", \`Min profit: \${MIN_PROFIT.toLocaleString()} base units ($${config.minProfitUsd})\`);
-log("INFO", \`Polling every \${POLL_INTERVAL_MS / 1000}s | 1inch chain ID: \${CHAIN_ID}\`);
-
-let cycle = 0;
-
-async function runCycle(): Promise<void> {
+let cycle=0;
+async function runCycle():Promise<void>{
   cycle++;
-  try {
-    const targetAmt   = await getQuote(BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, BORROW_BASE);
-    const grossReturn = await getQuote(TARGET_TOKEN_ADDRESS, BASE_TOKEN_ADDRESS, targetAmt);
-    const fee         = (BORROW_BASE * AAVE_FEE_BPS) / 10_000n;
-    const netProfit   = grossReturn - BORROW_BASE - fee - GAS_BUFFER_BASE;
-
-    const netH   = (Number(netProfit)   / 10 ** BASE_DECIMALS).toFixed(6);
-    const grossH = (Number(grossReturn) / 10 ** BASE_DECIMALS).toFixed(6);
-
-    if (netProfit > MIN_PROFIT) {
-      log("INFO", \`Cycle #\${cycle} ✓ Opportunity: gross \${grossH} ${config.baseToken}, net +\${netH} ${config.baseToken}\`);
-
-      const tokensOk = await verifyTokens();
-      if (!tokensOk) {
-        log("WARN", \`Cycle #\${cycle} Token risk check failed, skipping\`);
-        return;
-      }
-      log("INFO", \`Cycle #\${cycle} Token risk check passed\`);
-
-      if (SIMULATION_MODE) {
-        log("EXEC", \`[SIM] Cycle #\${cycle} Would flash loan. Net: +\${netH} ${config.baseToken}\`);
+  try{
+    const targetAmt   = await getQuote(BASE_TOKEN_ADDRESS,TARGET_TOKEN_ADDRESS,BORROW_BASE);
+    const grossReturn = await getQuote(TARGET_TOKEN_ADDRESS,BASE_TOKEN_ADDRESS,targetAmt);
+    const fee         = (BORROW_BASE*AAVE_FEE_BPS)/10_000n;
+    const netProfit   = grossReturn-BORROW_BASE-fee-GAS_BUFFER_BASE;
+    const netH        = (Number(netProfit)/10**BASE_DECIMALS).toFixed(6);
+    const grossH      = (Number(grossReturn)/10**BASE_DECIMALS).toFixed(6);
+    if(netProfit>MIN_PROFIT){
+      log("INFO",\`Cycle #\${cycle} ✓ gross \${grossH} ${config.baseToken}, net +\${netH} ${config.baseToken}\`);
+      const tokensOk=await verifyTokens();
+      if(!tokensOk){ log("WARN",\`Cycle #\${cycle} Token risk check failed\`); return; }
+      if(SIMULATION_MODE){
+        log("EXEC",\`[SIM] Cycle #\${cycle} Would flash loan. Net: +\${netH} ${config.baseToken}\`);
       } else {
-        if (!signer) { log("ERROR", "No signer — cannot execute"); return; }
-        log("EXEC", \`Cycle #\${cycle} Fetching swap calldata from 1inch...\`);
-        const calldata = await getSwapData(
-          BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, BORROW_BASE, ARB_BOT_ADDRESS
-        );
-        const { ethers } = await import("ethers");
-        const contract = new ethers.Contract(ARB_BOT_ADDRESS, FLASHLOAN_ABI, signer);
-        const tx = await contract.requestArbitrage(
-          BASE_TOKEN_ADDRESS, BORROW_BASE, ONE_INCH_ROUTER, calldata
-        );
-        const rc = await tx.wait(1);
-        if (!rc || rc.status !== 1) throw new Error(\`TX reverted: \${tx.hash}\`);
-        log("EXEC", \`Cycle #\${cycle} ✓ TX confirmed: \${tx.hash}\`);
+        if(!signer){ log("ERROR","No signer"); return; }
+        const {ethers}=await import("ethers");
+        const calldata=await getSwapData(BASE_TOKEN_ADDRESS,TARGET_TOKEN_ADDRESS,BORROW_BASE,ARB_BOT_ADDRESS);
+        const contract=new ethers.Contract(ARB_BOT_ADDRESS,FLASHLOAN_ABI,signer);
+        const tx=await contract.requestArbitrage(BASE_TOKEN_ADDRESS,BORROW_BASE,ONE_INCH_ROUTER,calldata);
+        const rc=await tx.wait(1);
+        if(!rc||rc.status!==1) throw new Error(\`TX reverted: \${tx.hash}\`);
+        log("EXEC",\`Cycle #\${cycle} ✓ TX: \${tx.hash}\`);
       }
     } else {
-      log("INFO", \`Cycle #\${cycle} No opportunity. Net: \${netH} ${config.baseToken} (after fees+buffer)\`);
+      log("INFO",\`Cycle #\${cycle} No opportunity. Net: \${netH} ${config.baseToken}\`);
     }
-  } catch (err: unknown) {
-    log("ERROR", \`Cycle #\${cycle}: \${(err as Error).message}\`);
+  } catch(err:unknown){
+    log("ERROR",\`Cycle #\${cycle}: \${(err as Error).message}\`);
   }
 }
 
 runCycle();
-const timer = setInterval(runCycle, POLL_INTERVAL_MS);
-process.on("SIGINT",  () => { clearInterval(timer); process.exit(0); });
-process.on("SIGTERM", () => { clearInterval(timer); process.exit(0); });
+const timer=setInterval(runCycle,POLL_INTERVAL_MS);
+process.on("SIGINT",()=>{ clearInterval(timer); process.exit(0); });
+process.on("SIGTERM",()=>{ clearInterval(timer); process.exit(0); });
 `;
 
-  // ─── .env.example ────────────────────────────────────────────────────────────
-  const envExample = `# ${config.botName} — Environment Variables
-# Generated by Agentia Bot Configurator
-
-# Required
-ONEINCH_API_KEY=your_1inch_key_here         # https://portal.1inch.dev
-${config.securityProvider === "webacy" ? "WEBACY_API_KEY=your_webacy_key_here         # https://webacy.com\n" : ""}
-# Required for LIVE mode (not needed when SIMULATION_MODE=true)
-RPC_PROVIDER_URL=${
-  config.chain === "base-sepolia" ? "https://base-sepolia.g.alchemy.com/v2/YOUR_KEY"
-  : config.chain === "base-mainnet" ? "https://base.g.alchemy.com/v2/YOUR_KEY"
-  : "https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY"
-}
-WALLET_PRIVATE_KEY=0000000000000000000000000000000000000000000000000000000000000001
-
-# Safety
-SIMULATION_MODE=${config.simulationMode}    # Set to false for live trading
-
-# Tuning
-BORROW_AMOUNT_HUMAN=${config.borrowAmountHuman}
-POLL_INTERVAL=${config.pollingIntervalSec}
-`;
-
-  // ─── package.json ─────────────────────────────────────────────────────────────
   const packageJson = JSON.stringify({
     name:        config.botName.toLowerCase().replace(/\s+/g, "-"),
     version:     "1.0.0",
@@ -506,14 +438,13 @@ POLL_INTERVAL=${config.pollingIntervalSec}
     devDependencies: { typescript: "^5.4.0", "@types/node": "^20.0.0", tsx: "^4.7.0" },
   }, null, 2);
 
+  // Files stored in DB — .env is NOT here, it's stored encrypted in envConfig column
   const files = [
-    { filepath: "package.json",    content: packageJson },
-    { filepath: "src/config.ts",   content: configTs    },
-    { filepath: "src/index.ts",    content: indexTs     },
-    // .env.example is not stored in DB files for security
+    { filepath: "package.json",  content: packageJson,  language: "json"       },
+    { filepath: "src/config.ts", content: configTs,     language: "typescript" },
+    { filepath: "src/index.ts",  content: indexTs,      language: "typescript" },
   ];
 
-  // Save to DB
   try {
     const userId = "public-user";
     await prisma.user.upsert({
@@ -521,11 +452,6 @@ POLL_INTERVAL=${config.pollingIntervalSec}
       update: {},
       create: { id: userId, email: `${userId}@placeholder.agentia`, walletAddress: "" },
     });
-
-    // Dummy env for fallback (no secrets)
-    const envPlaintext = `SIMULATION_MODE=${config.simulationMode}\nONEINCH_API_KEY=\nWEBACY_API_KEY=\nRPC_PROVIDER_URL=\nWALLET_PRIVATE_KEY=\n`;
-    const { encryptEnvConfig } = await import("@/lib/crypto-env");
-    const encryptedEnv = encryptEnvConfig(envPlaintext);
 
     const agent = await prisma.agent.create({
       data: {
@@ -544,14 +470,13 @@ POLL_INTERVAL=${config.pollingIntervalSec}
           generatedAt:       new Date().toISOString(),
           source:            "bot-configurator-fallback",
         },
+        // Use the real encrypted env — credentials are preserved
         envConfig: encryptedEnv,
         files: {
           create: files.map(f => ({
             filepath: f.filepath,
             content:  f.content,
-            language: f.filepath.endsWith(".ts") ? "typescript"
-                    : f.filepath.endsWith(".json") ? "json"
-                    : "plaintext",
+            language: f.language,
           })),
         },
       },
@@ -562,7 +487,7 @@ POLL_INTERVAL=${config.pollingIntervalSec}
       agentId:  agent.id,
       botName:  config.botName,
       files,
-      thoughts: `${config.botName}: ${config.baseToken}→${config.targetToken} arbitrage on ${config.chain} via ${config.dex}. Flash loan from Aave V3. ${config.simulationMode ? "Simulation mode." : "Live mode."}`,
+      thoughts: `${config.botName}: ${config.baseToken}→${config.targetToken} arbitrage on ${config.chain} via ${config.dex}. ${config.simulationMode ? "Simulation mode." : "Live mode."}`,
       config,
       source:   "fallback",
     });

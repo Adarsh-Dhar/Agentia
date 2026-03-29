@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { Zap, Play, Settings, Square, Save, CheckCircle2, AlertCircle, Loader2, Database } from "lucide-react";
+import { Zap, Play, Square } from "lucide-react";
 
 import { useTerminal }       from "@/hooks/use-terminal";
 import { useBotCodeGen }     from "@/hooks/use-bot-code-gen";
@@ -9,66 +9,83 @@ import { useBotSandbox }     from "@/hooks/use-bot-sandbox";
 import { FileExplorer }      from "@/components/ui/FileExplorer";
 import { CodeEditor }        from "@/components/ui/code-editor";
 import { TerminalPanel }     from "@/components/ui/TerminalPanel";
-import { BotEnvConfigModal } from "@/components/ui/Botenvconfigmodal";
 import type { BotEnvConfig } from "@/lib/bot-constant";
 import { DEFAULT_BOT_ENV_CONFIG } from "@/lib/bot-constant";
-
-// Note: Ensure SaveButton is imported here if it isn't globally available.
-// import { SaveButton } from "@/components/ui/SaveButton"; 
-
-type SaveStatus = "idle" | "saving" | "saved" | "error";
-
-function inferLanguage(filepath: string): string {
-  if (filepath.endsWith(".ts") || filepath.endsWith(".tsx")) return "typescript";
-  if (filepath.endsWith(".js") || filepath.endsWith(".jsx")) return "javascript";
-  if (filepath.endsWith(".json")) return "json";
-  if (filepath.endsWith(".md"))   return "markdown";
-  return "plaintext";
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
 
 export function WebContainerBotRunner() {
   const [envConfig, setEnvConfig] = useState<BotEnvConfig>({ ...DEFAULT_BOT_ENV_CONFIG });
   const [fileEdits, setFileEdits] = useState<Record<string, string>>({});
+  // Track whether env has been loaded from DB — prevents overwriting with defaults on re-render
+  const [envLoaded, setEnvLoaded] = useState(false);
 
   const { terminalRef, termRef } = useTerminal();
 
   const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
-  // Compute isDryRun locally from envConfig
+
   const isDryRun = envConfig.SIMULATION_MODE === "true";
 
-  // Derived state for the editor & save button
+  // Merge file edits on top of generated files
   const currentFiles = generatedFiles.map((f) => ({
     ...f,
     content: fileEdits[f.filepath] !== undefined ? fileEdits[f.filepath] : f.content,
   }));
 
   const sandbox = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
-
   const { phase, setPhase, status, stopProcess, bootAndRun } = sandbox;
 
-  const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content || "";
-  const saveDisabled = phase === "running" || generatedFiles.length === 0;
-
-  // On mount, fetch code and set phase to 'idle' so user can edit .env
+  // On mount: load files and inject env config from DB
   useEffect(() => {
     (async () => {
       const result = await generateFiles();
       if (result?.loadedEnvConfig) {
-        setEnvConfig(result.loadedEnvConfig as any);
+        setEnvConfig(result.loadedEnvConfig);
+        setEnvLoaded(true);
       }
       setPhase("idle");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle manual code edits
-  const handleEditorChange = useCallback((value: string) => {
-    if (selectedFile) {
-      setFileEdits((prev) => ({ ...prev, [selectedFile]: value }));
+  // If the user edits the .env file directly in the code editor, sync it to envConfig
+  useEffect(() => {
+    const envFileEdit = fileEdits[".env"];
+    if (!envFileEdit) return;
+
+    // Parse the edited .env and update envConfig
+    const parsed: Record<string, string> = {};
+    for (const rawLine of envFileEdit.split("\n")) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eqIdx = line.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key   = line.slice(0, eqIdx).trim();
+      const value = line.slice(eqIdx + 1).trim();
+      if (key) parsed[key] = value;
     }
-  }, [selectedFile]);
+
+    setEnvConfig((prev) => ({
+      ...prev,
+      SIMULATION_MODE:     parsed.SIMULATION_MODE     ?? prev.SIMULATION_MODE,
+      RPC_PROVIDER_URL:    parsed.RPC_PROVIDER_URL    ?? prev.RPC_PROVIDER_URL,
+      WALLET_PRIVATE_KEY:  parsed.WALLET_PRIVATE_KEY  ?? prev.WALLET_PRIVATE_KEY,
+      ONEINCH_API_KEY:     parsed.ONEINCH_API_KEY     ?? prev.ONEINCH_API_KEY,
+      WEBACY_API_KEY:      parsed.WEBACY_API_KEY      ?? prev.WEBACY_API_KEY,
+      BORROW_AMOUNT_HUMAN: parsed.BORROW_AMOUNT_HUMAN ?? prev.BORROW_AMOUNT_HUMAN,
+      POLL_INTERVAL:       parsed.POLL_INTERVAL       ?? prev.POLL_INTERVAL,
+    }));
+  }, [fileEdits]);
+
+  const handleEditorChange = useCallback(
+    (value: string) => {
+      if (selectedFile) {
+        setFileEdits((prev) => ({ ...prev, [selectedFile]: value }));
+      }
+    },
+    [selectedFile]
+  );
+
+  const selectedContent =
+    currentFiles.find((f) => f.filepath === selectedFile)?.content ?? "";
 
   return (
     <div
@@ -100,36 +117,79 @@ export function WebContainerBotRunner() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Zap size={14} color="#22d3ee" />
           <span style={{ fontSize: 12, fontWeight: 700, color: "#cbd5e1" }}>
-            Base Sepolia MCP Arbitrage Bot IDE
+            Arbitrage Bot IDE
           </span>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 10, background: "#0f172a", padding: "2px 8px", borderRadius: 4, border: "1px solid #1e293b", color: "#64748b" }}>
-            {status?.toUpperCase() || "IDLE"}
+          {/* Env status indicator */}
+          <span
+            style={{
+              fontSize:   10,
+              background: envLoaded ? "rgba(34,197,94,0.1)" : "rgba(251,191,36,0.1)",
+              padding:    "2px 8px",
+              borderRadius: 4,
+              border:     `1px solid ${envLoaded ? "rgba(34,197,94,0.3)" : "rgba(251,191,36,0.3)"}`,
+              color:      envLoaded ? "#4ade80" : "#fbbf24",
+            }}
+          >
+            {envLoaded ? "ENV ✓" : "NO ENV"}
+          </span>
+
+          <span
+            style={{
+              fontSize: 10,
+              background: "#0f172a",
+              padding: "2px 8px",
+              borderRadius: 4,
+              border: "1px solid #1e293b",
+              color: "#64748b",
+            }}
+          >
+            {status?.toUpperCase() ?? "IDLE"}
           </span>
 
           {isDryRun && (
-            <span style={{ fontSize: 10, background: "rgba(250,204,21,0.1)", padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(250,204,21,0.3)", color: "#fbbf24" }}>
+            <span
+              style={{
+                fontSize: 10,
+                background: "rgba(250,204,21,0.1)",
+                padding: "2px 8px",
+                borderRadius: 4,
+                border: "1px solid rgba(250,204,21,0.3)",
+                color: "#fbbf24",
+              }}
+            >
               SIM
             </span>
           )}
 
-          {/* Repaired Control Buttons */}
+          {/* Control buttons */}
           {phase === "running" ? (
             <button
               onClick={stopProcess}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "#7f1d1d", border: "1px solid #991b1b", borderRadius: 6, padding: "5px 12px", color: "#fca5a5", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                background: "#7f1d1d", border: "1px solid #991b1b",
+                borderRadius: 6, padding: "5px 12px",
+                color: "#fca5a5", fontSize: 11, fontWeight: 700,
+                cursor: "pointer", fontFamily: "inherit",
+              }}
             >
               <Square size={10} fill="currentColor" /> Stop Bot
             </button>
           ) : generatedFiles.length === 0 ? (
             <button
-              // onClick={generateFiles}
-              disabled={phase !== "idle"}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: phase !== "idle" ? "#1e293b" : "#0c4a6e", border: `1px solid ${phase !== "idle" ? "#334155" : "#0369a1"}`, borderRadius: 6, padding: "5px 12px", color: phase !== "idle" ? "#475569" : "#38bdf8", fontSize: 11, fontWeight: 700, cursor: phase !== "idle" ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+              disabled
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                background: "#1e293b", border: "1px solid #334155",
+                borderRadius: 6, padding: "5px 12px",
+                color: "#475569", fontSize: 11, fontWeight: 700,
+                cursor: "not-allowed", fontFamily: "inherit",
+              }}
             >
-              <Play size={11} fill="currentColor" /> Load Bot Files
+              <Play size={11} fill="currentColor" /> Loading…
             </button>
           ) : (
             <button
@@ -137,25 +197,44 @@ export function WebContainerBotRunner() {
                 setPhase("running");
                 bootAndRun();
               }}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "#059669", border: "1px solid #10b981", borderRadius: 6, padding: "5px 12px", color: "#a7f3d0", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                background: "#059669", border: "1px solid #10b981",
+                borderRadius: 6, padding: "5px 12px",
+                color: "#a7f3d0", fontSize: 11, fontWeight: 700,
+                cursor: "pointer", fontFamily: "inherit",
+              }}
             >
               <Play size={11} fill="currentColor" /> Launch Bot
             </button>
           )}
-
         </div>
       </div>
 
       {/* ── Main body ── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        <FileExplorer files={currentFiles} selectedFile={selectedFile} onSelect={setSelectedFile} />
+        <FileExplorer
+          files={currentFiles}
+          selectedFile={selectedFile}
+          onSelect={setSelectedFile}
+        />
 
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-          <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", minHeight: 0 }}>
-            {/* No manual config/run UI, bot auto-launches */}
+          <div
+            style={{
+              flex: 1,
+              position: "relative",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+            }}
+          >
             <CodeEditor content={selectedContent} onChange={handleEditorChange} />
           </div>
-          <TerminalPanel terminalRef={terminalRef} onClear={() => termRef.current?.clear()} />
+          <TerminalPanel
+            terminalRef={terminalRef}
+            onClear={() => termRef.current?.clear()}
+          />
         </div>
       </div>
     </div>
