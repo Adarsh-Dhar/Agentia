@@ -16,7 +16,7 @@ from azure.core.credentials import AzureKeyCredential
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Full flash loan ABI — used in the system prompt so the AI never guesses it
+# Full flash loan ABI
 # ---------------------------------------------------------------------------
 FLASHLOAN_ABI = [
     {
@@ -167,7 +167,7 @@ class MetaAgentBuilder:
 
     async def build_bot_logic(self, prompt: str) -> dict:
         """
-        Call GPT-4o with an exhaustive system prompt to generate a
+        Call GPT-4o with a structured system prompt to generate a
         production-ready 4-file arbitrage bot.
         """
         available_tools = await self.mcp_manager.list_all_tools()
@@ -184,212 +184,200 @@ class MetaAgentBuilder:
         tools_str = json.dumps(compressed_tools, separators=(',', ':'))
         abi_str   = json.dumps(FLASHLOAN_ABI, separators=(',', ':'))
 
-        system_instructions = f"""
-### IDENTITY
-You are an expert On-Chain Arbitrage Engineer.
-Generate a COMPLETE, production-ready Python project for Base Sepolia flash loan arbitrage.
-The project MUST consist of exactly 4 files with clean separation of concerns.
+        # ── SYSTEM PROMPT ────────────────────────────────────────────────────
+        # JSON schema is declared FIRST so the model locks onto the format
+        # before reading any constraints. Tool signatures are one-liners to
+        # reduce token pressure. Hard rules are short and numbered.
+        system_instructions = f"""You are an expert DeFi arbitrage engineer.
+Generate a COMPLETE 4-file Python project for a Base Sepolia flash-loan arbitrage bot.
 
-════════════════════════════════════════════════════════════════════
-VERIFIED TOOL SIGNATURES  ──  NEVER DEVIATE. NEVER GUESS.
-════════════════════════════════════════════════════════════════════
+## OUTPUT FORMAT — READ THIS FIRST
+Respond with RAW JSON ONLY. No markdown fences, no preamble, no trailing text.
+Required schema:
+{{
+  "thoughts": "<one paragraph: strategy + architecture decisions>",
+  "files": [
+    {{"filepath": "config.py",     "content": "<complete file>"}},
+    {{"filepath": "mcp_bridge.py", "content": "<complete file>"}},
+    {{"filepath": "arbitrage.py",  "content": "<complete file>"}},
+    {{"filepath": "main.py",       "content": "<complete file>"}}
+  ]
+}}
 
-① 1inch — PRICE QUOTE (read-only, no broadcast)
-  server="one_inch"  tool="get_quote"
-  args: {{"tokenIn":"<addr>","tokenOut":"<addr>","amount":"<str int>","chain":<int>}}
-  parse: int(response["toTokenAmount"])
+## ENVIRONMENT
+- Python 3.11, standard library only inside bot files. No pip, no web3, no ethers.
+- All blockchain I/O goes through MCP tools via stdio child processes.
+- All arithmetic is Python integers in base units — no float, no Decimal, no round().
 
-② 1inch — SWAP CALLDATA (needed before contract call)
-  server="one_inch"  tool="get_swap_data"
-  args: {{"tokenIn":"<addr>","tokenOut":"<addr>","amount":"<str int>","chain":<int>,"from":"<addr>","slippage":1}}
-  parse: response["tx"]["data"]  → hex string
+## MCP TOOL SIGNATURES — NEVER DEVIATE, NEVER GUESS
+1. get_quote       server="one_inch"  args={{"tokenIn":"<addr>","tokenOut":"<addr>","amount":"<str int>","chain":<int>}}
+                   parse → int(response["toTokenAmount"])
 
-③ Webacy — TOKEN RISK CHECK
-  server="webacy"  tool="get_token_risk"
-  args: {{"address":"<addr>","chain":"base-sepolia"}}   ← chain MUST be the STRING "base-sepolia"
-  parse: response["risk"] == "low"  OR  response["score"] < 20
+2. get_swap_data   server="one_inch"  args={{"tokenIn":"<addr>","tokenOut":"<addr>","amount":"<str int>","chain":<int>,"from":"<addr>","slippage":1}}
+                   parse → response["tx"]["data"]
 
-④ GOAT EVM — UNIT CONVERSION  (call ONCE at startup per token)
-  server="goat_evm"  tool="convert_to_base_units"
-  args: {{"tokenAddress":"<addr>","amount":"<str human number>"}}
-  parse: int(response["baseUnits"])
+3. get_token_risk  server="webacy"    args={{"address":"<addr>","chain":"base-sepolia"}}   ← STRING not int
+                   parse → response["risk"]=="low" OR response["score"]<20
 
-⑤ GOAT EVM — CONTRACT WRITE  (broadcasts the flash loan tx)
-  server="goat_evm"  tool="write_contract"
-  args: {{
-    "address":"<contract addr>",        ← KEY IS "address"  NOT "contractAddress"
-    "abi":<list>,
-    "functionName":"requestArbitrage",
-    "args":[tokenToBorrow, amountToBorrow, routerTarget, swapData]
-  }}
-  parse: response["transactionHash"]  → str
+4. convert_to_base_units  server="goat_evm"  args={{"tokenAddress":"<addr>","amount":"<str human>"}}
+                          parse → int(response["baseUnits"])
 
-════════════════════════════════════════════════════════════════════
-FILE SPECIFICATIONS
-════════════════════════════════════════════════════════════════════
+5. write_contract  server="goat_evm"
+                   args={{"address":"<contract>","abi":<list>,"functionName":"requestArbitrage","args":[tokenToBorrow,amountToBorrow,routerTarget,swapData]}}
+                   KEY IS "address" — NEVER "contractAddress"
+                   parse → response["transactionHash"]
 
-━━━ FILE 1 ── config.py  (constants only, zero logic) ━━━
-WETH_ADDRESS    = "0x4200000000000000000000000000000000000006"
-USDC_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-ARB_BOT_ADDRESS = "{self.arb_bot_address}"
-ONE_INCH_ROUTER = "0x111111125421cA6dc452d289314280a0f8842A65"
-CHAIN_ID           = 8453        # Base Sepolia
-USDC_DECIMALS      = 6
-WETH_DECIMALS      = 18
-AAVE_FEE_BPS       = 9            # 0.09 %
-GAS_BUFFER_USDC    = 2_000_000    # 2 USDC in base units — always integer
-POLL_INTERVAL      = 5            # seconds
-BORROW_AMOUNT_HUMAN = 1           # human-readable USDC; converted to base units at runtime
-FLASHLOAN_ABI      = {abi_str}
+## FILE 1 — config.py (constants only, zero logic)
+Generate exactly this structure, filling in values from the user prompt:
+```
+WETH_ADDRESS         = "0x4200000000000000000000000000000000000006"
+USDC_ADDRESS         = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+ARB_BOT_ADDRESS      = "{self.arb_bot_address}"
+ONE_INCH_ROUTER      = "0x111111125421cA6dc452d289314280a0f8842A65"
+CHAIN_ID             = 84532           # Base Sepolia — NOT 8453 (that is mainnet)
+AAVE_FEE_BPS         = 9               # 0.09%
+GAS_BUFFER_USDC      = 2_000_000       # 2 USDC in 6-decimal base units — integer
+POLL_INTERVAL        = 5               # seconds
+BORROW_AMOUNT_HUMAN  = "1"             # human-readable; converted at startup
+FLASHLOAN_ABI        = {abi_str}
+```
 
-━━━ FILE 2 ── mcp_bridge.py  (MCP wrapper with path fix) ━━━
-The generated bot lives in a SUBDIRECTORY of agents/.
-mcp_client.py is in the PARENT agents/ directory.
-You MUST include this exact path fix so the import resolves correctly:
+## FILE 2 — mcp_bridge.py (path fix + module-level singleton)
+MUST include this exact sys.path fix at the top (bot runs in a subdirectory of agents/):
+```python
+import sys, os, json
+_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _PARENT not in sys.path:
+    sys.path.insert(0, _PARENT)
+from mcp_client import MultiMCPClient
 
-  import sys, os, json
-  _PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-  if _PARENT not in sys.path:
-      sys.path.insert(0, _PARENT)
-  from mcp_client import MultiMCPClient
+mcp = MultiMCPClient()   # module-level singleton — DO NOT create inside functions
 
-  mcp = MultiMCPClient()   # module-level singleton
+async def call_mcp_tool(server: str, tool: str, args: dict) -> dict:
+    raw = await mcp.call_tool(server=server, tool=tool, args=args)
+    return json.loads(raw)
+```
 
-  async def call_mcp_tool(server: str, tool: str, args: dict) -> dict:
-      raw = await mcp.call_tool(server=server, tool=tool, args=args)
-      return json.loads(raw)
+## FILE 3 — arbitrage.py (all async strategy functions, import config + mcp_bridge only)
+Implement ALL of these functions completely — no stubs, no pass, no TODOs:
 
-━━━ FILE 3 ── arbitrage.py  (all async strategy functions) ━━━
-Import from config and mcp_bridge only.
+async def convert_to_base_units(token_address: str, human_amount: str) -> int
+    → goat_evm convert_to_base_units → int(response["baseUnits"])
 
-  async def convert_to_base_units(token_address: str, human_amount) -> int
-      → goat_evm convert_to_base_units → int(response["baseUnits"])
+async def get_quote(token_in: str, token_out: str, amount_base: int) -> int
+    → one_inch get_quote tokenIn/tokenOut → int(response["toTokenAmount"])
 
-  async def get_usdc_to_weth_quote(amount_usdc_base: int) -> int
-      → one_inch get_quote  tokenIn=USDC  tokenOut=WETH  → int(response["toTokenAmount"])
+async def calculate_profit(borrow_usdc_base: int) -> int
+    weth  = await get_quote(USDC_ADDRESS, WETH_ADDRESS, borrow_usdc_base)
+    gross = await get_quote(WETH_ADDRESS, USDC_ADDRESS, weth)
+    fee   = (borrow_usdc_base * AAVE_FEE_BPS) // 10_000
+    return gross - borrow_usdc_base - fee - GAS_BUFFER_USDC
 
-  async def get_weth_to_usdc_quote(amount_weth_base: int) -> int
-      → one_inch get_quote  tokenIn=WETH  tokenOut=USDC  → int(response["toTokenAmount"])
+async def verify_tokens() -> bool
+    → webacy get_token_risk for USDC and WETH, chain="base-sepolia" (STRING)
+    → True only if BOTH pass: risk=="low" OR score<20
 
-  async def calculate_profit(borrow_usdc_base: int) -> int
-      weth   = await get_usdc_to_weth_quote(borrow_usdc_base)
-      gross  = await get_weth_to_usdc_quote(weth)
-      fee    = (borrow_usdc_base * AAVE_FEE_BPS) // 10_000
-      return  gross - borrow_usdc_base - fee - GAS_BUFFER_USDC
+async def get_swap_calldata(src: str, dst: str, amount_base: int, from_addr: str) -> str
+    → one_inch get_swap_data tokenIn/tokenOut → response["tx"]["data"]
 
-  async def verify_tokens() -> bool
-      → webacy get_token_risk for USDC and WETH  chain="base-sepolia" (string)
-      → True only if BOTH pass: risk=="low" OR score<20
+async def execute_arbitrage(calldata: str, borrow_base: int) -> str
+    → goat_evm write_contract key="address" functionName="requestArbitrage"
+    → response["transactionHash"]
 
-  async def get_swap_calldata(src, dst, amount_base, from_addr) -> str
-      → one_inch get_swap_data  tokenIn/tokenOut  → response["tx"]["data"]
+## FILE 4 — main.py (entry point, full implementation)
+Implement exactly this structure:
+```python
+import asyncio, logging, os
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+from mcp_bridge import mcp
+from arbitrage import (convert_to_base_units, calculate_profit,
+                       verify_tokens, get_swap_calldata, execute_arbitrage)
+from config import *
 
-  async def execute_arbitrage(calldata: str, borrow_amount_base: int) -> str
-      → goat_evm write_contract  key="address"  functionName="requestArbitrage"
-      → response["transactionHash"]
+SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() == "true"
 
-━━━ FILE 4 ── main.py  (entry point with full setup) ━━━
+async def setup_connections():
+    # mcp.sessions is EMPTY until this function runs — call connect_to_server for each
+    oneinch_key = os.getenv("ONEINCH_API_KEY", "")
+    one_inch_args = ["-y","supergateway","--streamableHttp",
+                     "https://api.1inch.com/mcp/protocol"]
+    if oneinch_key:
+        one_inch_args += ["--header", f"Authorization: Bearer {{oneinch_key}}"]
+    one_inch_args += ["--outputTransport","stdio"]
+    await mcp.connect_to_server("one_inch","npx",one_inch_args)
 
-  Imports:
-    import asyncio, logging, os
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-    from mcp_bridge import mcp        ← import singleton for shutdown
-    from arbitrage import (convert_to_base_units, calculate_profit,
-                           verify_tokens, get_swap_calldata, execute_arbitrage)
-    from config import *
-
-  SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() == "true"
-
-  async def setup_bot_connections():
-    # The mcp object is a BLANK MultiMCPClient with self.sessions = {{}}.
-    # It has NO connections until this function runs.
-    # You MUST call mcp.connect_to_server() here for each server:
-    await mcp.connect_to_server("one_inch", "npx",
-        ["-y","supergateway","--streamableHttp",
-         "https://api.1inch.com/mcp/protocol","--outputTransport","stdio"])
     webacy_key = os.getenv("WEBACY_API_KEY")
     if not webacy_key: raise RuntimeError("WEBACY_API_KEY not set")
-    await mcp.connect_to_server("webacy", "npx",
+    await mcp.connect_to_server("webacy","npx",
         ["-y","supergateway","--streamableHttp","https://api.webacy.com/mcp",
          "--header",f"x-api-key: {{webacy_key}}","--outputTransport","stdio"])
-    wallet  = os.getenv("WALLET_PRIVATE_KEY")
-    rpc     = os.getenv("RPC_PROVIDER_URL")
-    gpath   = os.getenv("GOAT_EVM_PATH")
+
+    wallet = os.getenv("WALLET_PRIVATE_KEY")
+    rpc    = os.getenv("RPC_PROVIDER_URL")
+    gpath  = os.getenv("GOAT_EVM_PATH")
     if not all([wallet, rpc, gpath]):
-        raise RuntimeError("WALLET_PRIVATE_KEY, RPC_PROVIDER_URL, GOAT_EVM_PATH must be set")
+        raise RuntimeError("WALLET_PRIVATE_KEY, RPC_PROVIDER_URL, GOAT_EVM_PATH required")
     await mcp.connect_to_server("goat_evm","npx",["tsx",gpath],
         custom_env={{"WALLET_PRIVATE_KEY":wallet,"RPC_PROVIDER_URL":rpc}})
 
-  async def run_bot():
-    if SIMULATION_MODE: logger.info("SIMULATION MODE — no transactions will broadcast")
-    await setup_bot_connections()
-    borrow_amount_base = await convert_to_base_units(USDC_ADDRESS, BORROW_AMOUNT_HUMAN)
-    logger.info(f"Borrow amount: {{borrow_amount_base}} base units")
+async def run_bot():
+    logger.info("SIMULATION_MODE=%s", SIMULATION_MODE)
+    await setup_connections()
+    borrow_base = await convert_to_base_units(USDC_ADDRESS, BORROW_AMOUNT_HUMAN)
+    logger.info("Borrow amount: %d base units", borrow_base)
     try:
-      while True:
-        try:
-          profit = await calculate_profit(borrow_amount_base)
-          if profit > 0:
-            logger.info(f"Opportunity: +{{profit}} base units")
-            if not await verify_tokens():
-              logger.warning("Risk check failed. Skipping.")
-            elif SIMULATION_MODE:
-              logger.info(f"[SIM] Would execute. Profit: +{{profit/1_000_000:.6f}} USDC")
-            else:
-              calldata = await get_swap_calldata(USDC_ADDRESS,WETH_ADDRESS,borrow_amount_base,ARB_BOT_ADDRESS)
-              tx = await execute_arbitrage(calldata, borrow_amount_base)
-              logger.info(f"Executed. TX: {{tx}}")
-          else:
-            logger.info(f"No opportunity. Net: {{profit}} base units")
-        except Exception as e:
-          logger.error(str(e), exc_info=True)
-        await asyncio.sleep(POLL_INTERVAL)
+        while True:
+            try:
+                profit = await calculate_profit(borrow_base)
+                if profit > 0:
+                    logger.info("Opportunity: +%d base units (+%.6f USDC)",
+                                profit, profit / 1_000_000)
+                    if not await verify_tokens():
+                        logger.warning("Risk check failed. Skipping.")
+                    elif SIMULATION_MODE:
+                        logger.info("[SIM] Would execute. Profit: +%.6f USDC",
+                                    profit / 1_000_000)
+                    else:
+                        calldata = await get_swap_calldata(
+                            USDC_ADDRESS, WETH_ADDRESS, borrow_base, ARB_BOT_ADDRESS)
+                        tx = await execute_arbitrage(calldata, borrow_base)
+                        logger.info("Executed. TX: %s", tx)
+                else:
+                    logger.info("No opportunity. Net: %d base units", profit)
+            except Exception as e:
+                logger.error(str(e), exc_info=True)
+            await asyncio.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
-      logger.info("Stopping bot...")
+        logger.info("Stopping bot...")
     finally:
-      await mcp.shutdown()
+        await mcp.shutdown()
 
-  logging.basicConfig(level=logging.INFO,
-      format="%(asctime)s [%(levelname)s] %(message)s",
-      datefmt="%Y-%m-%d %H:%M:%S")
-  logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
-  if __name__ == "__main__":
-      asyncio.run(run_bot())
+if __name__ == "__main__":
+    asyncio.run(run_bot())
+```
 
-════════════════════════════════════════════════════════════════════
-AVAILABLE MCP TOOLS  (discovered at runtime — use server names above)
-════════════════════════════════════════════════════════════════════
+## HARD RULES — any violation produces a broken bot
+1. NEVER use tool name "swap" — only "get_quote" or "get_swap_data"
+2. NEVER use "src"/"dst" as 1inch arg keys — only "tokenIn"/"tokenOut"
+3. NEVER use "contractAddress" in goat_evm write_contract — only "address"
+4. CHAIN_ID = 84532 for Base Sepolia — NOT 8453 (that is Base mainnet)
+5. Webacy chain MUST be the string "base-sepolia" — never the integer 84532
+6. mcp_bridge.py MUST include the sys.path parent-dir fix shown in FILE 2
+7. main.py MUST call setup_connections() before any tool call
+8. main.py MUST call mcp.shutdown() in a finally block
+9. main.py MUST implement SIMULATION_MODE
+10. No placeholder comments, no stubs — every function body must be complete
+
+## AVAILABLE MCP TOOLS (discovered at runtime)
 {tools_str}
-
-════════════════════════════════════════════════════════════════════
-HARD RULES  ──  ANY VIOLATION = BROKEN BOT
-════════════════════════════════════════════════════════════════════
-1.  NEVER use tool name "swap" — ONLY "get_quote" or "get_swap_data"
-2.  NEVER use "src"/"dst" as 1inch keys — ONLY "tokenIn"/"tokenOut"
-3.  NEVER use "contractAddress" in goat_evm — ONLY "address"
-4.  NEVER hardcode base-unit amounts — derive via convert_to_base_units at startup
-5.  ALL profit arithmetic must use integers — no float, no Decimal, no round()
-6.  Webacy chain MUST be the string "base-sepolia" — never integer 8453
-7.  mcp_bridge.py MUST include the sys.path parent-dir fix shown above
-8.  main.py MUST call setup_bot_connections() FIRST before any tool call
-9.  main.py MUST call mcp.shutdown() in a finally block
-10. main.py MUST implement SIMULATION_MODE
-11. No placeholder comments — every function body must be complete and runnable
-
-════════════════════════════════════════════════════════════════════
-RESPONSE FORMAT — RAW JSON ONLY. NO MARKDOWN. NO PREAMBLE.
-════════════════════════════════════════════════════════════════════
-{{
-  "thoughts": "One paragraph explaining strategy and architecture.",
-  "files": [
-    {{"filepath": "config.py",     "content": "..."}},
-    {{"filepath": "mcp_bridge.py", "content": "..."}},
-    {{"filepath": "arbitrage.py",  "content": "..."}},
-    {{"filepath": "main.py",       "content": "..."}}
-  ]
-}}
 """
 
         response = self.client.complete(
@@ -398,7 +386,7 @@ RESPONSE FORMAT — RAW JSON ONLY. NO MARKDOWN. NO PREAMBLE.
                 UserMessage(content=prompt),
             ],
             model=self.model_name,
-            temperature=0.1,   # deterministic — less hallucination
+            temperature=0.1,   # deterministic — minimise hallucination
             max_tokens=4096,
         )
 

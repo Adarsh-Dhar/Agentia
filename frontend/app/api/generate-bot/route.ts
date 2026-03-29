@@ -114,8 +114,7 @@ export async function POST(req: NextRequest) {
         body:    JSON.stringify({ prompt }),
         signal:  AbortSignal.timeout(180_000), // 3 min
       });
-    } catch (connErr) {
-      const msg = connErr instanceof Error ? connErr.message : String(connErr);
+    } catch {
       // Fallback: generate a WebContainer-compatible TypeScript bot instead
       return generateWebContainerFallback(config);
     }
@@ -204,27 +203,49 @@ async function generateWebContainerFallback(config: BotConfig): Promise<NextResp
     "arbitrum":     42161,
   };
   const tokenAddr: Record<string, Record<string, string>> = {
-    USDC:  { "base-sepolia": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "base-mainnet": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "arbitrum": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" },
-    USDT:  { "base-sepolia": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", "base-mainnet": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", "arbitrum": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9" },
-    WETH:  { "base-sepolia": "0x4200000000000000000000000000000000000006", "base-mainnet": "0x4200000000000000000000000000000000000006", "arbitrum": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1" },
-    CBBTC: { "base-sepolia": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", "base-mainnet": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", "arbitrum": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf" },
-    AERO:  { "base-sepolia": "0x940181a94A35A4569E4529A3CDfB74e38FD98631", "base-mainnet": "0x940181a94A35A4569E4529A3CDfB74e38FD98631", "arbitrum": "" },
+    USDC:  {
+      "base-sepolia": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "base-mainnet": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "arbitrum":     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    },
+    USDT:  {
+      "base-sepolia": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+      "base-mainnet": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+      "arbitrum":     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+    },
+    WETH:  {
+      "base-sepolia": "0x4200000000000000000000000000000000000006",
+      "base-mainnet": "0x4200000000000000000000000000000000000006",
+      "arbitrum":     "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+    },
+    CBBTC: {
+      "base-sepolia": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+      "base-mainnet": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+      "arbitrum":     "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+    },
+    AERO:  {
+      "base-sepolia": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+      "base-mainnet": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
+      "arbitrum":     "",
+    },
   };
 
   const chainId  = chainIds[config.chain]  ?? 84532;
   const baseAddr = tokenAddr[config.baseToken]?.[config.chain]   ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
   const tgtAddr  = tokenAddr[config.targetToken]?.[config.chain] ?? "0x4200000000000000000000000000000000000006";
   const baseDec  = config.baseToken === "WETH" ? 18 : 6;
-  const tgtDec   = config.targetToken === "WETH" || config.targetToken === "AERO" ? 18 : config.targetToken === "CBBTC" ? 8 : 6;
+  const tgtDec   = config.targetToken === "WETH" || config.targetToken === "AERO" ? 18
+                 : config.targetToken === "CBBTC" ? 8
+                 : 6;
 
+  // ─── src/config.ts ──────────────────────────────────────────────────────────
   const configTs = `import "dotenv/config";
 import { ethers } from "ethers";
 
 // ── ${config.botName} — Generated Configuration ─────────────────────────────
 // Chain: ${config.chain} (${chainId})
 // Pair: ${config.baseToken} ↔ ${config.targetToken}
-// DEX: ${config.dex}
-// Security: ${config.securityProvider}
+// DEX: ${config.dex} | Security: ${config.securityProvider}
 
 export const BASE_TOKEN_ADDRESS   = "${baseAddr}";
 export const TARGET_TOKEN_ADDRESS = "${tgtAddr}";
@@ -234,14 +255,14 @@ export const CHAIN_ID             = ${chainId};
 export const BASE_DECIMALS        = ${baseDec};
 export const TARGET_DECIMALS      = ${tgtDec};
 
-// Financial guardrails
+// ── Financial constants (all BigInt) ─────────────────────────────────────────
 export const AAVE_FEE_BPS         = 9n;
 export const BORROW_AMOUNT_HUMAN  = process.env.BORROW_AMOUNT_HUMAN ?? "${config.borrowAmountHuman}";
 export const MIN_PROFIT_HUMAN     = ${config.minProfitUsd};
-export const GAS_BUFFER_BASE      = ${config.gasBufferUsdc}_000_000n; // ${config.gasBufferUsdc} ${config.baseToken} in base units
+export const GAS_BUFFER_BASE      = ${config.gasBufferUsdc}_000_000n;
 export const POLL_INTERVAL_MS     = ${config.pollingIntervalSec * 1000};
 
-// Runtime
+// ── Runtime ──────────────────────────────────────────────────────────────────
 export const SIMULATION_MODE      = (process.env.SIMULATION_MODE ?? "${config.simulationMode}") !== "false";
 export const WEBACY_API_KEY       = process.env.WEBACY_API_KEY ?? "";
 export const ONEINCH_API_KEY      = process.env.ONEINCH_API_KEY ?? "";
@@ -251,7 +272,6 @@ export const RPC_PROVIDER_URL     = process.env.RPC_PROVIDER_URL ?? "";
 export function parseBaseUnits(human: string, decimals: number): bigint {
   return BigInt(Math.round(parseFloat(human) * 10 ** decimals));
 }
-
 export function createProvider() {
   if (!RPC_PROVIDER_URL) throw new Error("RPC_PROVIDER_URL is not set");
   return new ethers.JsonRpcProvider(RPC_PROVIDER_URL);
@@ -263,22 +283,21 @@ export function createSigner(provider: ethers.JsonRpcProvider) {
 }
 
 export const FLASHLOAN_ABI = [
-  { inputs: [{ internalType: "address", name: "_addressProvider", type: "address" }], stateMutability: "nonpayable", type: "constructor" },
-  { inputs: [{ internalType: "address", name: "asset", type: "address" }, { internalType: "uint256", name: "amount", type: "uint256" }, { internalType: "uint256", name: "premium", type: "uint256" }, { internalType: "address", name: "initiator", type: "address" }, { internalType: "bytes", name: "params", type: "bytes" }], name: "executeOperation", outputs: [{ internalType: "bool", name: "", type: "bool" }], stateMutability: "nonpayable", type: "function" },
-  { inputs: [{ internalType: "address", name: "tokenToBorrow", type: "address" }, { internalType: "uint256", name: "amountToBorrow", type: "uint256" }, { internalType: "address", name: "routerTarget", type: "address" }, { internalType: "bytes", name: "swapData", type: "bytes" }], name: "requestArbitrage", outputs: [], stateMutability: "nonpayable", type: "function" },
-  { inputs: [{ internalType: "address", name: "token", type: "address" }], name: "withdrawProfit", outputs: [], stateMutability: "nonpayable", type: "function" },
+  { inputs:[{internalType:"address",name:"_addressProvider",type:"address"}], stateMutability:"nonpayable", type:"constructor" },
+  { inputs:[{internalType:"address",name:"asset",type:"address"},{internalType:"uint256",name:"amount",type:"uint256"},{internalType:"uint256",name:"premium",type:"uint256"},{internalType:"address",name:"initiator",type:"address"},{internalType:"bytes",name:"params",type:"bytes"}], name:"executeOperation", outputs:[{internalType:"bool",name:"",type:"bool"}], stateMutability:"nonpayable", type:"function" },
+  { inputs:[{internalType:"address",name:"tokenToBorrow",type:"address"},{internalType:"uint256",name:"amountToBorrow",type:"uint256"},{internalType:"address",name:"routerTarget",type:"address"},{internalType:"bytes",name:"swapData",type:"bytes"}], name:"requestArbitrage", outputs:[], stateMutability:"nonpayable", type:"function" },
+  { inputs:[{internalType:"address",name:"token",type:"address"}], name:"withdrawProfit", outputs:[], stateMutability:"nonpayable", type:"function" },
 ] as const;
 `;
 
+  // ─── src/index.ts ────────────────────────────────────────────────────────────
   const securityNote = config.securityProvider === "none"
     ? `// Security checks disabled by user configuration`
-    : config.securityProvider === "webacy"
-    ? `// Webacy token risk check`
-    : `// GoPlus security check`;
+    : `// ${config.securityProvider === "webacy" ? "Webacy" : "GoPlus"} token risk check`;
 
   const indexTs = `/**
  * src/index.ts — ${config.botName}
- * Chain: ${config.chain} | Pair: ${config.baseToken}→${config.targetToken}→${config.baseToken}
+ * Chain: ${config.chain} (chainId read from config) | Pair: ${config.baseToken}→${config.targetToken}→${config.baseToken}
  * DEX: ${config.dex} | Security: ${config.securityProvider}
  * Generated by Agentia Bot Configurator
  */
@@ -286,12 +305,13 @@ import "dotenv/config";
 import {
   SIMULATION_MODE, BORROW_AMOUNT_HUMAN, POLL_INTERVAL_MS,
   WALLET_PRIVATE_KEY, RPC_PROVIDER_URL, WEBACY_API_KEY, ONEINCH_API_KEY,
-  BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, ARB_BOT_ADDRESS,
-  AAVE_FEE_BPS, GAS_BUFFER_BASE, MIN_PROFIT_HUMAN, BASE_DECIMALS,
-  parseBaseUnits, createProvider, createSigner,
+  BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, ARB_BOT_ADDRESS, ONE_INCH_ROUTER,
+  AAVE_FEE_BPS, GAS_BUFFER_BASE, MIN_PROFIT_HUMAN, BASE_DECIMALS, CHAIN_ID,
+  FLASHLOAN_ABI, parseBaseUnits, createProvider, createSigner,
 } from "./config.js";
 
-const API_BASE = "https://api.1inch.dev/swap/v6.0/${chainId}";
+// ── 1inch API — chain ID comes from config constant, never hardcoded ───────────
+const API_BASE = \`https://api.1inch.dev/swap/v6.0/\${CHAIN_ID}\`;
 
 const C = {
   reset: "\\x1b[0m", cyan: "\\x1b[36m", green: "\\x1b[32m",
@@ -310,7 +330,12 @@ async function oneInchFetch(path: string): Promise<unknown> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(\`1inch \${res.status}: \${body.slice(0, 200)}\`);
+    let msg = body.slice(0, 200);
+    try {
+      const parsed = JSON.parse(body) as { description?: string; error?: string };
+      msg = parsed.description ?? parsed.error ?? msg;
+    } catch {}
+    throw new Error(\`1inch \${res.status}: \${msg}\`);
   }
   return res.json();
 }
@@ -318,22 +343,28 @@ async function oneInchFetch(path: string): Promise<unknown> {
 async function getQuote(src: string, dst: string, amount: bigint): Promise<bigint> {
   const qs   = new URLSearchParams({ src, dst, amount: amount.toString() });
   const data = await oneInchFetch(\`/quote?\${qs}\`) as { dstAmount: string };
+  if (!data.dstAmount) throw new Error("1inch quote: missing dstAmount in response");
   return BigInt(data.dstAmount);
 }
 
 async function getSwapData(src: string, dst: string, amount: bigint, from: string): Promise<string> {
-  const qs = new URLSearchParams({ src, dst, amount: amount.toString(), from, slippage: "1", disableEstimate: "true", allowPartialFill: "false" });
-  const d  = await oneInchFetch(\`/swap?\${qs}\`) as { tx: { data: string } };
+  const qs = new URLSearchParams({
+    src, dst, amount: amount.toString(), from,
+    slippage: "1", disableEstimate: "true", allowPartialFill: "false",
+  });
+  const d = await oneInchFetch(\`/swap?\${qs}\`) as { tx: { data: string } };
+  if (!d?.tx?.data) throw new Error("1inch swap: missing tx.data in response");
   return d.tx.data;
 }
 
 ${config.securityProvider !== "none" ? `
+${securityNote}
 async function isTokenSafe(addr: string): Promise<boolean> {
-  ${securityNote}
   try {
-    const res = await fetch(\`https://api.webacy.com/addresses/\${addr}?chain=${config.chain}\`, {
-      headers: { "x-api-key": WEBACY_API_KEY, Accept: "application/json" },
-    });
+    const res = await fetch(
+      \`https://api.webacy.com/addresses/\${addr}?chain=${config.chain}\`,
+      { headers: { "x-api-key": WEBACY_API_KEY, Accept: "application/json" } }
+    );
     if (!res.ok) return false;
     const d = await res.json() as { risk?: string; score?: number };
     return (d.risk ?? "unknown").toLowerCase() === "low" || (d.score ?? 100) < ${config.maxRiskScore ?? 20};
@@ -347,9 +378,10 @@ async function verifyTokens(): Promise<boolean> {
   ]);
   return b && t;
 }` : `
-async function verifyTokens(): Promise<boolean> { return true; } // Security disabled`}
+${securityNote}
+async function verifyTokens(): Promise<boolean> { return true; }`}
 
-function validate() {
+function validate(): void {
   const errs: string[] = [];
   if (!ONEINCH_API_KEY) errs.push("ONEINCH_API_KEY not set  →  https://portal.1inch.dev");
   ${config.securityProvider === "webacy" ? `if (!WEBACY_API_KEY)    errs.push("WEBACY_API_KEY not set   →  https://webacy.com");` : ""}
@@ -362,8 +394,8 @@ function validate() {
 
 console.log(\`
 \${C.bold}\${C.cyan}╔══════════════════════════════════════════════════════╗
-║  \${C.reset}\${C.bold}${config.botName.padEnd(50)}\${C.cyan}  ║
-║  Chain: ${config.chain.padEnd(14)} Pair: ${config.baseToken}→${config.targetToken}${" ".repeat(Math.max(0, 22 - config.baseToken.length - config.targetToken.length))}  ║
+║  ${config.botName.substring(0, 50).padEnd(50)}  ║
+║  Chain: ${config.chain.padEnd(14)} | Pair: ${config.baseToken}→${config.targetToken}${" ".repeat(Math.max(0, 22 - config.baseToken.length - config.targetToken.length))}  ║
 ╚══════════════════════════════════════════════════════╝\${C.reset}
 \`);
 
@@ -374,54 +406,57 @@ const MIN_PROFIT  = parseBaseUnits(String(MIN_PROFIT_HUMAN), BASE_DECIMALS);
 const provider    = !SIMULATION_MODE ? createProvider() : null;
 const signer      = !SIMULATION_MODE && provider ? createSigner(provider) : null;
 
-if (SIMULATION_MODE) log("WARN", "SIMULATION MODE — no real transactions");
-else                 log("WARN", "LIVE MODE — real transactions on ${config.chain}");
+if (SIMULATION_MODE) log("WARN", "SIMULATION MODE — no real transactions will broadcast");
+else                 log("WARN", \`LIVE MODE — real transactions on ${config.chain} (chainId \${CHAIN_ID})\`);
 
-log("INFO", \`Borrow: \${BORROW_BASE.toLocaleString()} base units (\${BORROW_AMOUNT_HUMAN} ${config.baseToken})\`);
+log("INFO", \`Borrow:     \${BORROW_BASE.toLocaleString()} base units (\${BORROW_AMOUNT_HUMAN} ${config.baseToken})\`);
 log("INFO", \`Min profit: \${MIN_PROFIT.toLocaleString()} base units ($${config.minProfitUsd})\`);
-log("INFO", \`Polling every \${POLL_INTERVAL_MS / 1000}s\`);
+log("INFO", \`Polling every \${POLL_INTERVAL_MS / 1000}s | 1inch chain ID: \${CHAIN_ID}\`);
 
 let cycle = 0;
 
-async function runCycle() {
+async function runCycle(): Promise<void> {
   cycle++;
   try {
-    const targetAmt  = await getQuote(BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, BORROW_BASE);
+    const targetAmt   = await getQuote(BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, BORROW_BASE);
     const grossReturn = await getQuote(TARGET_TOKEN_ADDRESS, BASE_TOKEN_ADDRESS, targetAmt);
-    const fee        = (BORROW_BASE * AAVE_FEE_BPS) / 10_000n;
-    const netProfit  = grossReturn - BORROW_BASE - fee - GAS_BUFFER_BASE;
+    const fee         = (BORROW_BASE * AAVE_FEE_BPS) / 10_000n;
+    const netProfit   = grossReturn - BORROW_BASE - fee - GAS_BUFFER_BASE;
 
-    const netHuman   = (Number(netProfit)    / 10 ** BASE_DECIMALS).toFixed(6);
-    const grossHuman = (Number(grossReturn)  / 10 ** BASE_DECIMALS).toFixed(6);
+    const netH   = (Number(netProfit)   / 10 ** BASE_DECIMALS).toFixed(6);
+    const grossH = (Number(grossReturn) / 10 ** BASE_DECIMALS).toFixed(6);
 
     if (netProfit > MIN_PROFIT) {
-      log("INFO", \`Cycle #\${cycle} ✓ Opportunity: gross \${grossHuman} ${config.baseToken}, net +\${netHuman} ${config.baseToken}\`);
+      log("INFO", \`Cycle #\${cycle} ✓ Opportunity: gross \${grossH} ${config.baseToken}, net +\${netH} ${config.baseToken}\`);
 
       const tokensOk = await verifyTokens();
       if (!tokensOk) {
         log("WARN", \`Cycle #\${cycle} Token risk check failed, skipping\`);
         return;
       }
+      log("INFO", \`Cycle #\${cycle} Token risk check passed\`);
 
       if (SIMULATION_MODE) {
-        log("EXEC", \`[SIM] Would execute flash loan. Net profit: +\${netHuman} ${config.baseToken}\`);
+        log("EXEC", \`[SIM] Cycle #\${cycle} Would flash loan. Net: +\${netH} ${config.baseToken}\`);
       } else {
-        if (!signer) { log("ERROR", "No signer"); return; }
-        log("EXEC", \`Fetching swap calldata...\`);
-        const calldata = await getSwapData(BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, BORROW_BASE, ARB_BOT_ADDRESS);
+        if (!signer) { log("ERROR", "No signer — cannot execute"); return; }
+        log("EXEC", \`Cycle #\${cycle} Fetching swap calldata from 1inch...\`);
+        const calldata = await getSwapData(
+          BASE_TOKEN_ADDRESS, TARGET_TOKEN_ADDRESS, BORROW_BASE, ARB_BOT_ADDRESS
+        );
         const { ethers } = await import("ethers");
-        const contract   = new ethers.Contract(ARB_BOT_ADDRESS, [
-          { inputs: [{ name: "tokenToBorrow", type: "address" }, { name: "amountToBorrow", type: "uint256" }, { name: "routerTarget", type: "address" }, { name: "swapData", type: "bytes" }], name: "requestArbitrage", outputs: [], stateMutability: "nonpayable", type: "function" }
-        ], signer);
-        const tx = await contract.requestArbitrage(BASE_TOKEN_ADDRESS, BORROW_BASE, ONE_INCH_ROUTER, calldata);
+        const contract = new ethers.Contract(ARB_BOT_ADDRESS, FLASHLOAN_ABI, signer);
+        const tx = await contract.requestArbitrage(
+          BASE_TOKEN_ADDRESS, BORROW_BASE, ONE_INCH_ROUTER, calldata
+        );
         const rc = await tx.wait(1);
         if (!rc || rc.status !== 1) throw new Error(\`TX reverted: \${tx.hash}\`);
-        log("EXEC", \`✓ TX confirmed: \${tx.hash}\`);
+        log("EXEC", \`Cycle #\${cycle} ✓ TX confirmed: \${tx.hash}\`);
       }
     } else {
-      log("INFO", \`Cycle #\${cycle} No opportunity. Net: \${netHuman} ${config.baseToken} (after fees)\`);
+      log("INFO", \`Cycle #\${cycle} No opportunity. Net: \${netH} ${config.baseToken} (after fees+buffer)\`);
     }
-  } catch (err) {
+  } catch (err: unknown) {
     log("ERROR", \`Cycle #\${cycle}: \${(err as Error).message}\`);
   }
 }
@@ -432,14 +467,19 @@ process.on("SIGINT",  () => { clearInterval(timer); process.exit(0); });
 process.on("SIGTERM", () => { clearInterval(timer); process.exit(0); });
 `;
 
+  // ─── .env.example ────────────────────────────────────────────────────────────
   const envExample = `# ${config.botName} — Environment Variables
 # Generated by Agentia Bot Configurator
 
 # Required
 ONEINCH_API_KEY=your_1inch_key_here         # https://portal.1inch.dev
 ${config.securityProvider === "webacy" ? "WEBACY_API_KEY=your_webacy_key_here         # https://webacy.com\n" : ""}
-# Required for LIVE mode
-RPC_PROVIDER_URL=${config.chain === "base-sepolia" ? "https://base-sepolia.g.alchemy.com/v2/YOUR_KEY" : config.chain === "base-mainnet" ? "https://base.g.alchemy.com/v2/YOUR_KEY" : "https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY"}
+# Required for LIVE mode (not needed when SIMULATION_MODE=true)
+RPC_PROVIDER_URL=${
+  config.chain === "base-sepolia" ? "https://base-sepolia.g.alchemy.com/v2/YOUR_KEY"
+  : config.chain === "base-mainnet" ? "https://base.g.alchemy.com/v2/YOUR_KEY"
+  : "https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY"
+}
 WALLET_PRIVATE_KEY=0000000000000000000000000000000000000000000000000000000000000001
 
 # Safety
@@ -450,6 +490,7 @@ BORROW_AMOUNT_HUMAN=${config.borrowAmountHuman}
 POLL_INTERVAL=${config.pollingIntervalSec}
 `;
 
+  // ─── package.json ─────────────────────────────────────────────────────────────
   const packageJson = JSON.stringify({
     name:        config.botName.toLowerCase().replace(/\s+/g, "-"),
     version:     "1.0.0",
@@ -482,19 +523,24 @@ POLL_INTERVAL=${config.pollingIntervalSec}
         userId,
         status: "STOPPED",
         configuration: {
-          chain: config.chain, baseToken: config.baseToken,
-          targetToken: config.targetToken, dex: config.dex,
-          securityProvider: config.securityProvider,
+          chain:             config.chain,
+          baseToken:         config.baseToken,
+          targetToken:       config.targetToken,
+          dex:               config.dex,
+          securityProvider:  config.securityProvider,
           borrowAmountHuman: config.borrowAmountHuman,
-          minProfitUsd: config.minProfitUsd, simulationMode: config.simulationMode,
-          generatedAt: new Date().toISOString(),
-          source: "bot-configurator-fallback",
+          minProfitUsd:      config.minProfitUsd,
+          simulationMode:    config.simulationMode,
+          generatedAt:       new Date().toISOString(),
+          source:            "bot-configurator-fallback",
         },
         files: {
           create: files.map(f => ({
             filepath: f.filepath,
             content:  f.content,
-            language: f.filepath.endsWith(".ts") ? "typescript" : f.filepath.endsWith(".json") ? "json" : "plaintext",
+            language: f.filepath.endsWith(".ts") ? "typescript"
+                    : f.filepath.endsWith(".json") ? "json"
+                    : "plaintext",
           })),
         },
       },
@@ -509,7 +555,7 @@ POLL_INTERVAL=${config.pollingIntervalSec}
       config,
       source:   "fallback",
     });
-  } catch (dbErr) {
+  } catch {
     return NextResponse.json({
       agentId:  "offline-" + Date.now(),
       botName:  config.botName,

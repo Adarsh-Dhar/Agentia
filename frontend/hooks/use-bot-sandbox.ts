@@ -4,12 +4,12 @@
  * frontend/hooks/use-bot-sandbox.ts
  *
  * WebContainer sandbox hook for the MCP Base Sepolia arbitrage bot.
- * Replaces use-sandbox.ts.  Key differences:
  *
- *  • Different env-config shape (BotEnvConfig vs EnvConfig)
- *  • Different .env file content
- *  • Entry point is always src/index.ts
- *  • Passes WEBACY_API_KEY, SIMULATION_MODE, etc. to the spawned process
+ * Key changes vs original:
+ *  - Detects Python bots (main.py present) vs TypeScript bots (src/index.ts)
+ *  - Skips npm install for Python bots — runs python3 main.py directly
+ *  - Uses CHAIN_ID-aware env vars
+ *  - Better error messages for boot failures
  */
 
 import { useState, useRef, useEffect, MutableRefObject } from "react";
@@ -65,6 +65,33 @@ function parseFilesToTree(files: BotFile[]): Record<string, unknown> {
   return tree;
 }
 
+/**
+ * Determine whether the generated bot is Python or TypeScript/Node.
+ * Returns the run command to pass to jsh -c.
+ */
+function detectRunCommand(files: BotFile[]): { isPython: boolean; runCmd: string } {
+  const filepaths = files.map(f => f.filepath.replace(/^[./]+/, ""));
+
+  const hasPythonMain = filepaths.includes("main.py");
+  const hasTsIndex    = filepaths.includes("src/index.ts") || filepaths.includes("src/index.js");
+  const hasTsEntry    = filepaths.some(p => p.endsWith(".ts") && !p.includes("config") && !p.includes("types"));
+
+  if (hasPythonMain) {
+    return { isPython: true, runCmd: "python3 main.py" };
+  }
+
+  if (hasTsIndex) {
+    return { isPython: false, runCmd: `npx -y tsx src/index.ts` };
+  }
+
+  // Fall back to BOT_ENTRY_POINT constant or first .ts file
+  const fallbackEntry = hasTsEntry
+    ? filepaths.find(p => p.endsWith(".ts") && !p.includes("config") && !p.includes("types")) ?? BOT_ENTRY_POINT
+    : BOT_ENTRY_POINT;
+
+  return { isPython: false, runCmd: `npx -y tsx ${fallbackEntry}` };
+}
+
 export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSandboxOptions) {
   const [phase,  setPhase]  = useState<BotPhase>("idle");
   const [status, setStatus] = useState("Idle");
@@ -88,12 +115,19 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
     term.writeln("\x1b[36m[System]\x1b[0m Booting WebContainer…");
 
     try {
+      // ── Detect bot type before doing anything else ───────────────────────
+      const { isPython, runCmd } = detectRunCommand(generatedFiles);
+      term.writeln(
+        `\x1b[36m[System]\x1b[0m Detected \x1b[1m${isPython ? "Python" : "TypeScript"}\x1b[0m bot → \x1b[33m${runCmd}\x1b[0m`
+      );
+
       // ── Build file tree ──────────────────────────────────────────────────
       const envContent = buildEnvFileContent(envConfig);
       const allFiles: BotFile[] = [
         ...generatedFiles.filter(f => f.filepath !== ".env" && f.filepath !== ".npmrc"),
-        { filepath: ".env",    content: envContent  },
-        { filepath: ".npmrc",  content: BOT_NPMRC   },
+        { filepath: ".env",   content: envContent },
+        // Only include .npmrc for Node bots — Python doesn't need it
+        ...(!isPython ? [{ filepath: ".npmrc", content: BOT_NPMRC }] : []),
       ];
 
       // ── Boot WebContainer (singleton) ────────────────────────────────────
@@ -106,14 +140,14 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
           globalWC = await Promise.race([
             WebContainer.boot(),
             new Promise((_, rej) =>
-              setTimeout(() => rej(new Error("WebContainer boot timeout")), 15_000)
+              setTimeout(() => rej(new Error("WebContainer boot timeout after 15s")), 15_000)
             ),
           ]);
         } catch (bootErr: unknown) {
           const msg = (bootErr as Error).message ?? "";
           if (msg.includes("Only a single WebContainer")) {
             throw new Error(
-              "WebContainer is already running. Please hard-refresh (Cmd/Ctrl+R) and try again."
+              "WebContainer is already running. Please hard-refresh (Cmd/Ctrl+Shift+R) and try again."
             );
           }
           throw bootErr;
@@ -135,38 +169,42 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
 
       await wc.mount(parseFilesToTree(allFiles));
 
-      // ── npm install ──────────────────────────────────────────────────────
-      setStatus("Installing packages…");
-      term.writeln("\x1b[36m[System]\x1b[0m npm install --legacy-peer-deps");
+      // ── npm install (TypeScript bots only) ───────────────────────────────
+      if (!isPython) {
+        setStatus("Installing packages…");
+        term.writeln("\x1b[36m[System]\x1b[0m npm install --legacy-peer-deps");
 
-      const install = await wc.spawn("jsh", [
-        "-c",
-        "npm install --loglevel=error --legacy-peer-deps --no-fund",
-      ], {
-        env:      { npm_config_yes: "true" },
-        terminal: { cols: term.cols, rows: term.rows },
-      });
+        const install = await wc.spawn("jsh", [
+          "-c",
+          "npm install --loglevel=error --legacy-peer-deps --no-fund",
+        ], {
+          env:      { npm_config_yes: "true" },
+          terminal: { cols: term.cols, rows: term.rows },
+        });
 
-      const installWriter = install.input.getWriter();
-      const installHook   = term.onData((d: string) => installWriter.write(d).catch(() => {}));
-      install.output.pipeTo(new WritableStream({ write(c) { term.write(c); } }));
+        const installWriter = install.input.getWriter();
+        const installHook   = term.onData((d: string) => installWriter.write(d).catch(() => {}));
+        install.output.pipeTo(new WritableStream({ write(c) { term.write(c); } }));
 
-      const installCode = await install.exit;
-      installHook.dispose();
-      installWriter.releaseLock();
+        const installCode = await install.exit;
+        installHook.dispose();
+        installWriter.releaseLock();
 
-      if (installCode !== 0) {
-        setStatus("Install failed");
-        term.writeln("\x1b[31m[Error]\x1b[0m npm install failed");
-        setPhase("env-setup");
-        return;
+        if (installCode !== 0) {
+          setStatus("Install failed");
+          term.writeln("\x1b[31m[Error]\x1b[0m npm install failed — check the output above");
+          setPhase("env-setup");
+          return;
+        }
+
+        term.writeln("\x1b[32m[System]\x1b[0m npm install complete");
+      } else {
+        term.writeln("\x1b[36m[System]\x1b[0m Python bot — skipping npm install");
       }
 
       // ── Run bot ──────────────────────────────────────────────────────────
       setStatus("Bot running…");
-      term.writeln(
-        `\n\x1b[36m[System]\x1b[0m Starting \x1b[1m${BOT_ENTRY_POINT}\x1b[0m …\n`
-      );
+      term.writeln(`\n\x1b[36m[System]\x1b[0m Starting → \x1b[1m${runCmd}\x1b[0m\n`);
 
       const processEnv: Record<string, string> = {
         SIMULATION_MODE:     envConfig.SIMULATION_MODE,
@@ -178,7 +216,7 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
         POLL_INTERVAL:       envConfig.POLL_INTERVAL       || "5",
       };
 
-      const run = await wc.spawn("jsh", ["-c", `npx -y tsx ${BOT_ENTRY_POINT}`], {
+      const run = await wc.spawn("jsh", ["-c", runCmd], {
         env:      processEnv,
         terminal: { cols: term.cols, rows: term.rows },
       });

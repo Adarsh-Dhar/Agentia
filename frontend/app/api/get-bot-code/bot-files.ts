@@ -110,7 +110,9 @@ export const WETH_ADDRESS    = "0x4200000000000000000000000000000000000006";
 export const USDC_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 export const ARB_BOT_ADDRESS = "0x6b7b81e04D024259b87a6C0F5ab5Eb04d9539102";
 export const ONE_INCH_ROUTER = "0x111111125421cA6dc452d289314280a0f8842A65";
-export const CHAIN_ID        = 8453; // Base Sepolia
+
+// IMPORTANT: 84532 is Base Sepolia. Base Mainnet is 8453.
+export const CHAIN_ID        = 84532;
 
 // ── Fee constants — all BigInt, no floats ─────────────────────────────────────
 export const AAVE_FEE_BPS    = 9n;         // 0.09 %
@@ -195,16 +197,17 @@ export const FLASHLOAN_ABI = [
 const ONEINCH_TS = `/**
  * src/oneinch.ts
  *
- * 1inch Swap API v6.0 — Base Sepolia (chain 8453)
+ * 1inch Swap API v6.0 — Base Sepolia (CHAIN_ID = 84532)
  * Docs: https://portal.1inch.dev/documentation/apis/swap/swagger
  *
  * All amounts are BigInt in token base units.
  * Auth: Authorization: Bearer <ONEINCH_API_KEY>
  */
+import { CHAIN_ID } from "./config.js";
 
-const API_BASE = "https://api.1inch.dev/swap/v6.0/8453";
+// API base URL uses CHAIN_ID constant — never a hardcoded integer
+const API_BASE = \`https://api.1inch.dev/swap/v6.0/\${CHAIN_ID}\`;
 
-// Shared fetch wrapper with auth + error handling
 async function oneInchFetch(path: string, apiKey: string): Promise<unknown> {
   const url = \`\${API_BASE}\${path}\`;
   const res  = await fetch(url, {
@@ -216,7 +219,6 @@ async function oneInchFetch(path: string, apiKey: string): Promise<unknown> {
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    // Surface the 1inch error description if present
     try {
       const parsed = JSON.parse(body) as { description?: string; error?: string };
       const msg    = parsed.description ?? parsed.error ?? body.slice(0, 200);
@@ -231,12 +233,6 @@ async function oneInchFetch(path: string, apiKey: string): Promise<unknown> {
 
 /**
  * getQuote — read-only price check, no transaction broadcast.
- *
- * @param src      Token address to sell (e.g. USDC)
- * @param dst      Token address to buy  (e.g. WETH)
- * @param amount   Amount of src in base units (BigInt)
- * @param apiKey   1inch API key
- * @returns        Amount of dst received in base units (BigInt)
  */
 export async function getQuote(
   src:    string,
@@ -259,13 +255,6 @@ export async function getQuote(
  *
  * Uses disableEstimate=true because 'from' (the flash loan contract)
  * doesn't hold the tokens at quote time — only during the flash loan callback.
- *
- * @param src      Token to sell
- * @param dst      Token to buy
- * @param amount   Amount of src in base units
- * @param from     Address that will execute the swap (= ARB_BOT_ADDRESS)
- * @param apiKey   1inch API key
- * @returns        ABI-encoded calldata hex string for the 1inch router
  */
 export async function getSwapData(
   src:    string,
@@ -280,7 +269,7 @@ export async function getSwapData(
     amount:           amount.toString(),
     from,
     slippage:         "1",
-    disableEstimate:  "true",   // Required for flash loan scenario
+    disableEstimate:  "true",
     allowPartialFill: "false",
   });
   const data = await oneInchFetch(\`/swap?\${qs}\`, apiKey) as {
@@ -331,7 +320,7 @@ export async function isTokenSafe(
     });
   } catch (networkErr) {
     console.warn(\`[Webacy] Network error checking \${tokenAddress}: \${(networkErr as Error).message}\`);
-    return false; // fail safe
+    return false;
   }
 
   if (!res.ok) {
@@ -403,7 +392,7 @@ export async function executeFlashLoan(
       ONE_INCH_ROUTER,
       swapCalldata,
     );
-    gasEstimate = (gasEstimate * 120n) / 100n; // +20% buffer
+    gasEstimate = (gasEstimate * 120n) / 100n;
   } catch {
     gasEstimate = 500_000n; // fallback
   }
@@ -450,8 +439,10 @@ import {
   USDC_ADDRESS,
   WETH_ADDRESS,
   ARB_BOT_ADDRESS,
+  ONE_INCH_ROUTER,
   AAVE_FEE_BPS,
   GAS_BUFFER_USDC,
+  CHAIN_ID,
   createProvider,
   createSigner,
   parseUsdc,
@@ -462,13 +453,13 @@ import { executeFlashLoan }      from "./execute.js";
 
 // ── ANSI color helpers ────────────────────────────────────────────────────────
 const C = {
-  reset:  "\x1b[0m",
-  cyan:   "\x1b[36m",
-  green:  "\x1b[32m",
-  red:    "\x1b[31m",
-  yellow: "\x1b[33m",
-  dim:    "\x1b[2m",
-  bold:   "\x1b[1m",
+  reset:  "\\x1b[0m",
+  cyan:   "\\x1b[36m",
+  green:  "\\x1b[32m",
+  red:    "\\x1b[31m",
+  yellow: "\\x1b[33m",
+  dim:    "\\x1b[2m",
+  bold:   "\\x1b[1m",
 };
 
 type LogLevel = "INFO" | "WARN" | "ERROR" | "EXEC";
@@ -505,10 +496,11 @@ function validate(): void {
 
 // ── Banner ────────────────────────────────────────────────────────────────────
 console.log(\`
-\${C.bold}\${C.cyan}╔══════════════════════════════════════════════════╗
-║   Base Sepolia Flash-Loan Arbitrage Bot          ║
-║   USDC ─→ WETH ─→ USDC  via 1inch + Aave V3     ║
-╚══════════════════════════════════════════════════╝\${C.reset}
+\${C.bold}\${C.cyan}╔══════════════════════════════════════════════════════╗
+║   Base Sepolia Flash-Loan Arbitrage Bot              ║
+║   USDC ─→ WETH ─→ USDC  via 1inch + Aave V3         ║
+║   Chain ID: \${CHAIN_ID} (Base Sepolia)                 ║
+╚══════════════════════════════════════════════════════╝\${C.reset}
 \`);
 
 validate();
@@ -522,12 +514,13 @@ const signer   = (!SIMULATION_MODE && provider) ? createSigner(provider) : null;
 if (SIMULATION_MODE) {
   log("WARN", \`\${C.yellow}SIMULATION MODE — no transactions will be broadcast\${C.reset}\`);
 } else {
-  log("WARN", \`\${C.red}LIVE MODE — real transactions will be broadcast on Base Sepolia\${C.reset}\`);
+  log("WARN", \`\${C.red}LIVE MODE — real transactions will be broadcast on Base Sepolia (chainId \${CHAIN_ID})\${C.reset}\`);
 }
 
 log("INFO", \`Borrow amount : \${BORROW_BASE.toLocaleString()} base units (\${BORROW_AMOUNT_HUMAN} USDC)\`);
 log("INFO", \`Poll interval : \${POLL_INTERVAL_MS / 1000}s\`);
 log("INFO", \`Bot address   : \${ARB_BOT_ADDRESS}\`);
+log("INFO", \`1inch chain   : \${CHAIN_ID}\`);
 console.log();
 
 // ── Main cycle ────────────────────────────────────────────────────────────────
@@ -566,10 +559,8 @@ async function runCycle(): Promise<void> {
       log("INFO", \`Cycle #\${cycle} — Token risk check passed\`);
 
       if (SIMULATION_MODE) {
-        // Simulation: log what would happen, no transaction
         log("EXEC", \`[SIM] Cycle #\${cycle} — Would execute flash loan. Net profit: +\${netUsd} USDC\`);
       } else {
-        // Live: get swap calldata and execute on-chain
         if (!signer) { log("ERROR", "No signer — cannot execute"); return; }
 
         log("EXEC", \`Cycle #\${cycle} — Fetching swap calldata from 1inch...\`);
