@@ -1,3 +1,0 @@
-# MCP servers handle all heavy blockchain calls.
-# Only lightweight runtime deps needed:
-python-dotenv
