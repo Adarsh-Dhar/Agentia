@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Zap, Play, Settings, Square, Save, CheckCircle2, AlertCircle, Loader2, Database } from "lucide-react";
 
 import { useTerminal }       from "@/hooks/use-terminal";
@@ -13,6 +13,9 @@ import { BotEnvConfigModal } from "@/components/ui/Botenvconfigmodal";
 import type { BotEnvConfig } from "@/lib/bot-constant";
 import { DEFAULT_BOT_ENV_CONFIG } from "@/lib/bot-constant";
 
+// Note: Ensure SaveButton is imported here if it isn't globally available.
+// import { SaveButton } from "@/components/ui/SaveButton"; 
+
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 function inferLanguage(filepath: string): string {
@@ -23,162 +26,6 @@ function inferLanguage(filepath: string): string {
   return "plaintext";
 }
 
-// ─── Save button ──────────────────────────────────────────────────────────────
-
-interface SaveButtonProps {
-  files:     { filepath: string; content: string; language?: string }[];
-  envConfig: BotEnvConfig; // encrypted server-side before storage
-  disabled:  boolean;
-}
-
-function SaveButton({ files, envConfig, disabled }: SaveButtonProps) {
-  const [saveStatus,   setSaveStatus]   = useState<SaveStatus>("idle");
-  const [savedAgentId, setSavedAgentId] = useState<string | null>(null);
-
-  const handleSave = useCallback(async () => {
-    if (disabled || files.length === 0) return;
-    setSaveStatus("saving");
-
-    try {
-      const res = await fetch("/api/agents/save-bot", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          name:  "Base Sepolia Arbitrage Bot",
-          files: files.map((f) => ({
-            filepath: f.filepath,
-            content:  f.content,
-            language: f.language ?? inferLanguage(f.filepath),
-          })),
-          // envConfig is encrypted (AES-256-GCM) by the API route before DB storage
-          envConfig,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(err.error ?? `HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
-      setSavedAgentId(data.agentId);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 4000);
-    } catch (err: unknown) {
-      console.error("[SaveButton]", err);
-      setSaveStatus("error");
-      setTimeout(() => setSaveStatus("idle"), 3000);
-    }
-  }, [files, envConfig, disabled]);
-
-  const isDisabled = disabled || files.length === 0 || saveStatus === "saving";
-
-  const bgColor = saveStatus === "saved"
-    ? "rgba(34,197,94,0.12)"
-    : saveStatus === "error"
-    ? "rgba(239,68,68,0.12)"
-    : "#0f172a";
-
-  const borderColor = saveStatus === "saved"
-    ? "rgba(34,197,94,0.35)"
-    : saveStatus === "error"
-    ? "rgba(239,68,68,0.35)"
-    : "#1e293b";
-
-  const textColor = saveStatus === "saved"
-    ? "#4ade80"
-    : saveStatus === "error"
-    ? "#f87171"
-    : isDisabled
-    ? "#334155"
-    : "#94a3b8";
-
-  const label = saveStatus === "saving" ? "Saving…"
-    : saveStatus === "saved"  ? "Saved!"
-    : saveStatus === "error"  ? "Failed"
-    : "Save to DB";
-
-  const Icon = saveStatus === "saving" ? Loader2
-    : saveStatus === "saved"  ? CheckCircle2
-    : saveStatus === "error"  ? AlertCircle
-    : Save;
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div style={{ width: 1, height: 16, background: "#1e293b" }} />
-      <button
-        onClick={handleSave}
-        disabled={isDisabled}
-        title={
-          files.length === 0
-            ? "Load bot files first"
-            : saveStatus === "saved"
-            ? "Saved — click to save a new version"
-            : "Save all bot files + credentials (encrypted) to the database"
-        }
-        style={{
-          display:      "flex",
-          alignItems:   "center",
-          gap:          5,
-          background:   bgColor,
-          border:       `1px solid ${borderColor}`,
-          borderRadius: 6,
-          padding:      "5px 11px",
-          color:        textColor,
-          fontSize:     11,
-          fontWeight:   700,
-          cursor:       isDisabled ? "not-allowed" : "pointer",
-          fontFamily:   "inherit",
-          opacity:      isDisabled && saveStatus === "idle" ? 0.45 : 1,
-          transition:   "background 0.15s, border-color 0.15s, color 0.15s",
-        }}
-        onMouseEnter={(e) => {
-          if (!isDisabled) (e.currentTarget as HTMLButtonElement).style.borderColor = "#334155";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.borderColor = borderColor;
-        }}
-      >
-        <Icon
-          size={11}
-          style={saveStatus === "saving" ? { animation: "spin 1s linear infinite" } : undefined}
-        />
-        {label}
-        {saveStatus === "saved" && savedAgentId && (
-          <span style={{ fontFamily: "monospace", fontSize: 10, color: "#22c55e", opacity: 0.7 }}>
-            #{savedAgentId.slice(-6)}
-          </span>
-        )}
-      </button>
-
-      {saveStatus === "saved" && savedAgentId && (
-        <a
-          href={`/dashboard/agents/${savedAgentId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="Open agent detail page"
-          style={{
-            display:        "flex",
-            alignItems:     "center",
-            gap:            4,
-            color:          "#4ade80",
-            fontSize:       10,
-            opacity:        0.75,
-            textDecoration: "none",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.75")}
-        >
-          <Database size={10} />
-          view
-        </a>
-      )}
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function WebContainerBotRunner() {
@@ -186,34 +33,54 @@ export function WebContainerBotRunner() {
   const [fileEdits, setFileEdits] = useState<Record<string, string>>({});
 
   const { terminalRef, termRef } = useTerminal();
-  const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
 
+  const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
+  const [autoLaunched, setAutoLaunched] = useState(false);
+  
+  // Compute isDryRun locally from envConfig
+  const isDryRun = envConfig.SIMULATION_MODE === "true";
+
+  // Derived state for the editor & save button
   const currentFiles = generatedFiles.map((f) => ({
     ...f,
     content: fileEdits[f.filepath] !== undefined ? fileEdits[f.filepath] : f.content,
   }));
 
-  const {
-    bootAndRun,
-    phase,
-    status,
-    setPhase,
-    stopProcess,
-    updateFileInSandbox,
-  } = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
+  const sandbox = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
 
-  const selectedContent = currentFiles.find((f) => f.filepath === selectedFile)?.content;
-  const isDryRun        = envConfig.SIMULATION_MODE === "true";
+  const { phase, setPhase, status, stopProcess, bootAndRun } = sandbox;
+  
+  const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content || "";
+  const saveDisabled = phase === "running" || generatedFiles.length === 0;
 
-  const handleEditorChange = (newContent: string) => {
-    if (!selectedFile) return;
-    setFileEdits((prev) => ({ ...prev, [selectedFile]: newContent }));
-    if (phase === "running") {
-      updateFileInSandbox(selectedFile, newContent);
+  // On mount, fetch code and run the bot automatically
+  useEffect(() => {
+    (async () => {
+      await generateFiles();
+      setPhase("env-setup");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-launch the bot after files are loaded and phase is env-setup
+  useEffect(() => {
+    if (
+      generatedFiles.length > 0 &&
+      phase === "env-setup" &&
+      !autoLaunched
+    ) {
+      setAutoLaunched(true);
+      bootAndRun();
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatedFiles, phase, autoLaunched, bootAndRun]);
 
-  const saveDisabled = phase === "booting" || phase === "installing";
+  // Handle manual code edits
+  const handleEditorChange = useCallback((value: string) => {
+    if (selectedFile) {
+      setFileEdits((prev) => ({ ...prev, [selectedFile]: value }));
+    }
+  }, [selectedFile]);
 
   return (
     <div
@@ -251,7 +118,7 @@ export function WebContainerBotRunner() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 10, background: "#0f172a", padding: "2px 8px", borderRadius: 4, border: "1px solid #1e293b", color: "#64748b" }}>
-            {status.toUpperCase()}
+            {status?.toUpperCase() || "IDLE"}
           </span>
 
           {isDryRun && (
@@ -260,6 +127,7 @@ export function WebContainerBotRunner() {
             </span>
           )}
 
+          {/* Repaired Control Buttons */}
           {phase === "running" ? (
             <button
               onClick={stopProcess}
@@ -285,8 +153,6 @@ export function WebContainerBotRunner() {
             </button>
           )}
 
-          {/* SaveButton now receives envConfig so credentials are encrypted + stored */}
-          <SaveButton files={currentFiles} envConfig={envConfig} disabled={saveDisabled} />
         </div>
       </div>
 
@@ -296,14 +162,7 @@ export function WebContainerBotRunner() {
 
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
           <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", minHeight: 0 }}>
-            {phase === "env-setup" && (
-              <BotEnvConfigModal
-                envConfig={envConfig}
-                onChange={(key, value) => setEnvConfig((prev) => ({ ...prev, [key]: value }))}
-                onLaunch={bootAndRun}
-                isDryRun={isDryRun}
-              />
-            )}
+            {/* No manual config/run UI, bot auto-launches */}
             <CodeEditor content={selectedContent} onChange={handleEditorChange} />
           </div>
           <TerminalPanel terminalRef={terminalRef} onClear={() => termRef.current?.clear()} />

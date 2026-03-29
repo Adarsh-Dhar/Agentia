@@ -8,7 +8,39 @@ import { MessageList }     from '@/components/message-list'
 import { Chips }           from '@/components/ui/chips'
 import { DepositModal }    from '@/components/deposit-modal'
 
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+
 export default function DeployChatPage() {
+  const router = useRouter();
+  const [creatingBot, setCreatingBot] = useState(false);
+
+  // Handler for the Create Bot button
+  async function handleCreateBot() {
+    setCreatingBot(true);
+    try {
+      // Call the get-bot-code API to create a new bot and agent in DB
+      const res = await fetch('/api/get-bot-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        throw new Error('Failed to create bot');
+      }
+      const data = await res.json();
+      const agentId = data.agentId;
+      if (!agentId) throw new Error('No agentId returned');
+      // Route to the code page for the new agent
+      router.push(`/dashboard/deploy/${agentId}/code`);
+    } catch (err) {
+      alert('Failed to create bot. Please try again.');
+      // Optionally log error
+      // console.error(err);
+    } finally {
+      setCreatingBot(false);
+    }
+  }
   const {
     messages, input, convState, isTyping, chips, isBusy,
     currentGuardrails,
@@ -30,6 +62,16 @@ export default function DeployChatPage() {
 
   return (
     <>
+      {/* ── Create Bot Button ── */}
+      <div className="flex justify-end p-4">
+        <Button
+          onClick={handleCreateBot}
+          disabled={creatingBot}
+          className="bg-primary text-white"
+        >
+          {creatingBot ? 'Creating Bot…' : 'Create Bot'}
+        </Button>
+      </div>
       {showDeposit && (
         <DepositModal
           agentName={deployedAgentName}
