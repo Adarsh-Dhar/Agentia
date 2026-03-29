@@ -52,6 +52,7 @@ model Agent {
   userId           String
   user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   configuration    Json?
+  envConfig        String?      @db.Text // Encrypted .env (AES-256-GCM)
   sessionKeyPriv   String?      
   tradeLogs        TradeLog[]
   files            AgentFile[]  // <-- NEW: Relation to bot code files

@@ -106,7 +106,8 @@ export async function POST(req: NextRequest) {
     const prompt = buildPrompt(config);
 
     // Call the Python Meta-Agent
-    let metaResponse: Response;
+
+    let metaResponse: Response | null = null;
     try {
       metaResponse = await fetch(`${META_AGENT_URL}/create-bot`, {
         method:  "POST",
@@ -115,25 +116,28 @@ export async function POST(req: NextRequest) {
         signal:  AbortSignal.timeout(180_000), // 3 min
       });
     } catch {
-      // Fallback: generate a WebContainer-compatible TypeScript bot instead
+      // Network error or server unreachable
       return generateWebContainerFallback(config);
     }
 
-    if (!metaResponse.ok) {
-      const text = await metaResponse.text().catch(() => "");
-      return NextResponse.json(
-        { error: `Meta-agent returned ${metaResponse.status}: ${text.slice(0, 200)}` },
-        { status: 502 }
-      );
+    if (!metaResponse || !metaResponse.ok) {
+      // Any non-OK response (404, 500, etc) triggers fallback
+      return generateWebContainerFallback(config);
     }
+
 
     const metaData = await metaResponse.json();
     const output   = metaData.output ?? {};
-    const files: { filepath: string; content: string }[] = output.files ?? [];
+    let files: { filepath: string; content: string; language?: string }[] = output.files ?? [];
 
-    if (files.length === 0) {
-      return NextResponse.json({ error: "Meta-agent returned no files." }, { status: 500 });
-    }
+    // Remove any .env or .env.example from files array (should not store secrets in files)
+    files = files.filter(f => ![".env", ".env.example"].includes(f.filepath));
+
+    // Format the credentials into a standard .env string
+    const envPlaintext = `SIMULATION_MODE=${config.simulationMode}\nONEINCH_API_KEY=${config.oneInchApiKey || ''}\nWEBACY_API_KEY=${config.webacyApiKey || ''}\nRPC_PROVIDER_URL=${config.rpcUrl || ''}\nWALLET_PRIVATE_KEY=${config.privateKey || ''}\n`;
+
+    // Encrypt the string using AES-256-GCM
+    const encryptedEnv = encryptEnvConfig(envPlaintext);
 
     // Persist to database
     const userId = "public-user";
@@ -164,11 +168,12 @@ export async function POST(req: NextRequest) {
         userId,
         status:        "STOPPED",
         configuration: configRecord,
+        envConfig:     encryptedEnv, // Save encrypted .env here
         files: {
           create: files.map(f => ({
             filepath: f.filepath,
             content:  f.content,
-            language: f.filepath.endsWith(".py") ? "python" : "plaintext",
+            language: f.language || (f.filepath.endsWith(".py") ? "python" : "plaintext"),
           })),
         },
       },
@@ -505,7 +510,7 @@ POLL_INTERVAL=${config.pollingIntervalSec}
     { filepath: "package.json",    content: packageJson },
     { filepath: "src/config.ts",   content: configTs    },
     { filepath: "src/index.ts",    content: indexTs     },
-    { filepath: ".env.example",    content: envExample  },
+    // .env.example is not stored in DB files for security
   ];
 
   // Save to DB
@@ -516,6 +521,11 @@ POLL_INTERVAL=${config.pollingIntervalSec}
       update: {},
       create: { id: userId, email: `${userId}@placeholder.agentia`, walletAddress: "" },
     });
+
+    // Dummy env for fallback (no secrets)
+    const envPlaintext = `SIMULATION_MODE=${config.simulationMode}\nONEINCH_API_KEY=\nWEBACY_API_KEY=\nRPC_PROVIDER_URL=\nWALLET_PRIVATE_KEY=\n`;
+    const { encryptEnvConfig } = await import("@/lib/crypto-env");
+    const encryptedEnv = encryptEnvConfig(envPlaintext);
 
     const agent = await prisma.agent.create({
       data: {
@@ -534,6 +544,7 @@ POLL_INTERVAL=${config.pollingIntervalSec}
           generatedAt:       new Date().toISOString(),
           source:            "bot-configurator-fallback",
         },
+        envConfig: encryptedEnv,
         files: {
           create: files.map(f => ({
             filepath: f.filepath,

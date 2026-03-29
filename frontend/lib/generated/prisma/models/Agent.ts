@@ -29,6 +29,7 @@ export type AgentMinAggregateOutputType = {
   name: string | null
   status: $Enums.AgentStatus | null
   userId: string | null
+  envConfig: string | null
   sessionKeyPriv: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -39,6 +40,7 @@ export type AgentMaxAggregateOutputType = {
   name: string | null
   status: $Enums.AgentStatus | null
   userId: string | null
+  envConfig: string | null
   sessionKeyPriv: string | null
   createdAt: Date | null
   updatedAt: Date | null
@@ -50,6 +52,7 @@ export type AgentCountAggregateOutputType = {
   status: number
   userId: number
   configuration: number
+  envConfig: number
   sessionKeyPriv: number
   createdAt: number
   updatedAt: number
@@ -62,6 +65,7 @@ export type AgentMinAggregateInputType = {
   name?: true
   status?: true
   userId?: true
+  envConfig?: true
   sessionKeyPriv?: true
   createdAt?: true
   updatedAt?: true
@@ -72,6 +76,7 @@ export type AgentMaxAggregateInputType = {
   name?: true
   status?: true
   userId?: true
+  envConfig?: true
   sessionKeyPriv?: true
   createdAt?: true
   updatedAt?: true
@@ -83,6 +88,7 @@ export type AgentCountAggregateInputType = {
   status?: true
   userId?: true
   configuration?: true
+  envConfig?: true
   sessionKeyPriv?: true
   createdAt?: true
   updatedAt?: true
@@ -167,6 +173,7 @@ export type AgentGroupByOutputType = {
   status: $Enums.AgentStatus
   userId: string
   configuration: runtime.JsonValue | null
+  envConfig: string | null
   sessionKeyPriv: string | null
   createdAt: Date
   updatedAt: Date
@@ -199,6 +206,7 @@ export type AgentWhereInput = {
   status?: Prisma.EnumAgentStatusFilter<"Agent"> | $Enums.AgentStatus
   userId?: Prisma.StringFilter<"Agent"> | string
   configuration?: Prisma.JsonNullableFilter<"Agent">
+  envConfig?: Prisma.StringNullableFilter<"Agent"> | string | null
   sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
@@ -213,6 +221,7 @@ export type AgentOrderByWithRelationInput = {
   status?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   configuration?: Prisma.SortOrderInput | Prisma.SortOrder
+  envConfig?: Prisma.SortOrderInput | Prisma.SortOrder
   sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -230,6 +239,7 @@ export type AgentWhereUniqueInput = Prisma.AtLeast<{
   status?: Prisma.EnumAgentStatusFilter<"Agent"> | $Enums.AgentStatus
   userId?: Prisma.StringFilter<"Agent"> | string
   configuration?: Prisma.JsonNullableFilter<"Agent">
+  envConfig?: Prisma.StringNullableFilter<"Agent"> | string | null
   sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
@@ -244,6 +254,7 @@ export type AgentOrderByWithAggregationInput = {
   status?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   configuration?: Prisma.SortOrderInput | Prisma.SortOrder
+  envConfig?: Prisma.SortOrderInput | Prisma.SortOrder
   sessionKeyPriv?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -261,6 +272,7 @@ export type AgentScalarWhereWithAggregatesInput = {
   status?: Prisma.EnumAgentStatusWithAggregatesFilter<"Agent"> | $Enums.AgentStatus
   userId?: Prisma.StringWithAggregatesFilter<"Agent"> | string
   configuration?: Prisma.JsonNullableWithAggregatesFilter<"Agent">
+  envConfig?: Prisma.StringNullableWithAggregatesFilter<"Agent"> | string | null
   sessionKeyPriv?: Prisma.StringNullableWithAggregatesFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"Agent"> | Date | string
@@ -271,6 +283,7 @@ export type AgentCreateInput = {
   name: string
   status?: $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -285,6 +298,7 @@ export type AgentUncheckedCreateInput = {
   status?: $Enums.AgentStatus
   userId: string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -297,6 +311,7 @@ export type AgentUpdateInput = {
   name?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -311,6 +326,7 @@ export type AgentUncheckedUpdateInput = {
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   userId?: Prisma.StringFieldUpdateOperationsInput | string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -324,6 +340,7 @@ export type AgentCreateManyInput = {
   status?: $Enums.AgentStatus
   userId: string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -334,6 +351,7 @@ export type AgentUpdateManyMutationInput = {
   name?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -345,6 +363,7 @@ export type AgentUncheckedUpdateManyInput = {
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   userId?: Prisma.StringFieldUpdateOperationsInput | string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -366,6 +385,7 @@ export type AgentCountOrderByAggregateInput = {
   status?: Prisma.SortOrder
   userId?: Prisma.SortOrder
   configuration?: Prisma.SortOrder
+  envConfig?: Prisma.SortOrder
   sessionKeyPriv?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -376,6 +396,7 @@ export type AgentMaxOrderByAggregateInput = {
   name?: Prisma.SortOrder
   status?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  envConfig?: Prisma.SortOrder
   sessionKeyPriv?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -386,6 +407,7 @@ export type AgentMinOrderByAggregateInput = {
   name?: Prisma.SortOrder
   status?: Prisma.SortOrder
   userId?: Prisma.SortOrder
+  envConfig?: Prisma.SortOrder
   sessionKeyPriv?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   updatedAt?: Prisma.SortOrder
@@ -475,6 +497,7 @@ export type AgentCreateWithoutUserInput = {
   name: string
   status?: $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -487,6 +510,7 @@ export type AgentUncheckedCreateWithoutUserInput = {
   name: string
   status?: $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -529,6 +553,7 @@ export type AgentScalarWhereInput = {
   status?: Prisma.EnumAgentStatusFilter<"Agent"> | $Enums.AgentStatus
   userId?: Prisma.StringFilter<"Agent"> | string
   configuration?: Prisma.JsonNullableFilter<"Agent">
+  envConfig?: Prisma.StringNullableFilter<"Agent"> | string | null
   sessionKeyPriv?: Prisma.StringNullableFilter<"Agent"> | string | null
   createdAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"Agent"> | Date | string
@@ -539,6 +564,7 @@ export type AgentCreateWithoutFilesInput = {
   name: string
   status?: $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -552,6 +578,7 @@ export type AgentUncheckedCreateWithoutFilesInput = {
   status?: $Enums.AgentStatus
   userId: string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -579,6 +606,7 @@ export type AgentUpdateWithoutFilesInput = {
   name?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -592,6 +620,7 @@ export type AgentUncheckedUpdateWithoutFilesInput = {
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   userId?: Prisma.StringFieldUpdateOperationsInput | string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -603,6 +632,7 @@ export type AgentCreateWithoutTradeLogsInput = {
   name: string
   status?: $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -616,6 +646,7 @@ export type AgentUncheckedCreateWithoutTradeLogsInput = {
   status?: $Enums.AgentStatus
   userId: string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -643,6 +674,7 @@ export type AgentUpdateWithoutTradeLogsInput = {
   name?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -656,6 +688,7 @@ export type AgentUncheckedUpdateWithoutTradeLogsInput = {
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   userId?: Prisma.StringFieldUpdateOperationsInput | string
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -667,6 +700,7 @@ export type AgentCreateManyUserInput = {
   name: string
   status?: $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: string | null
   sessionKeyPriv?: string | null
   createdAt?: Date | string
   updatedAt?: Date | string
@@ -677,6 +711,7 @@ export type AgentUpdateWithoutUserInput = {
   name?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -689,6 +724,7 @@ export type AgentUncheckedUpdateWithoutUserInput = {
   name?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -701,6 +737,7 @@ export type AgentUncheckedUpdateManyWithoutUserInput = {
   name?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumAgentStatusFieldUpdateOperationsInput | $Enums.AgentStatus
   configuration?: Prisma.NullableJsonNullValueInput | runtime.InputJsonValue
+  envConfig?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   sessionKeyPriv?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -752,6 +789,7 @@ export type AgentSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   status?: boolean
   userId?: boolean
   configuration?: boolean
+  envConfig?: boolean
   sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -767,6 +805,7 @@ export type AgentSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensi
   status?: boolean
   userId?: boolean
   configuration?: boolean
+  envConfig?: boolean
   sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -779,6 +818,7 @@ export type AgentSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensi
   status?: boolean
   userId?: boolean
   configuration?: boolean
+  envConfig?: boolean
   sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
@@ -791,12 +831,13 @@ export type AgentSelectScalar = {
   status?: boolean
   userId?: boolean
   configuration?: boolean
+  envConfig?: boolean
   sessionKeyPriv?: boolean
   createdAt?: boolean
   updatedAt?: boolean
 }
 
-export type AgentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "status" | "userId" | "configuration" | "sessionKeyPriv" | "createdAt" | "updatedAt", ExtArgs["result"]["agent"]>
+export type AgentOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "status" | "userId" | "configuration" | "envConfig" | "sessionKeyPriv" | "createdAt" | "updatedAt", ExtArgs["result"]["agent"]>
 export type AgentInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   tradeLogs?: boolean | Prisma.Agent$tradeLogsArgs<ExtArgs>
@@ -823,6 +864,7 @@ export type $AgentPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs 
     status: $Enums.AgentStatus
     userId: string
     configuration: runtime.JsonValue | null
+    envConfig: string | null
     sessionKeyPriv: string | null
     createdAt: Date
     updatedAt: Date
@@ -1257,6 +1299,7 @@ export interface AgentFieldRefs {
   readonly status: Prisma.FieldRef<"Agent", 'AgentStatus'>
   readonly userId: Prisma.FieldRef<"Agent", 'String'>
   readonly configuration: Prisma.FieldRef<"Agent", 'Json'>
+  readonly envConfig: Prisma.FieldRef<"Agent", 'String'>
   readonly sessionKeyPriv: Prisma.FieldRef<"Agent", 'String'>
   readonly createdAt: Prisma.FieldRef<"Agent", 'DateTime'>
   readonly updatedAt: Prisma.FieldRef<"Agent", 'DateTime'>

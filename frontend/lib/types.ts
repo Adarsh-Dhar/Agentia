@@ -238,6 +238,11 @@ export interface BotConfig {
   pollingIntervalSec: number;  // e.g. 5
   simulationMode:     boolean;
 
+  oneInchApiKey?: string; // Optional API key for 1inch (if using 1inch dex)
+  webacyApiKey?: string; // Optional API key for Webacy (if using Webacy security)
+  rpcUrl?: string;      // Optional custom RPC URL (if not using defaults)
+  privateKey?: string; // Optional private key (if not generated server-side)
+
   // Optional: max risk score (0-100) from Webacy
   maxRiskScore: number;
 }

@@ -760,6 +760,7 @@ export const AgentScalarFieldEnum = {
   status: 'status',
   userId: 'userId',
   configuration: 'configuration',
+  envConfig: 'envConfig',
   sessionKeyPriv: 'sessionKeyPriv',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

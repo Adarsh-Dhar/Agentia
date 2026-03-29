@@ -35,8 +35,6 @@ export function WebContainerBotRunner() {
   const { terminalRef, termRef } = useTerminal();
 
   const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
-  const [autoLaunched, setAutoLaunched] = useState(false);
-  
   // Compute isDryRun locally from envConfig
   const isDryRun = envConfig.SIMULATION_MODE === "true";
 
@@ -49,31 +47,18 @@ export function WebContainerBotRunner() {
   const sandbox = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
 
   const { phase, setPhase, status, stopProcess, bootAndRun } = sandbox;
-  
+
   const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content || "";
   const saveDisabled = phase === "running" || generatedFiles.length === 0;
 
-  // On mount, fetch code and run the bot automatically
+  // On mount, fetch code and set phase to 'idle' so user can edit .env
   useEffect(() => {
     (async () => {
       await generateFiles();
-      setPhase("env-setup");
+      setPhase("idle"); // Changed from "env-setup" to "idle"
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Auto-launch the bot after files are loaded and phase is env-setup
-  useEffect(() => {
-    if (
-      generatedFiles.length > 0 &&
-      phase === "env-setup" &&
-      !autoLaunched
-    ) {
-      setAutoLaunched(true);
-      bootAndRun();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generatedFiles, phase, autoLaunched, bootAndRun]);
 
   // Handle manual code edits
   const handleEditorChange = useCallback((value: string) => {
@@ -145,11 +130,13 @@ export function WebContainerBotRunner() {
             </button>
           ) : (
             <button
-              onClick={() => setPhase("env-setup")}
-              disabled={phase !== "idle" && phase !== "env-setup"}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "#312e81", border: "1px solid #4338ca", borderRadius: 6, padding: "5px 12px", color: "#a5b4fc", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+              onClick={() => {
+                setPhase("running");
+                bootAndRun();
+              }}
+              style={{ display: "flex", alignItems: "center", gap: 5, background: "#059669", border: "1px solid #10b981", borderRadius: 6, padding: "5px 12px", color: "#a7f3d0", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
             >
-              <Settings size={11} /> Configure & Run
+              <Play size={11} fill="currentColor" /> Launch Bot
             </button>
           )}
 

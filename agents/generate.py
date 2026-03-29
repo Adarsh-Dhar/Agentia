@@ -115,14 +115,25 @@ def build_prompt(config: dict) -> str:
         )
 
     return f"""
-Write an autonomous arbitrage bot named "{bot_name}" for {chain} (Chain ID: {chain_id}).
+You are an expert Web3 developer. Your job is to write an autonomous EVM arbitrage bot.
+
+CRITICAL ENVIRONMENT CONSTRAINT:
+The bot will run inside a WebContainer (an in-browser Node.js environment).
+YOU MUST WRITE THE BOT IN TYPESCRIPT / NODE.JS. DO NOT WRITE PYTHON.
+
+Requirements:
+1. Generate a package.json with dependencies (ethers, dotenv, etc.) and a \"start\": \"ts-node src/index.ts\" script.
+2. Generate a tsconfig.json.
+3. Write the bot logic in src/index.ts using modern async/await Node.js patterns.
 
 CONFIGURATION:
+- Bot Name: {bot_name}
+- Chain: {chain} (Chain ID: {chain_id})
 - Base Token (flash loan asset): {base_token} ({base_addr})
 - Target Token (arbitrage target): {target_token} ({target_addr})
 - DEX / Aggregator: {dex}
 - Flash Loan Provider: Aave V3
-- Borrow Amount: {borrow} {base_token} (convert to base units via convert_to_base_units at startup)
+- Borrow Amount: {borrow} {base_token} (convert to base units at startup)
 - Minimum Net Profit: {min_profit} {base_token} (convert to base units; use integer comparison)
 - Gas Buffer: {gas_buf} {base_token} (convert to base units at startup)
 - Loop Interval: Every {poll_sec} seconds
@@ -135,7 +146,7 @@ Calculate net profit after the 0.09% Aave flash loan fee and the gas buffer.
 All math must use integers (base units) only.
 {security_line}
 Get swap calldata from {dex} get_swap_data using tokenIn/tokenOut keys.
-Execute via goat_evm write_contract using the "address" key (not contractAddress).
+Execute via goat_evm write_contract using the \"address\" key (not contractAddress).
 Use structured logging. Call convert_to_base_units at startup. Include SIMULATION_MODE.
 """.strip()
 
