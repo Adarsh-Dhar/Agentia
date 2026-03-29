@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 
 // ─── POST /api/agents/save-bot ────────────────────────────────────────────────
 // Creates an Agent with associated AgentFile records for the WebContainer bot.
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+
+    // Use a default userId for all saves (no auth)
+    const userId = "public-user";
 
     const body = await req.json();
     const { name = "Base Sepolia Arbitrage Bot", files, configuration } = body;
@@ -41,7 +39,7 @@ export async function POST(req: Request) {
       create: {
         id: userId,
         email: `${userId}@placeholder.agentia`,
-        name: "User",
+        walletAddress: "", // Patch: add required field
       },
     });
 
@@ -66,7 +64,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, agentId: agent.id, agent });
   } catch (error) {
-    console.error("[POST /api/agents/save-bot] Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    const err = error as Error;
+    console.error("[POST /api/agents/save-bot] Error:", err, err.stack);
+    return NextResponse.json({
+      error: err.message || String(error),
+      stack: err.stack || null
+    }, { status: 500 });
   }
 }

@@ -4,17 +4,16 @@
  * frontend/components/webcontainer-bot-runner.tsx
  *
  * Full IDE for the Base Sepolia MCP arbitrage bot.
- * Replaces WebContainerRunner for the /dashboard/webcontainer route.
  *
  * Layout:
- *   ┌─ Header (title, status, Generate / Configure / Run / Stop) ────────┐
- *   ├─ FileExplorer │ CodeEditor                                          │
- *   ├──────────────────────────────────────────────────────────────────── ┤
- *   └─ Terminal                                                           ┘
+ *   ┌─ Header (title, status, Generate / Configure / Run / Stop / Save) ──┐
+ *   ├─ FileExplorer │ CodeEditor                                           │
+ *   ├─────────────────────────────────────────────────────────────────────┤
+ *   └─ Terminal                                                            ┘
  */
 
-import { useState }        from "react";
-import { Zap, Play, Settings, Square } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Zap, Play, Settings, Square, Save, CheckCircle2, AlertCircle, Loader2, Database } from "lucide-react";
 
 import { useTerminal }       from "@/hooks/use-terminal";
 import { useBotCodeGen }     from "@/hooks/use-bot-code-gen";
@@ -26,15 +25,188 @@ import { BotEnvConfigModal } from "@/components/ui/Botenvconfigmodal";
 import type { BotEnvConfig } from "@/lib/bot-constant";
 import { DEFAULT_BOT_ENV_CONFIG } from "@/lib/bot-constant";
 
+// ─── Save status ──────────────────────────────────────────────────────────────
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+function inferLanguage(filepath: string): string {
+  if (filepath.endsWith(".ts") || filepath.endsWith(".tsx")) return "typescript";
+  if (filepath.endsWith(".js") || filepath.endsWith(".jsx")) return "javascript";
+  if (filepath.endsWith(".json")) return "json";
+  if (filepath.endsWith(".md"))   return "markdown";
+  return "plaintext";
+}
+
+// ─── Inline save button (no external deps beyond existing ones) ───────────────
+
+interface SaveButtonProps {
+  files: { filepath: string; content: string; language?: string }[];
+  disabled: boolean;
+}
+
+function SaveButton({ files, disabled }: SaveButtonProps) {
+  const [saveStatus,   setSaveStatus]   = useState<SaveStatus>("idle");
+  const [savedAgentId, setSavedAgentId] = useState<string | null>(null);
+
+  const handleSave = useCallback(async () => {
+    if (disabled || files.length === 0) return;
+    setSaveStatus("saving");
+
+    try {
+      const res = await fetch("/api/agents/save-bot", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          name:  "Base Sepolia Arbitrage Bot",
+          files: files.map((f) => ({
+            filepath: f.filepath,
+            content:  f.content,
+            language: f.language ?? inferLanguage(f.filepath),
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      setSavedAgentId(data.agentId);
+      setSaveStatus("saved");
+      // Reset after 4 s so the user can re-save
+      setTimeout(() => setSaveStatus("idle"), 4000);
+    } catch (err: unknown) {
+      console.error("[SaveButton]", err);
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  }, [files, disabled]);
+
+  // ── Derived visuals ──────────────────────────────────────────────────────
+  const isDisabled = disabled || files.length === 0 || saveStatus === "saving";
+
+  const bgColor = saveStatus === "saved"
+    ? "rgba(34,197,94,0.12)"
+    : saveStatus === "error"
+    ? "rgba(239,68,68,0.12)"
+    : "#0f172a";
+
+  const borderColor = saveStatus === "saved"
+    ? "rgba(34,197,94,0.35)"
+    : saveStatus === "error"
+    ? "rgba(239,68,68,0.35)"
+    : "#1e293b";
+
+  const textColor = saveStatus === "saved"
+    ? "#4ade80"
+    : saveStatus === "error"
+    ? "#f87171"
+    : isDisabled
+    ? "#334155"
+    : "#94a3b8";
+
+  const label = saveStatus === "saving" ? "Saving…"
+    : saveStatus === "saved"  ? "Saved!"
+    : saveStatus === "error"  ? "Failed"
+    : "Save to DB";
+
+  const Icon = saveStatus === "saving" ? Loader2
+    : saveStatus === "saved"  ? CheckCircle2
+    : saveStatus === "error"  ? AlertCircle
+    : Save;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {/* Divider */}
+      <div style={{ width: 1, height: 16, background: "#1e293b" }} />
+
+      <button
+        onClick={handleSave}
+        disabled={isDisabled}
+        title={
+          files.length === 0
+            ? "Load bot files first"
+            : saveStatus === "saved"
+            ? "Saved — click to save a new version"
+            : "Save all bot files to the database"
+        }
+        style={{
+          display:      "flex",
+          alignItems:   "center",
+          gap:          5,
+          background:   bgColor,
+          border:       `1px solid ${borderColor}`,
+          borderRadius: 6,
+          padding:      "5px 11px",
+          color:        textColor,
+          fontSize:     11,
+          fontWeight:   700,
+          cursor:       isDisabled ? "not-allowed" : "pointer",
+          fontFamily:   "inherit",
+          opacity:      isDisabled && saveStatus === "idle" ? 0.45 : 1,
+          transition:   "background 0.15s, border-color 0.15s, color 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          if (!isDisabled) (e.currentTarget as HTMLButtonElement).style.borderColor = "#334155";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.borderColor = borderColor;
+        }}
+      >
+        <Icon
+          size={11}
+          style={saveStatus === "saving" ? { animation: "spin 1s linear infinite" } : undefined}
+        />
+        {label}
+        {saveStatus === "saved" && savedAgentId && (
+          <span style={{ fontFamily: "monospace", fontSize: 10, color: "#22c55e", opacity: 0.7 }}>
+            #{savedAgentId.slice(-6)}
+          </span>
+        )}
+      </button>
+
+      {/* View agent link — appears after save */}
+      {saveStatus === "saved" && savedAgentId && (
+        <a
+          href={`/dashboard/agents/${savedAgentId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open agent detail page"
+          style={{
+            display:    "flex",
+            alignItems: "center",
+            gap:        4,
+            color:      "#4ade80",
+            fontSize:   10,
+            opacity:    0.75,
+            textDecoration: "none",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.75")}
+        >
+          <Database size={10} />
+          view
+        </a>
+      )}
+
+      {/* Keyframe for spinner — injected once */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export function WebContainerBotRunner() {
-  const [envConfig,  setEnvConfig]  = useState<BotEnvConfig>({ ...DEFAULT_BOT_ENV_CONFIG });
-  const [fileEdits,  setFileEdits]  = useState<Record<string, string>>({});
+  const [envConfig, setEnvConfig] = useState<BotEnvConfig>({ ...DEFAULT_BOT_ENV_CONFIG });
+  const [fileEdits, setFileEdits] = useState<Record<string, string>>({});
 
   const { terminalRef, termRef } = useTerminal();
   const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
 
-  // Merge edits on top of generated content
-  const currentFiles = generatedFiles.map(f => ({
+  // Merge any in-editor edits on top of the generated content
+  const currentFiles = generatedFiles.map((f) => ({
     ...f,
     content: fileEdits[f.filepath] !== undefined ? fileEdits[f.filepath] : f.content,
   }));
@@ -48,16 +220,19 @@ export function WebContainerBotRunner() {
     updateFileInSandbox,
   } = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
 
-  const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content;
+  const selectedContent = currentFiles.find((f) => f.filepath === selectedFile)?.content;
   const isDryRun        = envConfig.SIMULATION_MODE === "true";
 
   const handleEditorChange = (newContent: string) => {
     if (!selectedFile) return;
-    setFileEdits(prev => ({ ...prev, [selectedFile]: newContent }));
+    setFileEdits((prev) => ({ ...prev, [selectedFile]: newContent }));
     if (phase === "running") {
       updateFileInSandbox(selectedFile, newContent);
     }
   };
+
+  // Save is blocked while the container is actively booting/installing
+  const saveDisabled = phase === "booting" || phase === "installing";
 
   return (
     <div
@@ -86,6 +261,7 @@ export function WebContainerBotRunner() {
           flexShrink:     0,
         }}
       >
+        {/* Left: title */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Zap size={14} color="#22d3ee" />
           <span style={{ fontSize: 12, fontWeight: 700, color: "#cbd5e1" }}>
@@ -93,7 +269,8 @@ export function WebContainerBotRunner() {
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Right: controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Status badge */}
           <span
             style={{
@@ -108,7 +285,7 @@ export function WebContainerBotRunner() {
             {status.toUpperCase()}
           </span>
 
-          {/* Simulation indicator */}
+          {/* Simulation mode indicator */}
           {isDryRun && (
             <span
               style={{
@@ -124,7 +301,7 @@ export function WebContainerBotRunner() {
             </span>
           )}
 
-          {/* Action button */}
+          {/* Run / Stop / Load / Configure */}
           {phase === "running" ? (
             <button
               onClick={stopProcess}
@@ -188,6 +365,9 @@ export function WebContainerBotRunner() {
               <Settings size={11} /> Configure & Run
             </button>
           )}
+
+          {/* ── Save to DB ── always rendered, disabled until files are loaded */}
+          <SaveButton files={currentFiles} disabled={saveDisabled} />
         </div>
       </div>
 
@@ -200,14 +380,24 @@ export function WebContainerBotRunner() {
           onSelect={setSelectedFile}
         />
 
-        {/* Editor + Terminal */}
+        {/* Editor + Terminal stack */}
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-          <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div
+            style={{
+              flex:          1,
+              position:      "relative",
+              display:       "flex",
+              flexDirection: "column",
+              minHeight:     0,
+            }}
+          >
             {/* Env config overlay */}
             {phase === "env-setup" && (
               <BotEnvConfigModal
                 envConfig={envConfig}
-                onChange={(key, value) => setEnvConfig(prev => ({ ...prev, [key]: value }))}
+                onChange={(key, value) =>
+                  setEnvConfig((prev) => ({ ...prev, [key]: value }))
+                }
                 onLaunch={bootAndRun}
                 isDryRun={isDryRun}
               />

@@ -175,7 +175,7 @@ export type AgentGroupByOutputType = {
   _max: AgentMaxAggregateOutputType | null
 }
 
-type GetAgentGroupByPayload<T extends AgentGroupByArgs> = Prisma.PrismaPromise<
+export type GetAgentGroupByPayload<T extends AgentGroupByArgs> = Prisma.PrismaPromise<
   Array<
     Prisma.PickEnumerable<AgentGroupByOutputType, T['by']> &
       {

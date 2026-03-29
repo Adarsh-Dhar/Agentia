@@ -17,7 +17,7 @@ import type { Terminal } from "@xterm/xterm";
 import type { BotEnvConfig } from "@/lib/bot-constant";
 import { BOT_ENTRY_POINT, BOT_NPMRC } from "@/lib/bot-constant";
 
-export type BotPhase = "idle" | "env-setup" | "running";
+export type BotPhase = "idle" | "env-setup" | "running" | "booting" | "installing";
 
 interface BotFile { filepath: string; content: string }
 
