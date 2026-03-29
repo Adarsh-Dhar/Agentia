@@ -1,16 +1,6 @@
-/**
- * frontend/app/api/get-latest-bot/route.ts
- *
- * Returns the most recently generated bot's files from the DB.
- * Prefers bots created by the Bot Configurator (source=bot-configurator*),
- * falls back to any bot.
- *
- * GET /api/get-latest-bot?agentId=xxx   (optional specific agent)
- * GET /api/get-latest-bot               (latest bot)
- */
-
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { decryptEnvConfig } from "@/lib/crypto-env"; // <-- 1. Add this import
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,7 +15,6 @@ export async function GET(req: NextRequest) {
         include: { files: { orderBy: { createdAt: "asc" } } },
       });
     } else {
-      // Get the latest bot — prefer configurator-generated ones
       agent = await prisma.agent.findFirst({
         where:   { userId },
         orderBy: { createdAt: "desc" },
@@ -39,19 +28,16 @@ export async function GET(req: NextRequest) {
 
     const config = agent.configuration as Record<string, unknown> | null;
 
-    console.log(`[GET /api/get-latest-bot] Returning bot ${agent.id} with ${agent.files.length} files. with code: ${agent.files.map(f => f.filepath).join(", ")}`);
-
-    // Map the standard codebase files
+    // 2. Map the standard code files
     const mappedFiles = agent.files.map(f => ({
       filepath: f.filepath,
       content:  f.content,
       language: f.language,
     }));
 
-    // Decrypt the environment variables and inject as a dynamic file
+    // 3. Decrypt the database credentials and inject the .env file!
     if (agent.envConfig) {
       try {
-        const { decryptEnvConfig } = await import("@/lib/crypto-env");
         const decryptedEnv = decryptEnvConfig(agent.envConfig);
         mappedFiles.push({
           filepath: ".env",
@@ -60,12 +46,6 @@ export async function GET(req: NextRequest) {
         });
       } catch (e) {
         console.error("Failed to decrypt envConfig for agent:", agent.id);
-        // Fallback to empty/example if decryption fails (e.g. secret changed)
-        mappedFiles.push({
-          filepath: ".env",
-          content: "SIMULATION_MODE=true\n",
-          language: "plaintext"
-        });
       }
     }
 
@@ -75,14 +55,11 @@ export async function GET(req: NextRequest) {
       status:    agent.status,
       config:    config ?? {},
       createdAt: agent.createdAt,
-      files:     mappedFiles, // Now contains the decrypted .env securely!
+      files:     mappedFiles, // <-- 4. This now safely contains the .env file
     });
 
   } catch (err) {
-    console.error("[GET /api/get-latest-bot]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Internal server error." },
-      { status: 500 }
-    );
+    console.error("get-latest-bot Error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

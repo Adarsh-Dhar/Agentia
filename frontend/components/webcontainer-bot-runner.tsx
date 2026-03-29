@@ -56,7 +56,7 @@ export function WebContainerBotRunner() {
     (async () => {
       const result = await generateFiles();
       if (result?.loadedEnvConfig) {
-        setEnvConfig(result.loadedEnvConfig);
+        setEnvConfig(result.loadedEnvConfig as any);
       }
       setPhase("idle");
     })();

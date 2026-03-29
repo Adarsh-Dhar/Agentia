@@ -39,47 +39,35 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
       const dbRes = await fetch(url);
 
       if (dbRes.ok) {
-        const data: { agentId: string; name: string; files: BotFile[]; config: Record<string, unknown> } = await dbRes.json();
-
-        if (data.files?.length > 0) {
-          // 1. Separate the .env file from the code files
-          const envFile = data.files.find(f => f.filepath === ".env");
-          const codeFiles = data.files.filter(f => f.filepath !== ".env");
-
+        const data: { agentId: string; name: string; files: BotFile[], config?: any } = await dbRes.json();
+        
+        if (data.files?.length) {
+          // 1. Keep ALL files, including the decrypted .env file, so it shows in the sidebar!
           setGeneratedFiles(data.files);
-          setAgentId(data.agentId);
-          setBotName(data.name);
+          
+          // Default to opening index.ts (or main.py) instead of .env
+          const mainFile = data.files.find(f => f.filepath.includes("index") || f.filepath.includes("main"));
+          setSelectedFile(mainFile?.filepath || data.files[0].filepath);
+          
+          if (data.agentId) setAgentId(data.agentId);
 
-          // Pick the best default file to show
-          const priority = ["src/index.ts", "main.py", "src/index.js", "index.ts"];
-          const best = priority.find(p => data.files.some(f => f.filepath === p))
-            ?? data.files[0]?.filepath;
-          setSelectedFile(best ?? null);
-
-          // 2. Parse the .env file back into a config object
+          // 2. Parse the .env file back into a config object for the React UI state
+          const envFile = data.files.find(f => f.filepath === ".env");
           let loadedEnvConfig = null;
           if (envFile && envFile.content) {
-            const envLines = envFile.content.split('\n');
-            loadedEnvConfig = {
-              SIMULATION_MODE:    envLines.find(l => l.startsWith('SIMULATION_MODE='))?.split('=')[1] || "true",
-              RPC_PROVIDER_URL:   envLines.find(l => l.startsWith('RPC_PROVIDER_URL='))?.split('=')[1] || "",
-              WALLET_PRIVATE_KEY: envLines.find(l => l.startsWith('WALLET_PRIVATE_KEY='))?.split('=')[1] || "",
-              ONEINCH_API_KEY:    envLines.find(l => l.startsWith('ONEINCH_API_KEY='))?.split('=')[1] || "",
-              WEBACY_API_KEY:     envLines.find(l => l.startsWith('WEBACY_API_KEY='))?.split('=')[1] || "",
-              BORROW_AMOUNT_HUMAN: envLines.find(l => l.startsWith('BORROW_AMOUNT_HUMAN='))?.split('=')[1] || "1",
-              POLL_INTERVAL: envLines.find(l => l.startsWith('POLL_INTERVAL='))?.split('=')[1] || "5",
-            };
+             const envLines = envFile.content.split('\n');
+             loadedEnvConfig = {
+                 SIMULATION_MODE:    envLines.find(l => l.startsWith('SIMULATION_MODE='))?.split('=')[1] === 'true',
+                 RPC_PROVIDER_URL:   envLines.find(l => l.startsWith('RPC_PROVIDER_URL='))?.split('=')[1] || "",
+                 WALLET_PRIVATE_KEY: envLines.find(l => l.startsWith('WALLET_PRIVATE_KEY='))?.split('=')[1] || "",
+                 ONEINCH_API_KEY:    envLines.find(l => l.startsWith('ONEINCH_API_KEY='))?.split('=')[1] || "",
+                 WEBACY_API_KEY:     envLines.find(l => l.startsWith('WEBACY_API_KEY='))?.split('=')[1] || "",
+             };
           }
 
-          const cfg = data.config as Record<string, string | number | boolean> | null;
-          if (cfg?.chain) {
-            term.writeln(`\x1b[32m[System]\x1b[0m Loaded \x1b[1m${data.name}\x1b[0m (${data.files.length} files)`);
-            term.writeln(`\x1b[33m[Bot]\x1b[0m Chain: ${cfg.chain} | Pair: ${cfg.baseToken}\u2192${cfg.targetToken} | DEX: ${cfg.dex}`);
-          } else {
-            term.writeln(`\x1b[32m[System]\x1b[0m Loaded \x1b[1m${data.name}\x1b[0m (${data.files.length} files)`);
-          }
-          term.writeln("\x1b[33m[System]\x1b[0m Fill in your credentials, then click \x1b[1mLaunch Bot\x1b[0m.");
-          // 3. Return the parsed config so the component can use it
+          term.writeln(`\x1b[32m[System]\x1b[0m Loaded \x1b[1m${data.name || "bot"}\x1b[0m (${data.files.length} files)`);
+          
+          // Return the parsed config so the component can use it
           return { success: true, loadedEnvConfig };
         }
       }
