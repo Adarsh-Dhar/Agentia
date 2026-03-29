@@ -33,8 +33,17 @@ app.get("/health", (_req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.post("/agents/:id/start", requireAuth, async (req, res) => {
   const { id } = req.params;
+  // Expect files and configuration in the request body
+  const { files, configuration } = req.body;
+  if (!Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ success: false, error: "Missing or empty files array in request body" });
+  }
   try {
-    res.json(await startAgent(id.toString()));
+    res.json(await startAgent({
+      agentId: id.toString(),
+      files,
+      configuration: configuration ?? {},
+    }));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[server] startAgent(${id}):`, message);

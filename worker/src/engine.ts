@@ -40,29 +40,28 @@ export function clearAgentLogs(agentId: string) {
 
 // ── Core operations ───────────────────────────────────────────────────────────
 
-export async function startAgent(agentId: string) {
+export async function startAgent({
+  agentId,
+  files,
+  configuration,
+  onExit,
+}: {
+  agentId: string;
+  files: Array<{ filepath: string; content: string }>;
+  configuration: Record<string, unknown> | null;
+  onExit?: (code: number | null) => void;
+}) {
   if (runningAgents.has(agentId)) {
     throw new Error(`Agent ${agentId} is already running`);
-  }
-
-  // Fetch agent + files from DB
-  const agent = await prisma.agent.findUnique({
-    where:   { id: agentId },
-    include: { files: true },
-  });
-
-  if (!agent) throw new Error(`Agent ${agentId} not found`);
-  if (!agent.files || agent.files.length === 0) {
-    throw new Error(`No code files found for agent ${agentId} in the database`);
   }
 
   // Build workspace
   const workspaceDir = path.join(process.cwd(), ".workspaces", agentId);
   await fs.mkdir(workspaceDir, { recursive: true });
 
-  appendLog(agentId, `Rebuilding workspace from ${agent.files.length} file(s)...`, "stdout");
+  appendLog(agentId, `Rebuilding workspace from ${files.length} file(s)...`, "stdout");
 
-  for (const file of agent.files) {
+  for (const file of files) {
     const fullPath = path.join(workspaceDir, file.filepath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, file.content, "utf-8");
@@ -79,15 +78,13 @@ export async function startAgent(agentId: string) {
     await execAsync("npm install --legacy-peer-deps", { cwd: workspaceDir });
     appendLog(agentId, "npm install complete.", "stdout");
 
-    const agentConfig =
-      agent.configuration && typeof agent.configuration === "object"
-        ? (agent.configuration as Record<string, string>)
-        : {};
+    const agentConfig = configuration && typeof configuration === "object"
+      ? (configuration as Record<string, string>)
+      : {};
 
     const agentEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...agentConfig,
-      ...(agent.sessionKeyPriv ? { SESSION_KEY_PRIV: agent.sessionKeyPriv } : {}),
     };
 
     appendLog(agentId, "Spawning tsx src/index.ts...", "stdout");
@@ -134,6 +131,7 @@ export async function startAgent(agentId: string) {
           data:  { status: code === 0 ? "STOPPED" : "ERROR" },
         });
       } catch { /* agent may have been deleted */ }
+      if (onExit) await onExit(code);
     });
 
     return { success: true, message: "Agent started successfully" };
@@ -146,6 +144,7 @@ export async function startAgent(agentId: string) {
       where: { id: agentId },
       data:  { status: "ERROR" },
     });
+    if (onExit) await onExit(null);
     throw error;
   }
 }

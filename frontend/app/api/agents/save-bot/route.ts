@@ -1,22 +1,31 @@
+// frontend/app/api/agents/save-bot/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { encryptEnvConfig } from "@/lib/crypto-env";
 
 // ─── POST /api/agents/save-bot ────────────────────────────────────────────────
-// Creates an Agent with associated AgentFile records for the WebContainer bot.
+// Creates an Agent with:
+//   - AgentFile records for the WebContainer bot code
+//   - configuration.encryptedEnv: AES-256-GCM encrypted envConfig JSON
+//
+// The worker decrypts encryptedEnv at runtime to get the API keys / RPC URL.
+// Keys are NEVER stored in plaintext in the database.
 export async function POST(req: Request) {
   try {
-
-    // Use a default userId for all saves (no auth)
     const userId = "public-user";
 
     const body = await req.json();
-    const { name = "Base Sepolia Arbitrage Bot", files, configuration } = body;
+    const {
+      name = "Base Sepolia Arbitrage Bot",
+      files,
+      configuration,
+      envConfig, // BotEnvConfig — encrypted before storage
+    } = body;
 
     if (!files || !Array.isArray(files) || files.length === 0) {
       return NextResponse.json({ error: "No files provided." }, { status: 400 });
     }
 
-    // Validate each file entry
     for (const f of files) {
       if (!f.filepath || typeof f.filepath !== "string") {
         return NextResponse.json(
@@ -32,14 +41,32 @@ export async function POST(req: Request) {
       }
     }
 
-    // Ensure the User row exists (Clerk may not have triggered the sync webhook yet)
+    // Build the configuration object stored in the DB.
+    // envConfig is encrypted; nothing sensitive lands in plaintext.
+    let mergedConfiguration: Record<string, unknown> = { ...(configuration ?? {}) };
+
+    if (envConfig && typeof envConfig === "object") {
+      // Strip empty values so we don't encrypt "" for optional fields
+      const sanitized: Record<string, string> = {};
+      for (const [k, v] of Object.entries(envConfig as Record<string, unknown>)) {
+        if (typeof v === "string" && v.trim().length > 0) {
+          sanitized[k] = v.trim();
+        }
+      }
+
+      if (Object.keys(sanitized).length > 0) {
+        mergedConfiguration.encryptedEnv = encryptEnvConfig(JSON.stringify(sanitized));
+      }
+    }
+
+    // Ensure the public user row exists
     await prisma.user.upsert({
       where: { id: userId },
       update: {},
       create: {
         id: userId,
         email: `${userId}@placeholder.agentia`,
-        walletAddress: "", // Patch: add required field
+        walletAddress: "",
       },
     });
 
@@ -48,7 +75,7 @@ export async function POST(req: Request) {
         name,
         userId,
         status: "STOPPED",
-        configuration: configuration ?? null,
+        configuration: mergedConfiguration as any, 
         files: {
           create: files.map(
             (f: { filepath: string; content: string; language?: string }) => ({
@@ -66,9 +93,9 @@ export async function POST(req: Request) {
   } catch (error) {
     const err = error as Error;
     console.error("[POST /api/agents/save-bot] Error:", err, err.stack);
-    return NextResponse.json({
-      error: err.message || String(error),
-      stack: err.stack || null
-    }, { status: 500 });
+    return NextResponse.json(
+      { error: err.message || String(error), stack: err.stack || null },
+      { status: 500 }
+    );
   }
 }
