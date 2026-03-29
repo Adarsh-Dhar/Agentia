@@ -1,103 +1,228 @@
 "use client"
 
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ExecutionTerminal } from '@/components/execution-terminal'
-import { PnLChart } from '@/components/pnl-chart'
 import {
-  ChevronLeft, Power, Copy, Pause, Play,
-  Trash2, RefreshCw, ShieldCheck, ShieldOff,
+  ChevronLeft, Play, Square, Trash2, RefreshCw, Loader2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import {
-  fetchAgent, fetchAgentLogs, updateAgentStatus, deleteAgent,
-  formatSessionExpiry, strategyLabel, Agent, TradeLog,
-} from '@/lib/api'
-import { useInterwovenKit, TESTNET } from '@initia/interwovenkit-react'
-import { useMutation } from '@tanstack/react-query'
+import { prisma } from '@/lib/prisma' // only used server-side — client calls API
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface AgentDetail {
+  id:            string
+  name:          string
+  status:        string
+  configuration: Record<string, unknown> | null
+  sessionKeyPriv: string | null
+  createdAt:     string
+  updatedAt:     string
+  files:         { id: string; filepath: string; language: string }[]
+  tradeLogs:     TradeLogEntry[]
+}
+
+interface TradeLogEntry {
+  id:              string
+  txHash:          string
+  tokenIn:         string
+  tokenOut:        string
+  amountIn:        string
+  amountOut:       string
+  profitEth:       string
+  profitUsd:       string
+  executionTimeMs: number
+  createdAt:       string
+}
+
+interface TerminalEntry {
+  line:  string
+  level: 'stdout' | 'stderr'
+  ts:    number
+}
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+
+const STATUS_COLOR: Record<string, string> = {
+  RUNNING:  'bg-green-500/20 text-green-300 border-green-500/30',
+  STARTING: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  STOPPING: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  STOPPED:  'bg-gray-500/20 text-gray-300 border-gray-500/30',
+  ERROR:    'bg-red-500/20 text-red-300 border-red-500/30',
+}
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+
+async function callWorker(agentId: string, action: 'start' | 'stop') {
+  const res = await fetch(`/api/agents/${agentId}/${action}`, { method: 'POST' })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+  return data
+}
+
+async function fetchAgentDetail(agentId: string): Promise<AgentDetail> {
+  const res = await fetch(`/api/agents/${agentId}`)
+  if (!res.ok) throw new Error('Agent not found')
+  return res.json()
+}
+
+async function fetchTerminalLogs(agentId: string, since?: number): Promise<TerminalEntry[]> {
+  const url = new URL(`/api/agents/${agentId}/terminal-logs`, window.location.origin)
+  if (since) url.searchParams.set('since', String(since))
+  const res = await fetch(url.toString())
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.entries ?? []
+}
+
+// ── Live Terminal component ───────────────────────────────────────────────────
+
+function LiveTerminal({ agentId, running }: { agentId: string; running: boolean }) {
+  const [lines, setLines]         = useState<TerminalEntry[]>([])
+  const sinceRef                  = useRef<number>(0)
+  const bottomRef                 = useRef<HTMLDivElement>(null)
+  const intervalRef               = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Initial load
+  useEffect(() => {
+    fetchTerminalLogs(agentId).then((entries) => {
+      setLines(entries)
+      if (entries.length > 0) sinceRef.current = entries[entries.length - 1].ts
+    })
+  }, [agentId])
+
+  // Poll for new lines when running
+  useEffect(() => {
+    if (!running) {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      return
+    }
+    intervalRef.current = setInterval(async () => {
+      const newEntries = await fetchTerminalLogs(agentId, sinceRef.current)
+      if (newEntries.length > 0) {
+        setLines((prev) => [...prev, ...newEntries].slice(-500))
+        sinceRef.current = newEntries[newEntries.length - 1].ts
+      }
+    }, 2000)
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [agentId, running])
+
+  // Auto-scroll
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lines])
+
+  const fmtTime = (ts: number) => {
+    const d = new Date(ts)
+    return [d.getHours(), d.getMinutes(), d.getSeconds()]
+      .map((n) => String(n).padStart(2, '0'))
+      .join(':')
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden flex flex-col h-[500px]">
+      <div className="bg-muted/30 border-b border-border px-4 py-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Live Terminal</h3>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{lines.length} lines</span>
+          {running && <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto bg-[#0a0d14] p-4 font-mono text-xs space-y-1">
+        {lines.length === 0 ? (
+          <span className="text-muted-foreground/50">No output yet — start the agent to see logs.</span>
+        ) : (
+          lines.map((entry, i) => (
+            <div key={i} className="flex gap-3 leading-relaxed">
+              <span className="text-muted-foreground/40 flex-shrink-0 select-none">
+                {fmtTime(entry.ts)}
+              </span>
+              <span className={entry.level === 'stderr' ? 'text-red-400' : 'text-green-300'}>
+                {entry.line}
+              </span>
+            </div>
+          ))
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="bg-muted/30 border-t border-border px-4 py-2 text-xs text-muted-foreground flex items-center gap-2">
+        {running
+          ? <><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />Polling every 2s</>
+          : <span className="text-muted-foreground/50">Agent stopped — showing last session logs</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AgentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const router = useRouter()
+  const router  = useRouter()
   const { id: agentId } = React.use(params)
 
-  const { autoSign } = useInterwovenKit()
-  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
-
-  const enableAutosign = useMutation({
-    mutationFn: () => autoSign.enable(TESTNET.defaultChainId),
-  })
-
-  const [agent,              setAgent]              = useState<Agent | null>(null)
-  const [logs,               setLogs]               = useState<TradeLog[]>([])
-  const [loading,            setLoading]            = useState(true)
-  const [error,              setError]              = useState<string | null>(null)
-  const [isCopied,           setIsCopied]           = useState(false)
-  const [actionLoading,      setActionLoading]      = useState(false)
-  const [showDeleteConfirm,  setShowDeleteConfirm]  = useState(false)
+  const [agent,             setAgent]             = useState<AgentDetail | null>(null)
+  const [loading,           setLoading]           = useState(true)
+  const [error,             setError]             = useState<string | null>(null)
+  const [actionLoading,     setActionLoading]     = useState(false)
+  const [actionError,       setActionError]       = useState<string | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const loadAgent = useCallback(async () => {
-    try { setAgent(await fetchAgent(agentId)); setError(null) }
-    catch { setError('Agent not found') }
-    finally { setLoading(false) }
+    try {
+      setAgent(await fetchAgentDetail(agentId))
+      setError(null)
+    } catch {
+      setError('Agent not found')
+    } finally {
+      setLoading(false)
+    }
   }, [agentId])
 
-  const loadLogs = useCallback(async () => {
-    try { setLogs([...await fetchAgentLogs(agentId)].reverse()) }
-    catch { /* silent */ }
-  }, [agentId])
+  // Initial load + refresh every 5 s while STARTING/STOPPING
+  useEffect(() => {
+    loadAgent()
+  }, [loadAgent])
 
   useEffect(() => {
-    loadAgent(); loadLogs()
-    const id = setInterval(loadLogs, 5000)
-    return () => clearInterval(id)
-  }, [loadAgent, loadLogs])
+    if (!agent) return
+    const transitioning = agent.status === 'STARTING' || agent.status === 'STOPPING'
+    if (!transitioning) return
+    const t = setInterval(loadAgent, 3000)
+    return () => clearInterval(t)
+  }, [agent, loadAgent])
 
-  const handleCopy = (txt: string) => {
-    navigator.clipboard.writeText(txt)
-    setIsCopied(true)
-    setTimeout(() => setIsCopied(false), 2000)
-  }
-
-  const handleStatusToggle = async () => {
+  const handleToggle = async () => {
     if (!agent) return
     setActionLoading(true)
+    setActionError(null)
     try {
-      const next = agent.status === 'RUNNING' ? 'PAUSED' : 'RUNNING'
-      setAgent(await updateAgentStatus(agentId, next))
-      await loadLogs()
-    } finally { setActionLoading(false) }
-  }
-
-  const handleRevoke = async () => {
-    setActionLoading(true)
-    try { await updateAgentStatus(agentId, 'REVOKED'); await loadAgent(); await loadLogs() }
-    finally { setActionLoading(false) }
+      const action = agent.status === 'RUNNING' ? 'stop' : 'start'
+      await callWorker(agentId, action)
+      setTimeout(loadAgent, 800)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   const handleDelete = async () => {
     setActionLoading(true)
-    try { await deleteAgent(agentId); router.push('/dashboard') }
-    finally { setActionLoading(false) }
+    try {
+      const res = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Delete failed')
+      router.push('/dashboard')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+      setActionLoading(false)
+    }
   }
 
-  const chartData = (() => {
-    if (!agent) return [{ time: 'Start', value: 0 }, { time: 'Now', value: 0 }]
-    const trades = logs.filter(l => l.type === 'EXECUTION_SELL' || l.type === 'PROFIT_SECURED')
-    if (!trades.length) return [{ time: 'Start', value: 0 }, { time: 'Now', value: agent.currentPnl }]
-    let cum = 0
-    const pts = [{ time: 'Start', value: 0 }]
-    trades.forEach(l => {
-      cum += (l.price ?? 0) * (l.amount ?? 0) * 0.01
-      const t = new Date(l.timestamp)
-      pts.push({ time: `${t.getHours()}:${String(t.getMinutes()).padStart(2,'0')}`, value: parseFloat(cum.toFixed(2)) })
-    })
-    pts[pts.length - 1].value = agent.currentPnl
-    return pts
-  })()
-
-  const latestTx = [...logs].reverse().find(l => l.txHash)
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
@@ -109,58 +234,81 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
     <div className="min-h-screen bg-background flex items-center justify-center text-center">
       <div>
         <h1 className="text-2xl font-bold mb-2">Agent Not Found</h1>
-        <Link href="/dashboard"><Button variant="outline" className="mt-4">Back to Dashboard</Button></Link>
+        <Link href="/dashboard">
+          <Button variant="outline" className="mt-4">Back to Dashboard</Button>
+        </Link>
       </div>
     </div>
   )
 
-  const statusColor: Record<string, string> = {
-    RUNNING: 'bg-green-500/20 text-green-300 border-green-500/30',
-    PAUSED:  'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
-    REVOKED: 'bg-red-500/20 text-red-300 border-red-500/30',
-    EXPIRED: 'bg-gray-500/20 text-gray-300 border-gray-500/30',
-  }
-
-  const isActive = agent.status !== 'REVOKED' && agent.status !== 'EXPIRED'
+  const isRunning    = agent.status === 'RUNNING'
+  const isTerminal   = agent.status === 'STOPPED' || agent.status === 'ERROR'
+  const inTransition = agent.status === 'STARTING' || agent.status === 'STOPPING'
+  const cfg          = agent.configuration as Record<string, unknown> | null
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="sticky top-0 z-30 bg-background border-b border-border">
         <div className="px-6 py-4 lg:px-8 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-4">
             <Link href="/dashboard">
-              <Button variant="ghost" size="sm"><ChevronLeft size={20} className="mr-1" />Back</Button>
+              <Button variant="ghost" size="sm">
+                <ChevronLeft size={20} className="mr-1" />Back
+              </Button>
             </Link>
             <div>
-              <h1 className="text-3xl font-bold">{agent.name}</h1>
+              <h1 className="text-2xl font-bold">{agent.name}</h1>
               <p className="text-muted-foreground text-sm mt-0.5">
-                {strategyLabel(agent.strategy)} · {agent.targetPair}
+                {cfg?.strategy as string ?? 'Custom Agent'}{cfg?.targetPair ? ` · ${cfg.targetPair}` : ''}
               </p>
             </div>
           </div>
+
           <div className="flex items-center gap-2 flex-wrap">
-            {isActive && (
-              <Button size="sm" variant="outline" onClick={handleStatusToggle} disabled={actionLoading}>
-                {agent.status === 'RUNNING'
-                  ? <><Pause size={14} className="mr-1.5" />Pause</>
-                  : <><Play size={14} className="mr-1.5" />Resume</>}
+            {/* Start / Stop */}
+            {!inTransition && (
+              <Button
+                size="sm"
+                onClick={handleToggle}
+                disabled={actionLoading}
+                variant={isRunning ? 'destructive' : 'outline'}
+                className={isRunning
+                  ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
+                  : 'border-green-500/30 text-green-400 hover:bg-green-500/10'}
+              >
+                {actionLoading ? (
+                  <Loader2 size={14} className="mr-1.5 animate-spin" />
+                ) : isRunning ? (
+                  <><Square size={14} className="mr-1.5" />Stop Agent</>
+                ) : (
+                  <><Play size={14} className="mr-1.5" />Start Agent</>
+                )}
               </Button>
             )}
-            {isActive && (
-              <Button size="sm" onClick={handleRevoke} disabled={actionLoading}
-                className="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20">
-                <Power size={14} className="mr-1.5" />Revoke
-              </Button>
+
+            {/* Transitioning indicator */}
+            {inTransition && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                {agent.status === 'STARTING' ? 'Starting...' : 'Stopping...'}
+              </div>
             )}
+
+            {/* Refresh */}
+            <Button variant="ghost" size="sm" onClick={loadAgent} disabled={actionLoading}>
+              <RefreshCw size={14} />
+            </Button>
+
+            {/* Delete */}
             {!showDeleteConfirm ? (
               <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(true)}
-                disabled={actionLoading} className="text-muted-foreground hover:text-destructive">
+                className="text-muted-foreground hover:text-destructive">
                 <Trash2 size={14} />
               </Button>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-destructive">Delete?</span>
+                <span className="text-sm text-destructive">Delete agent?</span>
                 <Button size="sm" variant="destructive" onClick={handleDelete} disabled={actionLoading}>Yes</Button>
                 <Button size="sm" variant="ghost" onClick={() => setShowDeleteConfirm(false)}>No</Button>
               </div>
@@ -170,83 +318,97 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div className="px-6 py-8 lg:px-8">
-        {/* Autosign nudge */}
-        {agent.status === 'RUNNING' && !autosignEnabled && (
-          <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <ShieldOff size={18} className="text-yellow-400 flex-shrink-0" />
-              <p className="text-sm text-yellow-300">
-                Enable Initia autosign so this agent can execute trades automatically.
-              </p>
-            </div>
-            <Button size="sm" variant="outline"
-              className="flex-shrink-0 border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10"
-              onClick={() => enableAutosign.mutate()} disabled={enableAutosign.isPending}>
-              <ShieldCheck size={14} className="mr-1.5" />
-              Enable Autosign
-            </Button>
+        {/* Action error */}
+        {actionError && (
+          <div className="mb-6 p-4 bg-destructive/10 border border-destructive/30 rounded-lg text-destructive text-sm">
+            {actionError}
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left */}
-          <div className="lg:col-span-2 space-y-6">
-            <div className="flex items-center gap-4 flex-wrap">
-              <Badge variant="default" className={statusColor[agent.status]}>{agent.status}</Badge>
-              <div>
-                <p className="text-xs text-muted-foreground">Session expires</p>
-                <p className="text-base font-semibold">{formatSessionExpiry(agent.sessionExpiresAt)}</p>
+
+          {/* ── Left column: info cards ── */}
+          <div className="lg:col-span-1 space-y-4">
+            {/* Status */}
+            <div className="bg-card border border-border rounded-lg p-5">
+              <p className="text-xs text-muted-foreground mb-2">Status</p>
+              <div className="flex items-center gap-2">
+                <Badge className={STATUS_COLOR[agent.status] ?? STATUS_COLOR.STOPPED}>
+                  {agent.status}
+                </Badge>
+                {inTransition && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
               </div>
-              {autosignEnabled && (
-                <div className="flex items-center gap-1.5 text-green-400 text-xs">
-                  <ShieldCheck size={13} />Autosign active
-                </div>
-              )}
-              <Button variant="ghost" size="sm" onClick={() => { loadAgent(); loadLogs() }}
-                className="ml-auto text-muted-foreground">
-                <RefreshCw size={14} className="mr-1" />Refresh
-              </Button>
             </div>
 
-            <div className="bg-card border border-border rounded-lg p-6">
-              <h3 className="text-lg font-semibold mb-4">Profit & Loss</h3>
-              <PnLChart data={chartData} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { label: 'Current PnL', value: `${agent.currentPnl >= 0 ? '+' : ''}${agent.currentPnl.toFixed(2)} USDC`, color: agent.currentPnl >= 0 ? 'text-green-400' : 'text-red-400' },
-                { label: 'Spend Allowance', value: `$${agent.spendAllowance.toFixed(0)}`, color: 'text-foreground' },
-                { label: 'Trading Pair', value: agent.targetPair, color: 'text-foreground font-mono' },
-                { label: 'Total Events', value: String(logs.length), color: 'text-foreground' },
-              ].map(s => (
-                <div key={s.label} className="bg-card border border-border rounded-lg p-5">
-                  <p className="text-sm text-muted-foreground mb-1">{s.label}</p>
-                  <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+            {/* Configuration */}
+            {cfg && (
+              <div className="bg-card border border-border rounded-lg p-5">
+                <p className="text-xs text-muted-foreground mb-3">Configuration</p>
+                <div className="space-y-2">
+                  {Object.entries(cfg)
+                    .filter(([k]) => !['intent', 'generatedAt', 'warnings', 'riskNotes', 'entryConditions', 'exitConditions'].includes(k))
+                    .map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-2 text-sm">
+                        <span className="text-muted-foreground capitalize">
+                          {k.replace(/([A-Z])/g, ' $1').toLowerCase()}
+                        </span>
+                        <span className="font-mono text-xs text-right truncate max-w-[120px]" title={String(v)}>
+                          {String(v)}
+                        </span>
+                      </div>
+                    ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+
+            {/* Files */}
+            {agent.files.length > 0 && (
+              <div className="bg-card border border-border rounded-lg p-5">
+                <p className="text-xs text-muted-foreground mb-3">Bot Files ({agent.files.length})</p>
+                <div className="space-y-1">
+                  {agent.files.map((f) => (
+                    <div key={f.id} className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                      <span className="text-primary/60">📄</span>
+                      {f.filepath}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recent trades */}
+            {agent.tradeLogs.length > 0 && (
+              <div className="bg-card border border-border rounded-lg p-5">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Recent Trades ({agent.tradeLogs.length})
+                </p>
+                <div className="space-y-2">
+                  {agent.tradeLogs.slice(0, 5).map((log) => (
+                    <div key={log.id} className="text-xs border border-border rounded p-2">
+                      <div className="flex justify-between mb-1">
+                        <span className="font-mono text-muted-foreground">
+                          {log.tokenIn} → {log.tokenOut}
+                        </span>
+                        <span className={parseFloat(log.profitUsd) >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {parseFloat(log.profitUsd) >= 0 ? '+' : ''}{log.profitUsd} USD
+                        </span>
+                      </div>
+                      <div className="text-muted-foreground/50 font-mono text-[10px] truncate">
+                        {log.txHash}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Terminal */}
-          <div className="lg:col-span-1">
-            <ExecutionTerminal logs={logs} />
+          {/* ── Right column: terminal ── */}
+          <div className="lg:col-span-2">
+            <LiveTerminal agentId={agentId} running={isRunning} />
           </div>
+
         </div>
-
-        {latestTx?.txHash && (
-          <div className="mt-8 bg-muted/10 border border-muted/30 rounded-lg p-6">
-            <h3 className="font-semibold mb-3">Latest Transaction</h3>
-            <div className="flex items-center justify-between bg-background rounded p-4 font-mono text-sm">
-              <span className="text-muted-foreground truncate pr-4">TxHash: {latestTx.txHash}</span>
-              <button onClick={() => handleCopy(latestTx.txHash!)}
-                className="ml-2 p-2 hover:bg-muted rounded transition-colors flex-shrink-0">
-                <Copy size={16} />
-              </button>
-            </div>
-            {isCopied && <p className="text-sm text-green-400 mt-2">Copied!</p>}
-          </div>
-        )}
       </div>
     </div>
   )

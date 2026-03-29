@@ -1,16 +1,21 @@
 import express from "express";
-import { startAgent, stopAgent, getAgentStatus, listRunningAgents } from "./engine.js";
+import {
+  startAgent,
+  stopAgent,
+  getAgentStatus,
+  getAgentLogs,
+  listRunningAgents,
+} from "./engine.js";
 
 const app = express();
 app.use(express.json());
 
 const SECRET = process.env.WORKER_SECRET ?? "dev-worker-secret";
 
-// Simple auth middleware — frontend must send the same secret
 function requireAuth(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction
+  req:  express.Request,
+  res:  express.Response,
+  next: express.NextFunction,
 ) {
   const auth = req.headers.authorization;
   if (!auth || auth !== `Bearer ${SECRET}`) {
@@ -20,40 +25,50 @@ function requireAuth(
   next();
 }
 
-// ── Health check (no auth needed) ────────────────────────────────────────────
+// ── Health (no auth) ──────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", running: listRunningAgents() });
 });
 
-// ── Start an agent ────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────────
 app.post("/agents/:id/start", requireAuth, async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await startAgent(id.toString());
-    res.json(result);
+    res.json(await startAgent(id.toString()));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[server] startAgent error for ${id}:`, message);
+    console.error(`[server] startAgent(${id}):`, message);
     res.status(500).json({ success: false, error: message });
   }
 });
 
-// ── Stop an agent ─────────────────────────────────────────────────────────────
+// ── Stop ──────────────────────────────────────────────────────────────────────
 app.post("/agents/:id/stop", requireAuth, async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await stopAgent(id.toString());
-    res.json(result);
+    res.json(await stopAgent(id.toString()));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[server] stopAgent error for ${id}:`, message);
+    console.error(`[server] stopAgent(${id}):`, message);
     res.status(500).json({ success: false, error: message });
   }
 });
 
-// ── Agent status ──────────────────────────────────────────────────────────────
+// ── Status ────────────────────────────────────────────────────────────────────
 app.get("/agents/:id/status", requireAuth, (req, res) => {
-  res.json(getAgentStatus(req.params.toString()));
+  res.json(getAgentStatus(req.params.id.toString()));
+});
+
+// ── Logs ──────────────────────────────────────────────────────────────────────
+// GET /agents/:id/logs?since=<epoch_ms>
+// Returns up to 500 log lines. If `since` is provided, returns only newer entries.
+app.get("/agents/:id/logs", requireAuth, (req, res) => {
+  const { id }   = req.params;
+  const sinceRaw = req.query.since as string | undefined;
+  const since    = sinceRaw ? parseInt(sinceRaw, 10) : undefined;
+
+  const entries = getAgentLogs(id.toString(), since);
+  res.json({ agentId: id, entries });
 });
 
 export function startServer(port: number) {

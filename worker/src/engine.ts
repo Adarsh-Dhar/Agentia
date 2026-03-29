@@ -6,17 +6,48 @@ import prisma from "./lib/prisma.js";
 
 const execAsync = promisify(exec);
 
-// In-memory registry of running bot processes
+// ── In-memory state ───────────────────────────────────────────────────────────
+
 const runningAgents: Map<string, ChildProcess> = new Map();
+
+// Circular log buffer — keeps last 500 lines per agent
+const MAX_LOG_LINES = 500;
+
+interface LogEntry {
+  line:  string;
+  level: "stdout" | "stderr";
+  ts:    number; // epoch ms
+}
+
+const agentLogs: Map<string, LogEntry[]> = new Map();
+
+function appendLog(agentId: string, line: string, level: "stdout" | "stderr") {
+  if (!agentLogs.has(agentId)) agentLogs.set(agentId, []);
+  const buf = agentLogs.get(agentId)!;
+  buf.push({ line, level, ts: Date.now() });
+  if (buf.length > MAX_LOG_LINES) buf.splice(0, buf.length - MAX_LOG_LINES);
+}
+
+/** Returns log entries for an agent, optionally filtering to entries after `since` (epoch ms). */
+export function getAgentLogs(agentId: string, since?: number): LogEntry[] {
+  const buf = agentLogs.get(agentId) ?? [];
+  return since ? buf.filter((e) => e.ts > since) : [...buf];
+}
+
+export function clearAgentLogs(agentId: string) {
+  agentLogs.delete(agentId);
+}
+
+// ── Core operations ───────────────────────────────────────────────────────────
 
 export async function startAgent(agentId: string) {
   if (runningAgents.has(agentId)) {
     throw new Error(`Agent ${agentId} is already running`);
   }
 
-  // 1. Fetch the Agent and its code files from the DB
+  // Fetch agent + files from DB
   const agent = await prisma.agent.findUnique({
-    where: { id: agentId },
+    where:   { id: agentId },
     include: { files: true },
   });
 
@@ -25,32 +56,29 @@ export async function startAgent(agentId: string) {
     throw new Error(`No code files found for agent ${agentId} in the database`);
   }
 
-  // 2. Create a dedicated workspace directory for this bot
+  // Build workspace
   const workspaceDir = path.join(process.cwd(), ".workspaces", agentId);
   await fs.mkdir(workspaceDir, { recursive: true });
 
-  // 3. Write all database files to disk
-  console.log(`[Agent ${agentId}] Rebuilding workspace from ${agent.files.length} file(s)...`);
+  appendLog(agentId, `Rebuilding workspace from ${agent.files.length} file(s)...`, "stdout");
+
   for (const file of agent.files) {
     const fullPath = path.join(workspaceDir, file.filepath);
-    // Ensure nested directories (e.g. src/) exist
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, file.content, "utf-8");
-    console.log(`[Agent ${agentId}]   wrote: ${file.filepath}`);
+    appendLog(agentId, `  wrote: ${file.filepath}`, "stdout");
   }
 
-  // 4. Mark as STARTING
   await prisma.agent.update({
     where: { id: agentId },
-    data: { status: "STARTING" },
+    data:  { status: "STARTING" },
   });
 
   try {
-    // 5. Install dependencies
-    console.log(`[Agent ${agentId}] Running npm install...`);
+    appendLog(agentId, "Running npm install...", "stdout");
     await execAsync("npm install --legacy-peer-deps", { cwd: workspaceDir });
+    appendLog(agentId, "npm install complete.", "stdout");
 
-    // 6. Build environment — inherit worker env + any agent-specific config
     const agentConfig =
       agent.configuration && typeof agent.configuration === "object"
         ? (agent.configuration as Record<string, string>)
@@ -59,15 +87,14 @@ export async function startAgent(agentId: string) {
     const agentEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...agentConfig,
-      // Pass the private session key if present
       ...(agent.sessionKeyPriv ? { SESSION_KEY_PRIV: agent.sessionKeyPriv } : {}),
     };
 
-    // 7. Spawn the bot process
-    console.log(`[Agent ${agentId}] Spawning tsx src/index.ts ...`);
+    appendLog(agentId, "Spawning tsx src/index.ts...", "stdout");
+
     const botProcess = spawn("npx", ["tsx", "src/index.ts"], {
-      cwd: workspaceDir,
-      env: agentEnv,
+      cwd:   workspaceDir,
+      env:   agentEnv,
       shell: true,
     });
 
@@ -75,36 +102,49 @@ export async function startAgent(agentId: string) {
 
     await prisma.agent.update({
       where: { id: agentId },
-      data: { status: "RUNNING" },
+      data:  { status: "RUNNING" },
     });
 
-    // 8. Pipe stdout / stderr
+    appendLog(agentId, "Agent RUNNING.", "stdout");
+
     botProcess.stdout?.on("data", (data: Buffer) => {
-      console.log(`[Agent ${agentId} OUT] ${data.toString().trim()}`);
+      const text = data.toString().trimEnd();
+      console.log(`[Agent ${agentId} OUT] ${text}`);
+      for (const line of text.split("\n")) {
+        if (line.trim()) appendLog(agentId, line, "stdout");
+      }
     });
 
     botProcess.stderr?.on("data", (data: Buffer) => {
-      console.error(`[Agent ${agentId} ERR] ${data.toString().trim()}`);
+      const text = data.toString().trimEnd();
+      console.error(`[Agent ${agentId} ERR] ${text}`);
+      for (const line of text.split("\n")) {
+        if (line.trim()) appendLog(agentId, line, "stderr");
+      }
     });
 
-    // 9. Handle process exit
     botProcess.on("close", async (code) => {
-      console.log(`[Agent ${agentId}] Process exited with code ${code}`);
+      const msg = `Process exited with code ${code}`;
+      appendLog(agentId, msg, code === 0 ? "stdout" : "stderr");
       runningAgents.delete(agentId);
 
-      await prisma.agent.update({
-        where: { id: agentId },
-        data: { status: code === 0 ? "STOPPED" : "ERROR" },
-      });
+      try {
+        await prisma.agent.update({
+          where: { id: agentId },
+          data:  { status: code === 0 ? "STOPPED" : "ERROR" },
+        });
+      } catch { /* agent may have been deleted */ }
     });
 
     return { success: true, message: "Agent started successfully" };
+
   } catch (error) {
-    console.error(`[Agent ${agentId}] Failed to start:`, error);
+    const msg = error instanceof Error ? error.message : String(error);
+    appendLog(agentId, `Failed to start: ${msg}`, "stderr");
     runningAgents.delete(agentId);
     await prisma.agent.update({
       where: { id: agentId },
-      data: { status: "ERROR" },
+      data:  { status: "ERROR" },
     });
     throw error;
   }
@@ -114,27 +154,28 @@ export async function stopAgent(agentId: string) {
   const botProcess = runningAgents.get(agentId);
 
   if (!botProcess) {
-    // Not running in memory — just sync the DB
     await prisma.agent.update({
       where: { id: agentId },
-      data: { status: "STOPPED" },
+      data:  { status: "STOPPED" },
     });
     return { success: true, message: "Agent was not running; marked as STOPPED." };
   }
 
   await prisma.agent.update({
     where: { id: agentId },
-    data: { status: "STOPPING" },
+    data:  { status: "STOPPING" },
   });
 
+  appendLog(agentId, "SIGTERM sent — stopping agent...", "stdout");
   botProcess.kill("SIGTERM");
   runningAgents.delete(agentId);
 
   await prisma.agent.update({
     where: { id: agentId },
-    data: { status: "STOPPED" },
+    data:  { status: "STOPPED" },
   });
 
+  appendLog(agentId, "Agent STOPPED.", "stdout");
   return { success: true, message: "Agent stopped successfully" };
 }
 

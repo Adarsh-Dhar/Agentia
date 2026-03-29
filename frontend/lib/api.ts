@@ -4,7 +4,7 @@ export interface Agent {
   id: string
   name: string
   strategy: 'MEME_SNIPER' | 'ARBITRAGE' | 'SENTIMENT_TRADER'
-  status: 'RUNNING' | 'PAUSED' | 'REVOKED' | 'EXPIRED'
+  status: 'RUNNING' | 'PAUSED' | 'REVOKED' | 'EXPIRED' | 'STARTING' | 'STOPPING' | 'STOPPED' | 'ERROR'
   targetPair: string
   spendAllowance: number
   sessionExpiresAt: string
@@ -15,6 +15,7 @@ export interface Agent {
   createdAt: string
   updatedAt: string
   logs?: TradeLog[]
+  configuration?: Record<string, unknown>
 }
 
 export interface TradeLog {
