@@ -4,119 +4,279 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { getRequiredEnvFields, type EnvFieldDef } from '@/lib/bot-constant'
 
 export interface BotConfigChatMessage {
-    id: string;
-    role: 'assistant' | 'user';
-    content: string;
-    timestamp: Date;
-    card?: 
-      | { type: 'success_card'; agentId: string; botName: string }
-      | { type: 'dynamic_credentials_form'; fields: EnvFieldDef[] };
+  id: string;
+  role: 'assistant' | 'user';
+  content: string;
+  timestamp: Date;
+  card?: 
+    | { type: 'success_card'; agentId: string; botName: string }
+    | { type: 'dynamic_credentials_form'; fields: EnvFieldDef[] };
+}
+
+let _msgId = 0
+const uid = () => String(++_msgId)
+const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+export function useBotConfigChat() {
+  const [messages, setMessages]         = useState<BotConfigChatMessage[]>([])
+  const [input, setInput]               = useState('')
+  const [isTyping, setIsTyping]         = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [step, setStep]                 = useState<'idle' | 'ask_keys' | 'generating'>('idle')
+
+  // Store both the original and expanded prompts across steps
+  const [pendingOriginalPrompt,  setPendingOriginalPrompt]  = useState('')
+  const [pendingExpandedPrompt,  setPendingExpandedPrompt]  = useState('')
+  const [pendingIntent,          setPendingIntent]          = useState<Record<string, unknown> | null>(null)
+
+  const [generatedAgentId, setGeneratedAgentId] = useState<string | null>(null)
+
+  const bottomRef  = useRef<HTMLDivElement>(null)
+  const initialized = useRef(false)
+
+  const defaultChips = [
+    "Flash Loan Arbitrage Bot",
+    "Solana Sentiment Bot",
+    "Memecoin Sniper",
+    "Cross-Chain Yield Arbitrage",
+    "Whale Mirror Bot",
+  ]
+  const [chips, setChips] = useState<string[]>(defaultChips)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isTyping, chips])
+
+  const pushA = useCallback((content: string, card?: BotConfigChatMessage['card']) => {
+    setMessages(prev => [...prev, { id: uid(), role: 'assistant', content, timestamp: new Date(), card }])
+  }, [])
+  const pushU = useCallback((content: string) => {
+    setMessages(prev => [...prev, { id: uid(), role: 'user', content, timestamp: new Date() }])
+  }, [])
+
+  useEffect(() => {
+    if (initialized.current) return
+    initialized.current = true
+    ;(async () => {
+      setIsTyping(true)
+      await delay(700)
+      setIsTyping(false)
+      pushA(
+        `Hey! 👋 I'm your **Universal Meta-Agent**.\n\n` +
+        `I can architect and generate over 20 types of on-chain trading bots — flash loan arbitrage, memecoin snipers, sentiment traders, whale mirrors, cross-chain yield bots, perpetual funding rate bots, and more.\n\n` +
+        `Just describe your strategy in plain English. I'll expand it into a full technical specification and then generate production-ready TypeScript code.\n\n` +
+        `What kind of bot do you want to build?`
+      )
+    })()
+  }, [pushA])
+
+  // ── Main send handler ──────────────────────────────────────────────────────
+
+  const handleSend = useCallback(async (rawInput?: string) => {
+    if (step !== 'idle') return
+    const text = (rawInput ?? input).trim()
+    if (!text || isGenerating) return
+
+    setInput('')
+    setChips([])
+    pushU(text)
+    setIsGenerating(true)
+
+    // Show a thinking message
+    setIsTyping(true)
+    await delay(500)
+    setIsTyping(false)
+    pushA(`🔍 Analyzing your strategy and expanding it into a full technical spec...`)
+
+    try {
+      // ── Step 1: Classify intent + expand prompt ───────────────────────────
+      const classRes = await fetch('/api/classify-intent', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ prompt: text }),
+      })
+
+      const classData = await classRes.json()
+
+      if (!classRes.ok) {
+        throw new Error(classData.error ?? `Classification failed (HTTP ${classRes.status})`)
+      }
+
+      const intent: Record<string, unknown>  = classData.intent  ?? {}
+      const expandedPrompt: string           = classData.expandedPrompt ?? text
+
+      console.log("[chat] Intent:", JSON.stringify(intent))
+      console.log("[chat] Expanded prompt length:", expandedPrompt.length, "chars")
+
+      // Show the user what was classified
+      const botType    = (intent.bot_type as string) ?? "Trading Bot"
+      const strategy   = (intent.strategy as string) ?? "unknown"
+      const chain      = (intent.chain as string) ?? "evm"
+      const network    = (intent.network as string) ?? "base-sepolia"
+      const execModel  = (intent.execution_model as string) ?? "polling"
+
+      setIsTyping(true)
+      await delay(400)
+      setIsTyping(false)
+      pushA(
+        `✅ **Strategy identified:** ${botType}\n\n` +
+        `📋 **Details:**\n` +
+        `• Chain: ${chain === 'solana' ? '◎ Solana' : `⬡ ${network}`}\n` +
+        `• Strategy: ${strategy.replace(/_/g, ' ')}\n` +
+        `• Execution model: ${execModel}\n` +
+        `• Required MCPs: ${((intent.required_mcps as string[]) ?? []).join(', ') || 'standard'}\n\n` +
+        `I've expanded your idea into a detailed technical specification (${expandedPrompt.length} chars). Checking what credentials are needed...`
+      )
+
+      // ── Step 2: Check which API keys are required ─────────────────────────
+      const fields = getRequiredEnvFields(intent as Parameters<typeof getRequiredEnvFields>[0])
+        .filter(f => f.required)
+
+      if (fields.length > 0) {
+        // Store both prompts + intent for when the user submits keys
+        setPendingOriginalPrompt(text)
+        setPendingExpandedPrompt(expandedPrompt)
+        setPendingIntent(intent)
+
+        setIsTyping(true)
+        await delay(400)
+        setIsTyping(false)
+        pushA(
+          `To build this bot I need a few API keys. They'll be **AES-256 encrypted** before being stored — never stored in plaintext.`,
+          { type: 'dynamic_credentials_form', fields }
+        )
+        setStep('ask_keys')
+        setIsGenerating(false)
+      } else {
+        // No keys needed — generate immediately
+        await generateBot(text, expandedPrompt, {})
+      }
+
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error("[chat] Error during classification:", msg)
+      setIsGenerating(false)
+      setIsTyping(true)
+      await delay(300)
+      setIsTyping(false)
+      pushA(
+        `❌ **Classification failed:** ${msg}\n\n` +
+        `This usually means the Python Meta-Agent isn't running. ` +
+        `Don't worry — I'll use a built-in fallback classifier to continue.\n\n` +
+        `Try sending your prompt again.`
+      )
+      setChips(defaultChips)
+    }
+  }, [input, isGenerating, step, pushA, pushU]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Submit keys from the credentials form ─────────────────────────────────
+
+  const submitDynamicKeys = async (envData: Record<string, string>) => {
+    setStep('generating')
+    setIsGenerating(true)
+    pushU("API keys provided ✓")
+
+    await generateBot(pendingOriginalPrompt, pendingExpandedPrompt, envData)
   }
 
-  let _msgId = 0
-  const uid = () => String(++_msgId)
-  const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
+  // ── Core generation function ───────────────────────────────────────────────
 
-  export function useBotConfigChat() {
-    const [messages, setMessages] = useState<BotConfigChatMessage[]>([])
-    const [input, setInput] = useState('')
-    const [isTyping, setIsTyping] = useState(false)
-    const [isGenerating, setIsGenerating] = useState(false)
-    const [step, setStep] = useState<'idle' | 'ask_keys' | 'generating'>('idle')
-    const [pendingPrompt, setPendingPrompt] = useState('')
-    const [generatedAgentId, setGeneratedAgentId] = useState<string | null>(null)
-  
-    const bottomRef = useRef<HTMLDivElement>(null)
-    const initialized = useRef(false)
+  const generateBot = async (
+    originalPrompt: string,
+    expandedPrompt: string,
+    envConfig: Record<string, string>
+  ) => {
+    setIsTyping(true)
+    await delay(500)
+    setIsTyping(false)
+    pushA(
+      `🔨 **Generating your bot...**\n\n` +
+      `The Meta-Agent is now writing production-ready TypeScript code based on your expanded specification. ` +
+      `This typically takes 20–45 seconds.\n\n` +
+      `_Hang tight while I architect the full bot..._`
+    )
 
-    const defaultChips = ["High-Frequency Sniper", "Solana Sentiment Bot", "Cross-Chain Yield Arbitrage"]
-    const [chips, setChips] = useState<string[]>(defaultChips)
+    try {
+      const res = await fetch('/api/generate-bot', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          prompt:         originalPrompt,   // original for display / DB record
+          expandedPrompt,                   // rich spec for the code generator
+          envConfig,
+        }),
+      })
 
-    useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isTyping, chips])
+      const data = await res.json()
 
-    const pushA = useCallback((content: string, card?: BotConfigChatMessage['card']) => {
-      setMessages(prev => [...prev, { id: uid(), role: 'assistant', content, timestamp: new Date(), card }])
-    }, [])
-    const pushU = useCallback((content: string) => {
-      setMessages(prev => [...prev, { id: uid(), role: 'user', content, timestamp: new Date() }])
-    }, [])
-
-    useEffect(() => {
-      if (initialized.current) return
-      initialized.current = true
-      ;(async () => {
-        setIsTyping(true); await delay(800); setIsTyping(false);
-        pushA(`Hey! 👋 I'm your **Universal Meta-Agent**.\n\nI can build over 20 different types of on-chain bots. What kind of bot do you want to build today?`)
-      })()
-    }, [pushA])
-
-    const handleSend = useCallback(async (rawInput?: string) => {
-      if (step !== 'idle') return;
-      const text = (rawInput ?? input).trim()
-      if (!text || isGenerating) return
-
-      setInput(''); setChips([]); pushU(text); setIsGenerating(true)
-
-      setIsTyping(true); await delay(600); setIsTyping(false);
-      pushA(`🔨 Analyzing your strategy...`)
-
-      try {
-        // 1. Classify Intent
-        const classRes = await fetch('/api/classify-intent', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: text }),
-        })
-        const classData = await classRes.json()
-        if (!classRes.ok) throw new Error(classData.error)
-
-        // 2. Check Required Keys
-        const fields = getRequiredEnvFields(classData.intent).filter(f => f.required)
-
-        if (fields.length > 0) {
-          setPendingPrompt(text)
-          pushA("To build this specific bot, I'll need a few API keys. Please provide them below (they are safely AES-256 encrypted in the database):", { type: 'dynamic_credentials_form', fields })
-          setStep('ask_keys')
-          setIsGenerating(false)
-        } else {
-          await generateBot(text, {})
-        }
-      } catch (err) {
-        setIsGenerating(false)
-        pushA(`❌ Analysis failed: ${err instanceof Error ? err.message : String(err)}`)
-        setChips(defaultChips)
+      if (!res.ok) {
+        throw new Error(data?.error ?? `Generation failed (HTTP ${res.status})`)
       }
-    }, [input, isGenerating, step, pushA, pushU])
 
-    const submitDynamicKeys = async (envData: Record<string, string>) => {
-      setStep('generating'); setIsGenerating(true); pushU("Provided API keys.")
-      await generateBot(pendingPrompt, envData)
+      setGeneratedAgentId(data.agentId)
+
+      const fileCount = (data.files ?? []).length
+      const thoughts  = data.thoughts ?? "Bot generated successfully."
+
+      setIsTyping(true)
+      await delay(400)
+      setIsTyping(false)
+      pushA(
+        `🎉 **${data.botName} is ready!**\n\n` +
+        `${thoughts}\n\n` +
+        `📁 **${fileCount} files generated** and saved to the Bot IDE.\n\n` +
+        `Click **Open in Bot IDE** below to review the code, configure your environment variables, and launch the bot.`,
+        { type: 'success_card', agentId: data.agentId, botName: data.botName }
+      )
+      setChips(["Build another bot", "What strategies are available?"])
+
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error("[chat] Error during generation:", msg)
+      setIsTyping(true)
+      await delay(300)
+      setIsTyping(false)
+      pushA(
+        `❌ **Generation failed:** ${msg}\n\n` +
+        (msg.includes("Cannot reach") || msg.includes("503")
+          ? `The Python Meta-Agent server isn't running. Start it with:\n\`cd agents && uvicorn main:app --reload\``
+          : `Please try again. If the error persists, check that all services are running.`)
+      )
+      setChips(defaultChips)
+    } finally {
+      setIsGenerating(false)
+      setStep('idle')
     }
+  }
 
-    const generateBot = async (promptText: string, envConfig: Record<string, string>) => {
-      setIsTyping(true); await delay(600); setIsTyping(false);
-      pushA(`🔨 Generating your custom bot architecture... This usually takes about 20-30 seconds.`)
+  // ── Input event handlers ───────────────────────────────────────────────────
 
-      try {
-        const res = await fetch('/api/generate-bot', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: promptText, envConfig }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data?.error ?? `Generation failed`)
-
-        setGeneratedAgentId(data.agentId)
-        setIsTyping(true); await delay(500); setIsTyping(false);
-        pushA(`✅ **${data.botName}** is ready!\n\n${data.thoughts}\n\nYour bot has been generated and saved to the Bot IDE.`, { type: 'success_card', agentId: data.agentId, botName: data.botName })
-        setChips(["Build another bot"])
-      } catch (err) {
-        pushA(`❌ Generation failed: ${err instanceof Error ? err.message : String(err)}`)
-        setChips(defaultChips)
-      } finally {
-        setIsGenerating(false); setStep('idle')
-      }
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
     }
+  }
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }
-    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+    e.target.style.height = 'auto'
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+  }
 
-    return { messages, input, setInput, isTyping, isGenerating: isGenerating || step === 'ask_keys', chips, bottomRef, generatedAgentId, handleSend, handleKeyDown, handleInputChange, submitDynamicKeys, step }}
+  return {
+    messages,
+    input,
+    setInput,
+    isTyping,
+    isGenerating: isGenerating || step === 'ask_keys',
+    chips,
+    bottomRef,
+    generatedAgentId,
+    handleSend,
+    handleKeyDown,
+    handleInputChange,
+    submitDynamicKeys,
+    step,
+  }
+}

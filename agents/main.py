@@ -89,6 +89,7 @@ async def proxy_mcp_tool(server_name: str, tool_name: str, args: dict):
 async def create_bot(request: PromptRequest):
     """Generate a production-ready arbitrage bot from a plain-English prompt."""
     try:
+        print(f"Received bot generation request with prompt: {request.prompt}")
         result = await builder.build_bot_logic(request.prompt)
         return result
     except Exception as e:
