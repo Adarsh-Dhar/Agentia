@@ -11,6 +11,17 @@ from pydantic import BaseModel
 from orchestrator import MetaAgentBuilder
 
 app     = FastAPI(title="Arbitrage Meta-Agent", version="1.0.0")
+
+# Add CORS middleware to allow browser-based requests
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Allows the browser WebContainer to fetch data
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 builder = MetaAgentBuilder()
 
 

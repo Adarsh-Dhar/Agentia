@@ -36,9 +36,16 @@ export async function POST(req: NextRequest) {
 
     const files = (output.files ?? []).filter((f: any) => !['.env', '.env.example'].includes(f.filepath));
 
-    // NEW: Inject collected keys from the chat directly into the environment
-    let envPlaintext = `SIMULATION_MODE=true\nMCP_GATEWAY_URL=${process.env.MCP_GATEWAY_URL ?? "http://192.168.1.50:8000/mcp"}\n`;
-    for (const [key, val] of Object.entries(envConfig)) {
+
+    // NEW: Properly merge keys so user input overwrites the defaults
+    const finalEnv: Record<string, string> = {
+      SIMULATION_MODE: "true",
+      MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp",
+      ...envConfig // The user's Localtunnel URL from the chat overwrites the default here!
+    };
+
+    let envPlaintext = "";
+    for (const [key, val] of Object.entries(finalEnv)) {
       if (val) envPlaintext += `${key}=${val}\n`;
     }
     const encryptedEnv = encryptEnvConfig(envPlaintext);
@@ -67,7 +74,8 @@ export async function POST(req: NextRequest) {
         files: {
           create: files.map((f: any) => ({
             filepath: f.filepath,
-            content:  f.content,
+            // Safely convert JSON objects back to strings if the LLM didn't stringify them
+            content:  typeof f.content === 'object' ? JSON.stringify(f.content, null, 2) : String(f.content),
             language: f.language || (f.filepath.endsWith(".ts") ? "typescript" : "plaintext"),
           })),
         },

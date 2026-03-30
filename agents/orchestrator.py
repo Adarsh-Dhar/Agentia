@@ -41,11 +41,15 @@ export async function callMcpTool(
   const MCP_GATEWAY = process.env.MCP_GATEWAY_URL ?? "http://192.168.1.50:8000/mcp";
   const response = await fetch(`${MCP_GATEWAY}/${server}/${tool}`, {
     method:  "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Bypass-Tunnel-Reminder": "true"
+    },
     body:    JSON.stringify(args),
   });
   if (!response.ok) {
-    throw new Error(`MCP Tool ${server}/${tool} failed: ${response.status} ${response.statusText}`);
+    const errText = await response.text();
+    throw new Error(`MCP Tool ${server}/${tool} failed: ${response.status} ${response.statusText} - ${errText}`);
   }
   return response.json();
 }
@@ -364,7 +368,9 @@ Required env: OPENAI_API_KEY
 
 Lightweight OpenAI sub-agent pattern (preferred for simple signal interpretation):
   import OpenAI from 'openai';
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // Safely handle WebContainer CJS/ESM interop mismatch
+  const OpenAIApi = (OpenAI as any).default || (OpenAI as any).OpenAI || OpenAI;
+  const openai = new OpenAIApi({ apiKey: process.env.OPENAI_API_KEY });
 
   interface TradeDecision { action: 'buy' | 'sell' | 'hold'; confidence: number; reasoning: string; }
 
@@ -402,20 +408,20 @@ Full ReAct agent (LangGraph — use for multi-step research tasks):
 # ─────────────────────────────────────────────────────────────────────────────
 
 STRATEGY_SNIPPETS: dict[str, list[str]] = {
-    "arbitrage":    [],
-    "mev_intent":   ["cow_protocol"],
-    "sniping":      ["websocket_mempool"],
-    "dca":          [],
-    "grid":         [],
-    "sentiment":    ["lunarcrush_sentiment"],
-    "whale_mirror": ["nansen_whale"],
+    "arbitrage":     [],
+    "mev_intent":    ["cow_protocol"],
+    "sniping":       ["websocket_mempool"],
+    "dca":           [],
+    "grid":          [],
+    "sentiment":     ["lunarcrush_sentiment"],
+    "whale_mirror":  ["nansen_whale"],
     "news_reactive": ["langchain_agent", "lunarcrush_sentiment"],
-    "yield":        ["debridge_crosschain"],
-    "perp":         ["hyperliquid_perp"],
-    "scalper":      ["websocket_mempool"],
-    "rebalancing":  [],
-    "ta_scripter":  ["langchain_agent"],
-    "unknown":      [],
+    "yield":         ["debridge_crosschain"],
+    "perp":          ["hyperliquid_perp"],
+    "scalper":       ["websocket_mempool"],
+    "rebalancing":   [],
+    "ta_scripter":   ["langchain_agent"],
+    "unknown":       [],
 }
 
 # MCP server name → SDK snippet key
@@ -496,7 +502,9 @@ The outer loop polls data; the inner LLM call converts raw context into a typed 
 TypeScript pattern:
 ```typescript
 import OpenAI from 'openai';
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Safely handle WebContainer CJS/ESM interop mismatch
+const OpenAIApi = (OpenAI as any).default || (OpenAI as any).OpenAI || OpenAI;
+const openai = new OpenAIApi({ apiKey: process.env.OPENAI_API_KEY });
 
 interface TradeDecision { action: 'buy' | 'sell' | 'hold'; confidence: number; reasoning: string; }
 
@@ -511,6 +519,20 @@ async function getTradeDecision(context: object): Promise<TradeDecision> {
   });
   return JSON.parse(res.choices[0].message.content!) as TradeDecision;
 }
+
+async function runCycle() {
+  try {
+    // 1. Fetch market context via MCP
+    // 2. const decision = await getTradeDecision(context);
+    // 3. Execute trade if necessary
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+// CRITICAL: Always run the cycle immediately once before entering the interval
+runCycle();
+setInterval(runCycle, 60000);
 ```
 
 Required package additions:
@@ -533,25 +555,9 @@ import bs58 from 'bs58';
 const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
 
 // Safely load the keypair, or generate a random dummy one for Simulation Mode
-const keypair = process.env.SOLANA_PRIVATE_KEY 
-  ? Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY)) 
+const keypair = process.env.SOLANA_PRIVATE_KEY
+  ? Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY))
   : Keypair.generate();
-
-async function jupiterSwap(
-  inputMint: string, outputMint: string, amountBaseUnits: bigint, slippageBps = 50,
-): Promise<string> {
-  const quote = await (await fetch(
-    `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountBaseUnits}&slippageBps=${slippageBps}`
-  )).json();
-  const { swapTransaction } = await (await fetch('https://quote-api.jup.ag/v6/swap', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ quoteResponse: quote, userPublicKey: keypair.publicKey.toBase58(), wrapAndUnwrapSol: true }),
-  })).json();
-  const vtx = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'));
-  vtx.sign([keypair]);
-  return connection.sendRawTransaction(vtx.serialize(), { skipPreflight: true });
-}
 
 async function jupiterSwap(
   inputMint: string, outputMint: string, amountBaseUnits: bigint, slippageBps = 50,
@@ -935,13 +941,12 @@ class MetaAgentBuilder:
                     raw = raw[4:]
             raw = raw.strip()
 
-
             intent = json.loads(raw)
             # Defensive parsing: If the LLM wrapped the JSON in a list, unwrap it.
             if isinstance(intent, list):
-              intent = intent[0] if len(intent) > 0 else {}
+                intent = intent[0] if len(intent) > 0 else {}
             if not isinstance(intent, dict):
-              raise ValueError("Parsed intent is not a valid JSON object.")
+                raise ValueError("Parsed intent is not a valid JSON object.")
 
             print(f"\n🎯 Intent classified:\n{json.dumps(intent, indent=2)}\n")
             return intent
@@ -982,7 +987,7 @@ class MetaAgentBuilder:
         """
         strategy      = intent.get("strategy", "unknown")
         required_mcps = intent.get("required_mcps", [])
-        snippet_keys:  set[str] = set()
+        snippet_keys: set[str] = set()
 
         # From strategy
         for key in STRATEGY_SNIPPETS.get(strategy, []):
@@ -1043,8 +1048,11 @@ class MetaAgentBuilder:
         tokens = token_table.get(network, token_table["base-sepolia"])
         token_lines = "\n".join(f"  {sym}: {addr}" for sym, addr in tokens.items())
 
-        # 🚀 ONLY inject the flashloan ABI if we are actually doing arbitrage
-        flashloan_text = f"If using Aave V3 flash loans, embed this ABI in src/config.ts:\n  FLASHLOAN_ABI = {abi_str}" if strategy == "arbitrage" else ""
+        # Only inject the flashloan ABI if we are actually doing arbitrage
+        flashloan_text = (
+            f"If using Aave V3 flash loans, embed this ABI in src/config.ts:\n  FLASHLOAN_ABI = {abi_str}"
+            if strategy == "arbitrage" else ""
+        )
 
         return f"""
 ## EVM-SPECIFIC CONFIGURATION
@@ -1123,14 +1131,14 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
         execution_template = self._select_template(intent)
         sdk_context        = self._collect_sdk_snippets(intent)
 
-        required_mcps = intent.get("required_mcps", [])
+        required_mcps   = intent.get("required_mcps", [])
         available_tools = await self.mcp_manager.list_all_tools()
 
         # Minify tool list to fit token budget (Safely handles malformed MCP schemas)
         compressed_tools = []
         for t in available_tools:
             server_name = t.get("server", "unknown") if isinstance(t, dict) else "unknown"
-            # 🚀 THE FIX: Strip out thousands of tokens by ignoring irrelevant MCPs
+            # Strip out thousands of tokens by ignoring irrelevant MCPs
             if required_mcps and server_name not in required_mcps:
                 continue
             # Safely extract input schema
@@ -1155,9 +1163,9 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
         abi_str   = json.dumps(FLASHLOAN_ABI,   separators=(',', ':'))
 
         chain_config = (
-          self._solana_output_format()
-          if chain == "solana"
-          else self._evm_output_format(network, strategy, abi_str)
+            self._solana_output_format()
+            if chain == "solana"
+            else self._evm_output_format(network, strategy, abi_str)
         )
 
         system_instructions = f"""You are an expert DeFi bot engineer.
@@ -1194,14 +1202,20 @@ package.json must include: "start": "tsx src/index.ts"
 {chain_config}
 
 ## UNIVERSAL HARD RULES
-1. NEVER write Python — TypeScript / Node.js ONLY.
-2. NEVER hardcode private keys or API keys — always read from process.env.
-3. All token amount math must use BigInt — never float, never Decimal.
-4. NEVER leave stubs, TODOs, or placeholder comments — every function must be fully implemented.
-5. Include SIMULATION_MODE=true by default (process.env.SIMULATION_MODE !== "false").
-6. Include structured logging: [timestamp] [LEVEL] message.
-7. Handle all errors gracefully — wrap cycle logic in try/catch and log; never let one bad cycle crash the bot.
-8. Graceful shutdown: listen for SIGINT / SIGTERM, clear intervals, exit cleanly.
+1.  NEVER write Python — TypeScript / Node.js ONLY.
+2.  NEVER hardcode private keys or API keys — always read from process.env.
+3.  All token amount math must use BigInt — never float, never Decimal.
+4.  NEVER leave stubs, TODOs, or placeholder comments — every function must be fully implemented.
+5.  Include SIMULATION_MODE=true by default (process.env.SIMULATION_MODE !== "false").
+6.  Include structured logging: [timestamp] [LEVEL] message.
+7.  Handle all errors gracefully — wrap cycle logic in try/catch and log; never let one bad cycle crash the bot.
+8.  Graceful shutdown: listen for SIGINT / SIGTERM, clear intervals, exit cleanly.
+9.  IF USING A POLLING LOOP: NEVER use an anonymous function inside setInterval. Always extract the logic to an `async function runCycle()` and call it explicitly ONCE before setting the interval.
+
+## PROJECT CONFIGURATION RULES (CRITICAL)
+1.  package.json MUST contain the top-level property: "type": "module"
+2.  package.json MUST include "typescript", "tsx", and "dotenv" in dependencies or devDependencies.
+3.  tsconfig.json MUST set "module": "NodeNext", "moduleResolution": "NodeNext", and "esModuleInterop": true in compilerOptions.
 
 ## AVAILABLE MCP TOOLS  (discovered at runtime — reference these in generated code)
 {tools_str}
@@ -1232,7 +1246,7 @@ package.json must include: "start": "tsx src/index.ts"
         try:
             structured_output = json.loads(raw_text)
             files = structured_output.get("files", [])
-            got   = {f.get("filepath") for f in files}
+            got      = {f.get("filepath") for f in files}
             required = {"package.json", "src/index.ts"}
             missing  = required - got
             if missing:
@@ -1247,6 +1261,6 @@ package.json must include: "start": "tsx src/index.ts"
         return {
             "status":     "blueprint_ready",
             "output":     structured_output,
-            "intent":     intent,           # ← new: expose classification to callers
+            "intent":     intent,           # ← expose classification to callers
             "tools_used": [t["name"] for t in available_tools],
         }
