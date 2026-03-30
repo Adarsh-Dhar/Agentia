@@ -5,8 +5,10 @@ import { encryptEnvConfig } from "@/lib/crypto-env";
 const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
 
 export async function POST(req: NextRequest) {
+  console.log("Received request for bot generation");
   try {
     const body = await req.json();
+    console.log("Received request body for bot generation:", body);
 
     const prompt = body.prompt;
     const envConfig = body.envConfig || {}; // NEW: Accept keys from chat
@@ -16,22 +18,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Prompt is required." }, { status: 400 });
     }
 
+    console.log("Received prompt for bot generation:", prompt);
+
     // 2. Call the Python Universal Meta-Agent
     const metaResponse = await fetch(`${META_AGENT_URL}/create-bot`, {
       method:  "POST",
       headers: { "Content-Type": "application/json", accept: "application/json" },
       body:    JSON.stringify({ prompt }),
-      signal:  AbortSignal.timeout(180_000), // 3-minute timeout for LLM generation
+      signal:  AbortSignal.timeout(600_000), // 10-minute timeout for LLM generation
     });
 
     if (!metaResponse.ok) {
+        console.log(metaResponse)
         const errText = await metaResponse.text();
         throw new Error(`Meta-Agent failed: ${metaResponse.status} - ${errText}`);
     }
 
     const metaData = await metaResponse.json();
+    console.log("Received metadata from Meta-Agent:", metaData);
     const output = metaData.output ?? {};
+    console.log("Received output from Meta-Agent:", output);
     const intent = metaData.intent ?? {};
+    console.log("Received intent from Meta-Agent:", intent);
     const botName = intent.bot_type || "Universal DeFi Bot";
 
     const files = (output.files ?? []).filter((f: any) => !['.env', '.env.example'].includes(f.filepath));

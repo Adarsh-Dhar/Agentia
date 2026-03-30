@@ -778,8 +778,8 @@ class MetaAgentBuilder:
                     await self.mcp_manager.connect_to_server(
                         "goat_evm", "npx", ["tsx", goat_path],
                         custom_env={
-                            "WALLET_PRIVATE_KEY": wallet_key,
-                            "RPC_PROVIDER_URL":   rpc_url,
+                            "WALLET_PRIVATE_KEY": self.wallet_key,
+                            "RPC_PROVIDER_URL":   self.rpc_url,
                         },
                     )
                 except Exception as e:
@@ -1243,9 +1243,9 @@ package.json must include: "start": "tsx src/index.ts"
 9.  IF USING A POLLING LOOP: NEVER use an anonymous function inside setInterval. Always extract the logic to an `async function runCycle()` and call it explicitly ONCE before setting the interval.
 10. OPENAI WEBCONTAINER RULE — MANDATORY: The OpenAI npm package has a CJS/ESM interop
     bug inside WebContainer that makes `new OpenAI(...)` throw at runtime.
-    You MUST resolve the class safely INSIDE every async function that instantiates it:
-      const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
-      const client = new OpenAIClass({ apiKey: process.env.OPENAI_API_KEY });
+        You MUST resolve the class safely INSIDE every async function that instantiates it:
+          const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
+          const client = new OpenAIClass({{ apiKey: process.env.OPENAI_API_KEY }});
     NEVER declare `const openai = new OpenAI(...)` or any variant at module top-level.
     This rule overrides all other patterns you may have been trained on.
 
