@@ -366,16 +366,30 @@ For bots that use a sub-LLM to interpret news, sentiment, or TA signals before t
 Required packages: openai  (lightweight; or @langchain/openai + @langchain/langgraph for full graphs)
 Required env: OPENAI_API_KEY
 
+CRITICAL WEBCONTAINER OPENAI RULE:
+  The OpenAI package has a CJS/ESM interop bug in WebContainer. Instantiating at
+  module top-level throws "TypeError: _openai.default.default is not a constructor".
+  Always resolve the class INSIDE the async function. Never at module scope.
+
+  BANNED:
+    const openai = new OpenAI({…});              // ❌ top-level
+    const openai = new (OpenAI as any).default(…); // ❌ .default may be undefined
+
+  REQUIRED inside every function that calls the API:
+    const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
+    const client = new OpenAIClass({ apiKey: process.env.OPENAI_API_KEY });
+
 Lightweight OpenAI sub-agent pattern (preferred for simple signal interpretation):
   import OpenAI from 'openai';
-  // Safely handle WebContainer CJS/ESM interop mismatch
-  const OpenAIApi = (OpenAI as any).default || (OpenAI as any).OpenAI || OpenAI;
-  const openai = new OpenAIApi({ apiKey: process.env.OPENAI_API_KEY });
 
   interface TradeDecision { action: 'buy' | 'sell' | 'hold'; confidence: number; reasoning: string; }
 
   async function getTradeDecision(marketContext: object): Promise<TradeDecision> {
-    const res = await openai.chat.completions.create({
+    // WebContainer-safe constructor resolution — must be inside the function
+    const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
+    const client = new OpenAIClass({ apiKey: process.env.OPENAI_API_KEY });
+
+    const res = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       temperature: 0,
       response_format: { type: 'json_object' },
@@ -499,46 +513,62 @@ Embed a sub-LLM call each cycle to interpret complex, unstructured signals (news
 sentiment scores, TA patterns) before deciding whether to trade.
 The outer loop polls data; the inner LLM call converts raw context into a typed TradeDecision.
 
-TypeScript pattern:
+CRITICAL WEBCONTAINER OPENAI RULE:
+The OpenAI npm package has a CJS/ESM interop bug inside WebContainer.
+Calling `new OpenAI(...)` at the module top-level throws:
+  TypeError: _openai.default.default is not a constructor
+You MUST resolve the constructor safely INSIDE the function that uses it.
+NEVER instantiate OpenAI at module scope.
+
+BANNED patterns — never emit these:
+  ❌  const openai = new OpenAI({ ... });              // top-level — always breaks
+  ❌  const openai = new (OpenAI as any).default({…}); // .default may be undefined
+  ❌  import { OpenAI } from 'openai';                 // named import also broken
+
+REQUIRED pattern — resolve inside every async function that calls the API:
 ```typescript
 import OpenAI from 'openai';
-// Safely handle WebContainer CJS/ESM interop mismatch
-const OpenAIApi = (OpenAI as any).default || (OpenAI as any).OpenAI || OpenAI;
-const openai = new OpenAIApi({ apiKey: process.env.OPENAI_API_KEY });
 
 interface TradeDecision { action: 'buy' | 'sell' | 'hold'; confidence: number; reasoning: string; }
 
 async function getTradeDecision(context: object): Promise<TradeDecision> {
-  const res = await openai.chat.completions.create({
-    model: 'gpt-4o-mini', temperature: 0,
+  // Safe WebContainer interop — resolve constructor inside the function
+  const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
+  const client = new OpenAIClass({ apiKey: process.env.OPENAI_API_KEY });
+
+  const res = await client.chat.completions.create({
+    model: 'gpt-4o-mini',
+    temperature: 0,
     response_format: { type: 'json_object' },
     messages: [
-      { role: 'system', content: 'DeFi signal interpreter. Output JSON: { action, confidence (0-1), reasoning }.' },
+      { role: 'system', content: 'DeFi signal interpreter. Output JSON only: { action, confidence (0-1), reasoning }.' },
       { role: 'user',   content: JSON.stringify(context) },
     ],
   });
   return JSON.parse(res.choices[0].message.content!) as TradeDecision;
 }
 
-async function runCycle() {
+async function runCycle(): Promise<void> {
   try {
-    // 1. Fetch market context via MCP
+    // 1. Fetch market context via MCP / REST
     // 2. const decision = await getTradeDecision(context);
-    // 3. Execute trade if necessary
-  } catch (error) {
-    console.error(error);
+    // 3. Execute trade if decision.action !== 'hold'
+  } catch (err: unknown) {
+    console.error(`[${new Date().toISOString()}] [ERROR]`, (err as Error).message);
   }
 }
 
-// CRITICAL: Always run the cycle immediately once before entering the interval
+// CRITICAL: call once immediately, THEN set interval
 runCycle();
-setInterval(runCycle, 60000);
+const interval = setInterval(runCycle, 60_000);
+process.on('SIGINT',  () => { clearInterval(interval); process.exit(0); });
+process.on('SIGTERM', () => { clearInterval(interval); process.exit(0); });
 ```
 
 Required package additions:
   dependencies: "openai": "^4.0.0"
 
-Required env: OPENAI_API_KEY  (injected by worker at runtime; never hardcode).
+Required env: OPENAI_API_KEY (injected at runtime — never hardcode).
 Suitable for: Sentiment Sniper, News-Reactive Trader, TA Scripter.
 """
 
@@ -1211,6 +1241,13 @@ package.json must include: "start": "tsx src/index.ts"
 7.  Handle all errors gracefully — wrap cycle logic in try/catch and log; never let one bad cycle crash the bot.
 8.  Graceful shutdown: listen for SIGINT / SIGTERM, clear intervals, exit cleanly.
 9.  IF USING A POLLING LOOP: NEVER use an anonymous function inside setInterval. Always extract the logic to an `async function runCycle()` and call it explicitly ONCE before setting the interval.
+10. OPENAI WEBCONTAINER RULE — MANDATORY: The OpenAI npm package has a CJS/ESM interop
+    bug inside WebContainer that makes `new OpenAI(...)` throw at runtime.
+    You MUST resolve the class safely INSIDE every async function that instantiates it:
+      const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
+      const client = new OpenAIClass({ apiKey: process.env.OPENAI_API_KEY });
+    NEVER declare `const openai = new OpenAI(...)` or any variant at module top-level.
+    This rule overrides all other patterns you may have been trained on.
 
 ## PROJECT CONFIGURATION RULES (CRITICAL)
 1.  package.json MUST contain the top-level property: "type": "module"
