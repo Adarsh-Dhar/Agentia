@@ -21,28 +21,39 @@ from azure.core.credentials import AzureKeyCredential
 
 load_dotenv()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MCP Bridge instruction — injected into every generated bot's system prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
 TS_MCP_BRIDGE = """
 ## FILE INSTRUCTION: src/mcp_bridge.ts
 You MUST generate a file named `src/mcp_bridge.ts` to communicate with the host MCP servers.
-Use exactly this code:
+Use exactly this implementation:
 
 ```typescript
 // src/mcp_bridge.ts
-export async function callMcpTool(server: string, tool: string, args: Record<string, any>): Promise<any> {
-    const MCP_GATEWAY = process.env.MCP_GATEWAY_URL || "http://localhost:8000/mcp";
-    
-    const response = await fetch(`${MCP_GATEWAY}/${server}/${tool}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(args)
-    });
-
-    if (!response.ok) {
-        throw new Error(`MCP Tool ${server}/${tool} failed: ${response.statusText}`);
-    }
-    return response.json();
+export async function callMcpTool(
+  server: string,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const MCP_GATEWAY = process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp";
+  const response = await fetch(`${MCP_GATEWAY}/${server}/${tool}`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(args),
+  });
+  if (!response.ok) {
+    throw new Error(`MCP Tool ${server}/${tool} failed: ${response.status} ${response.statusText}`);
+  }
+  return response.json();
 }
 ```
+
+Import and use `callMcpTool` in src/index.ts for all MCP server interactions.
+Add `MCP_GATEWAY_URL=http://localhost:8000/mcp` to your .env.example file.
+"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -885,41 +896,41 @@ class MetaAgentBuilder:
         classification dict.  Falls back to EVM/polling/arbitrage on any error.
         """
         try:
-          response = self.client.complete(
-            messages=[
-              SystemMessage(content=CLASSIFIER_SYSTEM_PROMPT),
-              UserMessage(content=prompt),
-            ],
-            model=self.model_name,
-            temperature=0.0,
-            max_tokens=512,
-          )
-          raw = response.choices[0].message.content.strip()
+            response = self.client.complete(
+                messages=[
+                    SystemMessage(content=CLASSIFIER_SYSTEM_PROMPT),
+                    UserMessage(content=prompt),
+                ],
+                model=self.model_name,
+                temperature=0.0,
+                max_tokens=512,
+            )
+            raw = response.choices[0].message.content.strip()
 
-          # Strip any errant markdown fences
-          if raw.startswith("```"):
-            parts = raw.split("```")
-            raw = parts[1] if len(parts) > 1 else raw
-            if raw.startswith("json"):
-              raw = raw[4:]
-          raw = raw.strip()
+            # Strip any errant markdown fences
+            if raw.startswith("```"):
+                parts = raw.split("```")
+                raw = parts[1] if len(parts) > 1 else raw
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = raw.strip()
 
-          intent = json.loads(raw)
-          print(f"\n🎯 Intent classified:\n{json.dumps(intent, indent=2)}\n")
-          return intent
+            intent = json.loads(raw)
+            print(f"\n🎯 Intent classified:\n{json.dumps(intent, indent=2)}\n")
+            return intent
 
         except Exception as exc:
-          print(f"⚠️  Intent classification failed ({exc}). Defaulting to EVM polling arbitrage.")
-          return {
-            "chain":                  "evm",
-            "network":                "base-sepolia",
-            "execution_model":        "polling",
-            "strategy":               "arbitrage",
-            "required_mcps":          ["one_inch", "webacy", "goat_evm"],
-            "bot_type":               "EVM Flash Loan Arbitrage Bot",
-            "requires_openai_key":    False,
-            "requires_solana_wallet": False,
-          }
+            print(f"⚠️  Intent classification failed ({exc}). Defaulting to EVM polling arbitrage.")
+            return {
+                "chain":                  "evm",
+                "network":                "base-sepolia",
+                "execution_model":        "polling",
+                "strategy":               "arbitrage",
+                "required_mcps":          ["one_inch", "webacy", "goat_evm"],
+                "bot_type":               "EVM Flash Loan Arbitrage Bot",
+                "requires_openai_key":    False,
+                "requires_solana_wallet": False,
+            }
 
     # ─────────────────────────────────────────────────────────────────────────
     # Step 2 — Template Selector
@@ -1126,6 +1137,11 @@ Required schema:
 }}
 Minimum required files: package.json, tsconfig.json, src/config.ts, src/mcp_bridge.ts, src/index.ts
 
+## CRITICAL ENVIRONMENT CONSTRAINT
+The bot runs inside a WebContainer (in-browser Node.js environment).
+WRITE IN TYPESCRIPT / NODE.JS ONLY — absolutely no Python.
+package.json must include: "start": "tsx src/index.ts"
+
 {TS_MCP_BRIDGE}
 
 {execution_template}
@@ -1143,9 +1159,6 @@ Minimum required files: package.json, tsconfig.json, src/config.ts, src/mcp_brid
 6. Include structured logging: [timestamp] [LEVEL] message.
 7. Handle all errors gracefully — wrap cycle logic in try/catch and log; never let one bad cycle crash the bot.
 8. Graceful shutdown: listen for SIGINT / SIGTERM, clear intervals, exit cleanly.
-
-## PACKAGE.JSON DEPENDENCIES
-You MUST include at least: "typescript", "tsx", "dotenv" in dependencies or devDependencies, in addition to any required for the bot's logic (e.g. "ws", "openai", "@solana/web3.js").
 
 ## AVAILABLE MCP TOOLS  (discovered at runtime — reference these in generated code)
 {tools_str}
