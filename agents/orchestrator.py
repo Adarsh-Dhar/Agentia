@@ -992,7 +992,7 @@ class MetaAgentBuilder:
     # Chain-specific output format helpers
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _evm_output_format(self, network: str, abi_str: str) -> str:
+    def _evm_output_format(self, network: str, strategy: str, abi_str: str) -> str:
         chain_ids = {
             "base-sepolia": 84532,
             "base-mainnet": 8453,
@@ -1023,6 +1023,9 @@ class MetaAgentBuilder:
         tokens = token_table.get(network, token_table["base-sepolia"])
         token_lines = "\n".join(f"  {sym}: {addr}" for sym, addr in tokens.items())
 
+        # 🚀 ONLY inject the flashloan ABI if we are actually doing arbitrage
+        flashloan_text = f"If using Aave V3 flash loans, embed this ABI in src/config.ts:\n  FLASHLOAN_ABI = {abi_str}" if strategy == "arbitrage" else ""
+
         return f"""
 ## EVM-SPECIFIC CONFIGURATION
 Network:  {network}
@@ -1035,8 +1038,7 @@ Contract addresses:
   ARB_BOT_ADDRESS  = "{self.arb_bot_address}"
   ONE_INCH_ROUTER  = "0x111111125421cA6dc452d289314280a0f8842A65"
 
-If using Aave V3 flash loans, embed this ABI in src/config.ts:
-  FLASHLOAN_ABI = {abi_str}
+{flashloan_text}
 
 1inch MCP tool signatures (NEVER deviate from these):
   get_quote      server="one_inch"  args={{tokenIn, tokenOut, amount:"<str int>", chain:{chain_id}}}
@@ -1101,38 +1103,41 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
         execution_template = self._select_template(intent)
         sdk_context        = self._collect_sdk_snippets(intent)
 
+        required_mcps = intent.get("required_mcps", [])
         available_tools = await self.mcp_manager.list_all_tools()
 
         # Minify tool list to fit token budget (Safely handles malformed MCP schemas)
         compressed_tools = []
         for t in available_tools:
-          # Safely extract input schema
-          schema = t.get("input_schema") if isinstance(t, dict) else {}
-          if not isinstance(schema, dict):
-            schema = {}
-          # Safely extract properties
-          props = schema.get("properties") or {}
-          if not isinstance(props, dict):
-            props = {}
-          # Safely map argument types
-          args = {}
-          for k, v in props.items():
-            if isinstance(v, dict):
-              args[k] = v.get("type", "string")
-            else:
-              args[k] = "unknown"
-          compressed_tools.append({
-            "server": t.get("server", "unknown") if isinstance(t, dict) else "unknown",
-            "name":   t.get("name", "unknown") if isinstance(t, dict) else "unknown",
-            "args":   args,
-          })
+            server_name = t.get("server", "unknown") if isinstance(t, dict) else "unknown"
+            # 🚀 THE FIX: Strip out thousands of tokens by ignoring irrelevant MCPs
+            if required_mcps and server_name not in required_mcps:
+                continue
+            # Safely extract input schema
+            schema = t.get("input_schema") if isinstance(t, dict) else {}
+            if not isinstance(schema, dict): schema = {}
+            # Safely extract properties
+            props = schema.get("properties") or {}
+            if not isinstance(props, dict): props = {}
+            # Safely map argument types
+            args = {}
+            for k, v in props.items():
+                if isinstance(v, dict):
+                    args[k] = v.get("type", "string")
+                else:
+                    args[k] = "unknown"
+            compressed_tools.append({
+                "server": server_name,
+                "name":   t.get("name", "unknown") if isinstance(t, dict) else "unknown",
+                "args":   args,
+            })
         tools_str = json.dumps(compressed_tools, separators=(',', ':'))
         abi_str   = json.dumps(FLASHLOAN_ABI,   separators=(',', ':'))
 
         chain_config = (
-            self._solana_output_format()
-            if chain == "solana"
-            else self._evm_output_format(network, abi_str)
+          self._solana_output_format()
+          if chain == "solana"
+          else self._evm_output_format(network, strategy, abi_str)
         )
 
         system_instructions = f"""You are an expert DeFi bot engineer.
