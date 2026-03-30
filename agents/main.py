@@ -38,6 +38,19 @@ async def get_tools():
     return {"count": len(tools), "tools": tools}
 
 
+# --- Two-Step Intelligence Flow: Expose intent classification endpoint ---
+from fastapi import Request
+
+@app.post("/classify-intent")
+async def classify_intent(request: PromptRequest):
+    """Classify user intent to determine required API keys before generating."""
+    try:
+        intent = await builder.classify_intent(request.prompt)
+        return {"intent": intent}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/create-bot")
 async def create_bot(request: PromptRequest):
     """Generate a production-ready arbitrage bot from a plain-English prompt."""

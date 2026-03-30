@@ -915,7 +915,14 @@ class MetaAgentBuilder:
                     raw = raw[4:]
             raw = raw.strip()
 
+
             intent = json.loads(raw)
+            # Defensive parsing: If the LLM wrapped the JSON in a list, unwrap it.
+            if isinstance(intent, list):
+              intent = intent[0] if len(intent) > 0 else {}
+            if not isinstance(intent, dict):
+              raise ValueError("Parsed intent is not a valid JSON object.")
+
             print(f"\n🎯 Intent classified:\n{json.dumps(intent, indent=2)}\n")
             return intent
 
@@ -1096,18 +1103,29 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
 
         available_tools = await self.mcp_manager.list_all_tools()
 
-        # Minify tool list to fit token budget
-        compressed_tools = [
-            {
-                "server": t.get("server", "unknown"),
-                "name":   t["name"],
-                "args":   {
-                    k: v.get("type", "string")
-                    for k, v in t.get("input_schema", {}).get("properties", {}).items()
-                },
-            }
-            for t in available_tools
-        ]
+        # Minify tool list to fit token budget (Safely handles malformed MCP schemas)
+        compressed_tools = []
+        for t in available_tools:
+          # Safely extract input schema
+          schema = t.get("input_schema") if isinstance(t, dict) else {}
+          if not isinstance(schema, dict):
+            schema = {}
+          # Safely extract properties
+          props = schema.get("properties") or {}
+          if not isinstance(props, dict):
+            props = {}
+          # Safely map argument types
+          args = {}
+          for k, v in props.items():
+            if isinstance(v, dict):
+              args[k] = v.get("type", "string")
+            else:
+              args[k] = "unknown"
+          compressed_tools.append({
+            "server": t.get("server", "unknown") if isinstance(t, dict) else "unknown",
+            "name":   t.get("name", "unknown") if isinstance(t, dict) else "unknown",
+            "args":   args,
+          })
         tools_str = json.dumps(compressed_tools, separators=(',', ':'))
         abi_str   = json.dumps(FLASHLOAN_ABI,   separators=(',', ':'))
 
