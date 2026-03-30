@@ -21,13 +21,78 @@ const STATUS_STYLES: Record<string, string> = {
   EXPIRED:  'bg-gray-500/20 text-gray-300 border-gray-500/30',
 }
 
+// ── Intent display helpers ────────────────────────────────────────────────────
+
+interface BotIntent {
+  chain?:          string;
+  network?:        string;
+  strategy?:       string;
+  execution_model?: string;
+  bot_type?:       string;
+}
+
+function strategyIcon(strategy?: string): string {
+  if (!strategy) return "🤖";
+  if (strategy.includes("arbitrage"))    return "⚡";
+  if (strategy.includes("snip"))        return "🎯";
+  if (strategy.includes("sentiment"))   return "📰";
+  if (strategy.includes("whale"))       return "🐋";
+  if (strategy.includes("perp") || strategy.includes("funding")) return "📈";
+  if (strategy.includes("dca") || strategy.includes("grid"))     return "📊";
+  if (strategy.includes("yield") || strategy.includes("bridge")) return "🌉";
+  if (strategy.includes("news"))        return "📰";
+  if (strategy.includes("mev"))         return "🛡️";
+  return "🤖";
+}
+
+function strategyLabel(strategy?: string): string {
+  if (!strategy) return "Custom Bot";
+  const labels: Record<string, string> = {
+    arbitrage:    "Arbitrage",
+    sniping:      "Sniper",
+    sentiment:    "Sentiment",
+    whale_mirror: "Whale Mirror",
+    dca:          "DCA",
+    grid:         "Grid",
+    perp:         "Perp/Funding",
+    yield:        "Yield Arb",
+    mev_intent:   "MEV-Protected",
+    scalper:      "HF Scalper",
+    news_reactive:"News Trader",
+    rebalancing:  "Rebalancer",
+    ta_scripter:  "TA Trader",
+  };
+  return labels[strategy] ?? strategy.replace(/_/g, " ");
+}
+
+function chainLabel(intent?: BotIntent | null): { label: string; color: string } {
+  if (!intent) return { label: "EVM", color: "text-cyan-400" };
+  if (intent.chain === "solana") return { label: "◎ Solana", color: "text-purple-400" };
+  const nets: Record<string, { label: string; color: string }> = {
+    "base-sepolia": { label: "⬡ Base Sepolia", color: "text-blue-400" },
+    "base-mainnet": { label: "⬡ Base",         color: "text-blue-400" },
+    "arbitrum":     { label: "🔴 Arbitrum",     color: "text-red-400"  },
+  };
+  return nets[intent.network ?? ""] ?? { label: "⬡ EVM", color: "text-cyan-400" };
+}
+
+function execModelBadge(model?: string): string | null {
+  if (!model) return null;
+  const m: Record<string, string> = {
+    polling:   "REST",
+    websocket: "WSS",
+    agentic:   "AI",
+  };
+  return m[model] ?? model;
+}
+
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 async function callWorkerAction(agentId: string, action: 'start' | 'stop') {
   const res = await fetch(`/api/agents/${agentId}/${action}`, { method: 'POST' })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.error ?? `HTTP ${res.status}`)
+    throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`)
   }
   return res.json()
 }
@@ -40,54 +105,50 @@ export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
 
   const handleToggle = async (agent: Agent) => {
     setLoadingId(agent.id)
-    setErrors((prev) => { const n = { ...prev }; delete n[agent.id]; return n })
-
+    setErrors(prev => { const n = { ...prev }; delete n[agent.id]; return n })
     try {
       const action = agent.status === 'RUNNING' ? 'stop' : 'start'
       await callWorkerAction(agent.id, action)
-      // Give the worker a moment to update the DB status, then refresh
       setTimeout(() => onRefresh?.(), 800)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      setErrors((prev) => ({ ...prev, [agent.id]: msg }))
+      setErrors(prev => ({ ...prev, [agent.id]: msg }))
     } finally {
       setLoadingId(null)
     }
   }
 
-  const isTerminal = (status: string) =>
-    status === 'REVOKED' || status === 'EXPIRED'
-
-  const canToggle = (status: string) =>
-    !isTerminal(status) && status !== 'STARTING' && status !== 'STOPPING'
+  const isTerminal = (status: string) => status === 'REVOKED' || status === 'EXPIRED'
+  const canToggle  = (status: string) => !isTerminal(status) && status !== 'STARTING' && status !== 'STOPPING'
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
         <thead>
           <tr className="border-b border-border bg-muted/30">
-            {['Name', 'Status', 'Configuration', 'Actions'].map((h) => (
-              <th
-                key={h}
-                className="px-6 py-4 text-left text-sm font-semibold text-muted-foreground"
-              >
+            {['Name', 'Status', 'Strategy', 'Configuration', 'Actions'].map(h => (
+              <th key={h} className="px-6 py-4 text-left text-sm font-semibold text-muted-foreground">
                 {h}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {agents.map((agent) => {
+          {agents.map(agent => {
             const isLoading  = loadingId === agent.id
             const toggleable = canToggle(agent.status)
             const isRunning  = agent.status === 'RUNNING'
             const errMsg     = errors[agent.id]
 
+            // Extract intent from configuration
+            const cfg    = agent.configuration as Record<string, unknown> | null
+            const intent = (cfg?.intent ?? null) as BotIntent | null
+            const chain  = chainLabel(intent)
+            const model  = execModelBadge(intent?.execution_model)
+
             return (
-              <tr
-                key={agent.id}
-                className="border-b border-border hover:bg-muted/20 transition-colors"
-              >
+              <tr key={agent.id} className="border-b border-border hover:bg-muted/20 transition-colors">
+
                 {/* Name */}
                 <td className="px-6 py-4">
                   <Link
@@ -106,10 +167,7 @@ export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
                 {/* Status */}
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <Badge
-                      variant="default"
-                      className={STATUS_STYLES[agent.status] ?? STATUS_STYLES.STOPPED}
-                    >
+                    <Badge variant="default" className={STATUS_STYLES[agent.status] ?? STATUS_STYLES.STOPPED}>
                       {agent.status}
                     </Badge>
                     {(agent.status === 'STARTING' || agent.status === 'STOPPING') && (
@@ -118,26 +176,53 @@ export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
                   </div>
                 </td>
 
+                {/* Strategy — NEW: shows intent data ─────────────────────── */}
+                <td className="px-6 py-4">
+                  <div className="flex flex-col gap-1">
+                    {intent?.strategy ? (
+                      <span className="text-sm font-medium text-foreground">
+                        {strategyIcon(intent.strategy)}&nbsp;{strategyLabel(intent.strategy)}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground italic">—</span>
+                    )}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-xs font-mono ${chain.color}`}>{chain.label}</span>
+                      {model && (
+                        <span className="text-[10px] bg-muted/30 border border-border rounded px-1.5 py-0.5 text-muted-foreground font-semibold">
+                          {model}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </td>
+
                 {/* Configuration summary */}
                 <td className="px-6 py-4 text-sm text-muted-foreground">
-                  {agent.configuration
-                    ? (() => {
-                        const cfg = agent.configuration as Record<string, unknown>
-                        return (
-                          <span className="font-mono text-xs">
-                            {[cfg.strategy, cfg.targetPair]
-                              .filter(Boolean)
-                              .join(' · ') || 'configured'}
-                          </span>
-                        )
-                      })()
-                    : <span className="italic text-muted-foreground/50">no config</span>}
+                  {cfg ? (
+                    <div className="flex flex-col gap-0.5">
+                      {typeof cfg.baseToken === 'string' && typeof cfg.targetToken === 'string' && (
+                        <span className="font-mono text-xs text-foreground/70">
+                          {cfg.baseToken + '→' + cfg.targetToken}
+                        </span>
+                      )}
+                      {cfg.simulationMode !== undefined && (
+                        <span className={`text-[10px] font-semibold ${cfg.simulationMode ? 'text-yellow-400' : 'text-red-400'}`}>
+                          {cfg.simulationMode ? '🧪 Simulation' : '⚡ Live'}
+                        </span>
+                      )}
+                      {!cfg.baseToken && !cfg.targetToken && (
+                        <span className="italic text-muted-foreground/50 text-xs">configured</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="italic text-muted-foreground/50">no config</span>
+                  )}
                 </td>
 
                 {/* Actions */}
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    {/* Start / Stop toggle */}
                     {toggleable && (
                       <Button
                         size="sm"
@@ -159,8 +244,6 @@ export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
                         )}
                       </Button>
                     )}
-
-                    {/* Manage link */}
                     <Link href={`/dashboard/agents/${agent.id}`}>
                       <Button size="sm" variant="outline" className="border-border hover:bg-muted">
                         <Settings2 size={14} className="mr-1.5" />
@@ -169,6 +252,7 @@ export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
                     </Link>
                   </div>
                 </td>
+
               </tr>
             )
           })}

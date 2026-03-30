@@ -3,19 +3,20 @@
 /**
  * frontend/hooks/use-bot-sandbox.ts
  *
- * WebContainer sandbox hook for the MCP Base Sepolia arbitrage bot.
+ * WebContainer sandbox hook for all Meta-Agent generated bots.
  *
- * Key changes vs original:
- *  - Detects Python bots (main.py present) vs TypeScript bots (src/index.ts)
- *  - Skips npm install for Python bots — runs python3 main.py directly
- *  - Uses CHAIN_ID-aware env vars
- *  - Better error messages for boot failures
+ * Key fixes vs. original:
+ *  1. Always injects MCP_GATEWAY_URL so mcp_bridge.ts can reach the gateway.
+ *  2. Uses `npm run start` (defined in the generated package.json) instead of
+ *     hardcoding `npx tsx` — works for TypeScript, Python fallback, etc.
+ *  3. Python bots (main.py present) skip npm install and run `python3 main.py`.
+ *  4. Passes ALL env vars from BotEnvConfig into the container process.
  */
 
 import { useState, useRef, useEffect, MutableRefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { BotEnvConfig } from "@/lib/bot-constant";
-import { BOT_ENTRY_POINT, BOT_NPMRC } from "@/lib/bot-constant";
+import { BOT_NPMRC } from "@/lib/bot-constant";
 
 export type BotPhase = "idle" | "env-setup" | "running" | "booting" | "installing";
 
@@ -30,26 +31,20 @@ interface UseBotSandboxOptions {
 // Singleton — WebContainer can only boot once per page
 let globalWC: unknown = null;
 
+/** Build .env file content from the BotEnvConfig — all keys, skip empty. */
 function buildEnvFileContent(cfg: BotEnvConfig): string {
-  return [
-    `SIMULATION_MODE=${cfg.SIMULATION_MODE}`,
-    `WALLET_PRIVATE_KEY=${cfg.WALLET_PRIVATE_KEY}`,
-    `RPC_PROVIDER_URL=${cfg.RPC_PROVIDER_URL}`,
-    `WEBACY_API_KEY=${cfg.WEBACY_API_KEY}`,
-    `ONEINCH_API_KEY=${cfg.ONEINCH_API_KEY}`,
-    `BORROW_AMOUNT_HUMAN=${cfg.BORROW_AMOUNT_HUMAN || "1"}`,
-    `POLL_INTERVAL=${cfg.POLL_INTERVAL || "5"}`,
-  ].join("\n");
+  return Object.entries(cfg)
+    .filter(([, v]) => typeof v === "string")
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
 }
 
 function parseFilesToTree(files: BotFile[]): Record<string, unknown> {
   const tree: Record<string, unknown> = {};
-
   for (const file of files) {
     const path  = file.filepath.replace(/^[./]+/, "");
     const parts = path.split("/");
     let   cur: Record<string, unknown> = tree;
-
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
       if (!part) continue;
@@ -61,35 +56,50 @@ function parseFilesToTree(files: BotFile[]): Record<string, unknown> {
       }
     }
   }
-
   return tree;
 }
 
 /**
- * Determine whether the generated bot is Python or TypeScript/Node.
- * Returns the run command to pass to jsh -c.
+ * Determine the run strategy for this bot.
+ *
+ * Priority:
+ *   1. Python: main.py present → skip npm install, run python3 main.py
+ *   2. TypeScript: use `npm run start` (defined in generated package.json)
+ *      which maps to `tsx src/index.ts`
  */
-function detectRunCommand(files: BotFile[]): { isPython: boolean; runCmd: string } {
-  const filepaths = files.map(f => f.filepath.replace(/^[./]+/, ""));
+function detectRunStrategy(files: BotFile[]): {
+  isPython: boolean;
+  needsInstall: boolean;
+  runCmd: string;
+} {
+  const paths = files.map(f => f.filepath.replace(/^[./]+/, ""));
 
-  const hasPythonMain = filepaths.includes("main.py");
-  const hasTsIndex    = filepaths.includes("src/index.ts") || filepaths.includes("src/index.js");
-  const hasTsEntry    = filepaths.some(p => p.endsWith(".ts") && !p.includes("config") && !p.includes("types"));
-
-  if (hasPythonMain) {
-    return { isPython: true, runCmd: "python3 main.py" };
+  if (paths.includes("main.py")) {
+    return { isPython: true, needsInstall: false, runCmd: "python3 main.py" };
   }
 
-  if (hasTsIndex) {
-    return { isPython: false, runCmd: `npx -y tsx src/index.ts` };
+  // For all TS/JS bots: npm install then npm run start
+  // The generated package.json always has "start": "tsx src/index.ts"
+  return { isPython: false, needsInstall: true, runCmd: "npm run start" };
+}
+
+/** Build the complete process env from BotEnvConfig, adding sensible defaults. */
+function buildProcessEnv(cfg: BotEnvConfig): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(cfg)) {
+    if (typeof v === "string" && v !== "") {
+      env[k] = v;
+    }
   }
-
-  // Fall back to BOT_ENTRY_POINT constant or first .ts file
-  const fallbackEntry = hasTsEntry
-    ? filepaths.find(p => p.endsWith(".ts") && !p.includes("config") && !p.includes("types")) ?? BOT_ENTRY_POINT
-    : BOT_ENTRY_POINT;
-
-  return { isPython: false, runCmd: `npx -y tsx ${fallbackEntry}` };
+  // Ensure MCP_GATEWAY_URL always present
+  if (!env.MCP_GATEWAY_URL) {
+    env.MCP_GATEWAY_URL = "http://localhost:8000/mcp";
+  }
+  // Ensure SIMULATION_MODE always present
+  if (!env.SIMULATION_MODE) {
+    env.SIMULATION_MODE = "true";
+  }
+  return env;
 }
 
 export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSandboxOptions) {
@@ -115,18 +125,33 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
     term.writeln("\x1b[36m[System]\x1b[0m Booting WebContainer…");
 
     try {
-      // ── Detect bot type before doing anything else ───────────────────────
-      const { isPython, runCmd } = detectRunCommand(generatedFiles);
+      // ── Detect bot type ──────────────────────────────────────────────────
+      const { isPython, needsInstall, runCmd } = detectRunStrategy(generatedFiles);
       term.writeln(
-        `\x1b[36m[System]\x1b[0m Detected \x1b[1m${isPython ? "Python" : "TypeScript"}\x1b[0m bot → \x1b[33m${runCmd}\x1b[0m`
+        `\x1b[36m[System]\x1b[0m Bot type: \x1b[1m${isPython ? "Python" : "TypeScript/Node"}\x1b[0m` +
+        ` — run: \x1b[33m${runCmd}\x1b[0m`
       );
 
+      // ── Log env summary (redact sensitive values) ─────────────────────────
+      const envKeys = Object.entries(envConfig)
+        .filter(([, v]) => v && v !== "true" && v !== "false" && v !== "1" && v !== "5")
+        .map(([k]) => k);
+      term.writeln(`\x1b[36m[System]\x1b[0m Env keys set: \x1b[32m${envKeys.join(", ") || "none"}\x1b[0m`);
+
       // ── Build file tree ──────────────────────────────────────────────────
-      const envContent = buildEnvFileContent(envConfig);
+      const envContent = buildEnvFileContent({
+        ...envConfig,
+        // Ensure MCP_GATEWAY_URL is always written to .env
+        MCP_GATEWAY_URL: envConfig.MCP_GATEWAY_URL || "http://localhost:8000/mcp",
+      });
+
       const allFiles: BotFile[] = [
-        ...generatedFiles.filter(f => f.filepath !== ".env" && f.filepath !== ".npmrc"),
-        { filepath: ".env",   content: envContent },
-        // Only include .npmrc for Node bots — Python doesn't need it
+        ...generatedFiles.filter(f =>
+          f.filepath !== ".env" &&
+          f.filepath !== ".npmrc" &&
+          f.filepath !== ".env.example"
+        ),
+        { filepath: ".env", content: envContent },
         ...(!isPython ? [{ filepath: ".npmrc", content: BOT_NPMRC }] : []),
       ];
 
@@ -147,7 +172,7 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
           const msg = (bootErr as Error).message ?? "";
           if (msg.includes("Only a single WebContainer")) {
             throw new Error(
-              "WebContainer is already running. Please hard-refresh (Cmd/Ctrl+Shift+R) and try again."
+              "WebContainer already running. Hard-refresh (Cmd/Ctrl+Shift+R) and try again."
             );
           }
           throw bootErr;
@@ -168,17 +193,19 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
       };
 
       await wc.mount(parseFilesToTree(allFiles));
+      term.writeln(`\x1b[36m[System]\x1b[0m Mounted ${allFiles.length} files`);
 
       // ── npm install (TypeScript bots only) ───────────────────────────────
-      if (!isPython) {
+      if (needsInstall) {
+        setPhase("installing");
         setStatus("Installing packages…");
-        term.writeln("\x1b[36m[System]\x1b[0m npm install --legacy-peer-deps");
+        term.writeln("\x1b[36m[System]\x1b[0m Running npm install…");
 
         const install = await wc.spawn("jsh", [
           "-c",
           "npm install --loglevel=error --legacy-peer-deps --no-fund",
         ], {
-          env:      { npm_config_yes: "true" },
+          env: { npm_config_yes: "true" },
           terminal: { cols: term.cols, rows: term.rows },
         });
 
@@ -192,29 +219,20 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
 
         if (installCode !== 0) {
           setStatus("Install failed");
-          term.writeln("\x1b[31m[Error]\x1b[0m npm install failed — check the output above");
+          term.writeln("\x1b[31m[Error]\x1b[0m npm install failed — see output above");
           setPhase("env-setup");
           return;
         }
 
-        term.writeln("\x1b[32m[System]\x1b[0m npm install complete");
-      } else {
-        term.writeln("\x1b[36m[System]\x1b[0m Python bot — skipping npm install");
+        term.writeln("\x1b[32m[System]\x1b[0m npm install complete ✓");
       }
 
       // ── Run bot ──────────────────────────────────────────────────────────
+      setPhase("running");
       setStatus("Bot running…");
       term.writeln(`\n\x1b[36m[System]\x1b[0m Starting → \x1b[1m${runCmd}\x1b[0m\n`);
 
-      const processEnv: Record<string, string> = {
-        SIMULATION_MODE:     envConfig.SIMULATION_MODE,
-        WALLET_PRIVATE_KEY:  envConfig.WALLET_PRIVATE_KEY,
-        RPC_PROVIDER_URL:    envConfig.RPC_PROVIDER_URL,
-        WEBACY_API_KEY:      envConfig.WEBACY_API_KEY,
-        ONEINCH_API_KEY:     envConfig.ONEINCH_API_KEY,
-        BORROW_AMOUNT_HUMAN: envConfig.BORROW_AMOUNT_HUMAN || "1",
-        POLL_INTERVAL:       envConfig.POLL_INTERVAL       || "5",
-      };
+      const processEnv = buildProcessEnv(envConfig);
 
       const run = await wc.spawn("jsh", ["-c", runCmd], {
         env:      processEnv,

@@ -4,6 +4,10 @@
  * Receives a structured BotConfig from the configurator chat,
  * calls the Python Meta-Agent server to scaffold the bot code,
  * then saves it as an Agent + files in the database.
+ *
+ * Key change: the `intent` object returned by the orchestrator is now
+ * saved inside the agent's `configuration` field so that the Bot IDE
+ * can read it back and render the correct env-var fields and strategy badges.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -13,8 +17,8 @@ import type { BotConfig } from "@/lib/types";
 
 const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
 
-// ─── Build the env plaintext string from BotConfig ────────────────────────────
-// This is the single source of truth — used by BOTH the main path and fallback.
+// ─── Build .env plaintext from BotConfig ─────────────────────────────────────
+
 function buildEnvPlaintext(config: BotConfig): string {
   return [
     `SIMULATION_MODE=${config.simulationMode}`,
@@ -24,6 +28,8 @@ function buildEnvPlaintext(config: BotConfig): string {
     `WALLET_PRIVATE_KEY=${config.privateKey ?? ""}`,
     `BORROW_AMOUNT_HUMAN=${config.borrowAmountHuman}`,
     `POLL_INTERVAL=${config.pollingIntervalSec}`,
+    // Always include MCP gateway URL so the bot can reach the server
+    `MCP_GATEWAY_URL=${process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp"}`,
   ].join("\n") + "\n";
 }
 
@@ -37,17 +43,17 @@ function buildPrompt(cfg: BotConfig): string {
   };
 
   const tokenAddresses: Record<string, Record<string, string>> = {
-    USDC: {
+    USDC:  {
       "base-sepolia": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "base-mainnet": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "arbitrum":     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     },
-    USDT: {
+    USDT:  {
       "base-sepolia": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
       "base-mainnet": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
       "arbitrum":     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
     },
-    WETH: {
+    WETH:  {
       "base-sepolia": "0x4200000000000000000000000000000000000006",
       "base-mainnet": "0x4200000000000000000000000000000000000006",
       "arbitrum":     "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
@@ -57,7 +63,7 @@ function buildPrompt(cfg: BotConfig): string {
       "base-mainnet": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
       "arbitrum":     "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
     },
-    AERO: {
+    AERO:  {
       "base-sepolia": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
       "base-mainnet": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
       "arbitrum":     "",
@@ -106,21 +112,21 @@ Include SIMULATION_MODE toggle (read from env var).
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body   = await req.json();
     const config = body.config as BotConfig;
 
     if (!config || !config.chain || !config.baseToken || !config.targetToken) {
       return NextResponse.json({ error: "Invalid bot configuration." }, { status: 400 });
     }
 
-    // Build and encrypt the .env content using REAL credentials from config
     const envPlaintext = buildEnvPlaintext(config);
     const encryptedEnv = encryptEnvConfig(envPlaintext);
+    const prompt       = buildPrompt(config);
 
-    const prompt = buildPrompt(config);
-
-    // Try the Python Meta-Agent
+    // ── Call Meta-Agent ───────────────────────────────────────────────────────
     let metaResponse: Response | null = null;
+    let metaData:     Record<string, unknown> | null = null;
+
     try {
       metaResponse = await fetch(`${META_AGENT_URL}/create-bot`, {
         method:  "POST",
@@ -128,68 +134,19 @@ export async function POST(req: NextRequest) {
         body:    JSON.stringify({ prompt }),
         signal:  AbortSignal.timeout(180_000),
       });
+
+      if (metaResponse.ok) {
+        metaData = await metaResponse.json() as Record<string, unknown>;
+      }
     } catch {
-      return generateWebContainerFallback(config, envPlaintext, encryptedEnv);
+      // Fall through to fallback
     }
 
-    if (!metaResponse || !metaResponse.ok) {
-      return generateWebContainerFallback(config, envPlaintext, encryptedEnv);
+    if (metaData) {
+      return await saveMetaAgentBot(config, metaData, encryptedEnv);
     }
 
-    const metaData = await metaResponse.json();
-    const output   = metaData.output ?? {};
-    let files: { filepath: string; content: string; language?: string }[] = output.files ?? [];
-
-    // Never store .env or .env.example in the files array
-    files = files.filter(f => ![".env", ".env.example"].includes(f.filepath));
-
-    const userId = "public-user";
-    await prisma.user.upsert({
-      where:  { id: userId },
-      update: {},
-      create: { id: userId, email: `${userId}@placeholder.agentia`, walletAddress: "" },
-    });
-
-    const botName      = config.botName || "ArbitrageBot";
-    const configRecord = {
-      chain:              config.chain,
-      baseToken:          config.baseToken,
-      targetToken:        config.targetToken,
-      dex:                config.dex,
-      securityProvider:   config.securityProvider,
-      borrowAmountHuman:  config.borrowAmountHuman,
-      minProfitUsd:       config.minProfitUsd,
-      gasBufferUsdc:      config.gasBufferUsdc,
-      pollingIntervalSec: config.pollingIntervalSec,
-      simulationMode:     config.simulationMode,
-      generatedAt:        new Date().toISOString(),
-    };
-
-    const agent = await prisma.agent.create({
-      data: {
-        name:          botName,
-        userId,
-        status:        "STOPPED",
-        configuration: configRecord,
-        envConfig:     encryptedEnv,
-        files: {
-          create: files.map(f => ({
-            filepath: f.filepath,
-            content:  f.content,
-            language: f.language || (f.filepath.endsWith(".py") ? "python" : "plaintext"),
-          })),
-        },
-      },
-      include: { files: true },
-    });
-
-    return NextResponse.json({
-      agentId:  agent.id,
-      botName,
-      files,
-      thoughts: output.thoughts ?? "",
-      config:   configRecord,
-    });
+    return generateWebContainerFallback(config, envPlaintext, encryptedEnv);
 
   } catch (err) {
     console.error("[POST /api/generate-bot]", err);
@@ -200,12 +157,80 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// ─── Save Meta-Agent output ───────────────────────────────────────────────────
+
+async function saveMetaAgentBot(
+  config:      BotConfig,
+  metaData:    Record<string, unknown>,
+  encryptedEnv: string,
+): Promise<NextResponse> {
+  const output = (metaData.output ?? {}) as Record<string, unknown>;
+
+  // The orchestrator now returns the classified intent in metaData.intent
+  const intent = (metaData.intent ?? null) as Record<string, unknown> | null;
+
+  let files = ((output.files ?? []) as Array<{ filepath: string; content: string; language?: string }>)
+    .filter(f => ![".env", ".env.example"].includes(f.filepath));
+
+  const userId = "public-user";
+  await prisma.user.upsert({
+    where:  { id: userId },
+    update: {},
+    create: { id: userId, email: `${userId}@placeholder.agentia`, walletAddress: "" },
+  });
+
+  const botName      = config.botName || "ArbitrageBot";
+  const configRecord = {
+    // Base config
+    chain:              config.chain,
+    baseToken:          config.baseToken,
+    targetToken:        config.targetToken,
+    dex:                config.dex,
+    securityProvider:   config.securityProvider,
+    borrowAmountHuman:  config.borrowAmountHuman,
+    minProfitUsd:       config.minProfitUsd,
+    gasBufferUsdc:      config.gasBufferUsdc,
+    pollingIntervalSec: config.pollingIntervalSec,
+    simulationMode:     config.simulationMode,
+    generatedAt:        new Date().toISOString(),
+    // ✅ Save intent so the IDE can render the correct env fields and badges
+    intent,
+    // Tools used by the Meta-Agent
+    toolsUsed: Array.isArray(metaData.tools_used) ? metaData.tools_used : [],
+  };
+
+  const agent = await prisma.agent.create({
+    data: {
+      name:          botName,
+      userId,
+      status:        "STOPPED",
+      configuration: configRecord as any,
+      envConfig:     encryptedEnv,
+      files: {
+        create: files.map(f => ({
+          filepath: f.filepath,
+          content:  f.content,
+          language: f.language || (f.filepath.endsWith(".py") ? "python" : "plaintext"),
+        })),
+      },
+    },
+    include: { files: true },
+  });
+
+  return NextResponse.json({
+    agentId:  agent.id,
+    botName,
+    files,
+    thoughts: (output.thoughts as string) ?? "",
+    config:   configRecord,
+    intent,
+  });
+}
+
 // ─── Fallback: WebContainer TypeScript Bot ────────────────────────────────────
-// Now receives the already-built envPlaintext and encryptedEnv so credentials
-// from the config are ALWAYS saved — whether Meta-Agent runs or not.
 
 async function generateWebContainerFallback(
-  config: BotConfig,
+  config:      BotConfig,
   envPlaintext: string,
   encryptedEnv: string,
 ): Promise<NextResponse> {
@@ -247,8 +272,7 @@ async function generateWebContainerFallback(
   const tgtAddr  = tokenAddr[config.targetToken]?.[config.chain] ?? "0x4200000000000000000000000000000000000006";
   const baseDec  = config.baseToken === "WETH" ? 18 : 6;
   const tgtDec   = config.targetToken === "WETH" || config.targetToken === "AERO" ? 18
-                 : config.targetToken === "CBBTC" ? 8
-                 : 6;
+                 : config.targetToken === "CBBTC" ? 8 : 6;
 
   const configTs = `import "dotenv/config";
 import { ethers } from "ethers";
@@ -261,6 +285,7 @@ export const CHAIN_ID             = ${chainId};
 export const BASE_DECIMALS        = ${baseDec};
 export const TARGET_DECIMALS      = ${tgtDec};
 
+export const MCP_GATEWAY_URL      = process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp";
 export const AAVE_FEE_BPS         = 9n;
 export const BORROW_AMOUNT_HUMAN  = process.env.BORROW_AMOUNT_HUMAN ?? "${config.borrowAmountHuman}";
 export const MIN_PROFIT_HUMAN     = ${config.minProfitUsd};
@@ -294,7 +319,7 @@ export const FLASHLOAN_ABI = [
 ] as const;
 `;
 
-  const securityNote = config.securityProvider === "none"
+  const secNote = config.securityProvider === "none"
     ? `async function verifyTokens(): Promise<boolean> { return true; }`
     : `async function isTokenSafe(addr: string): Promise<boolean> {
   try {
@@ -357,12 +382,12 @@ async function getSwapData(src:string,dst:string,amount:bigint,from:string):Prom
   return d.tx.data;
 }
 
-${securityNote}
+${secNote}
 
 function validate():void{
   const errs:string[]=[];
-  if(!ONEINCH_API_KEY) errs.push("ONEINCH_API_KEY not set  →  https://portal.1inch.dev");
-  ${config.securityProvider==="webacy" ? 'if(!WEBACY_API_KEY) errs.push("WEBACY_API_KEY not set   →  https://webacy.com");' : ""}
+  if(!ONEINCH_API_KEY) errs.push("ONEINCH_API_KEY not set  → https://portal.1inch.dev");
+  ${config.securityProvider==="webacy" ? 'if(!WEBACY_API_KEY) errs.push("WEBACY_API_KEY not set   → https://webacy.com");' : ""}
   if(!SIMULATION_MODE){
     if(!RPC_PROVIDER_URL)   errs.push("RPC_PROVIDER_URL required for live mode");
     if(!WALLET_PRIVATE_KEY) errs.push("WALLET_PRIVATE_KEY required for live mode");
@@ -370,11 +395,7 @@ function validate():void{
   if(errs.length){ errs.forEach(e=>log("ERROR",e)); process.exit(1); }
 }
 
-console.log(\`\\n\${C.bold}\${C.cyan}╔══════════════════════════════════════════════════════╗
-║  ${config.botName.substring(0,50).padEnd(50)}  ║
-║  Chain: ${config.chain.padEnd(14)} | Pair: ${config.baseToken}→${config.targetToken}${" ".repeat(Math.max(0,22-config.baseToken.length-config.targetToken.length))}  ║
-╚══════════════════════════════════════════════════════╝\${C.reset}\\n\`);
-
+log("INFO",\`${config.botName} | ${config.baseToken}→${config.targetToken} | ${config.chain} | chainId \${CHAIN_ID}\`);
 validate();
 
 const BORROW_BASE = parseBaseUnits(BORROW_AMOUNT_HUMAN, BASE_DECIMALS);
@@ -384,9 +405,6 @@ const signer      = !SIMULATION_MODE && provider ? createSigner(provider) : null
 
 if(SIMULATION_MODE) log("WARN","SIMULATION MODE — no real transactions will broadcast");
 else                log("WARN",\`LIVE MODE on ${config.chain} (chainId \${CHAIN_ID})\`);
-log("INFO",\`Borrow: \${BORROW_BASE.toLocaleString()} base units (\${BORROW_AMOUNT_HUMAN} ${config.baseToken})\`);
-log("INFO",\`Min profit: \${MIN_PROFIT.toLocaleString()} base units\`);
-log("INFO",\`Polling every \${POLL_INTERVAL_MS/1000}s\`);
 
 let cycle=0;
 async function runCycle():Promise<void>{
@@ -397,9 +415,8 @@ async function runCycle():Promise<void>{
     const fee         = (BORROW_BASE*AAVE_FEE_BPS)/10_000n;
     const netProfit   = grossReturn-BORROW_BASE-fee-GAS_BUFFER_BASE;
     const netH        = (Number(netProfit)/10**BASE_DECIMALS).toFixed(6);
-    const grossH      = (Number(grossReturn)/10**BASE_DECIMALS).toFixed(6);
     if(netProfit>MIN_PROFIT){
-      log("INFO",\`Cycle #\${cycle} ✓ gross \${grossH} ${config.baseToken}, net +\${netH} ${config.baseToken}\`);
+      log("INFO",\`Cycle #\${cycle} ✓ net +\${netH} ${config.baseToken}\`);
       const tokensOk=await verifyTokens();
       if(!tokensOk){ log("WARN",\`Cycle #\${cycle} Token risk check failed\`); return; }
       if(SIMULATION_MODE){
@@ -429,21 +446,47 @@ process.on("SIGTERM",()=>{ clearInterval(timer); process.exit(0); });
 `;
 
   const packageJson = JSON.stringify({
-    name:        config.botName.toLowerCase().replace(/\s+/g, "-"),
-    version:     "1.0.0",
-    type:        "module",
+    name:    config.botName.toLowerCase().replace(/\s+/g, "-"),
+    version: "1.0.0",
+    type:    "module",
     description: `${config.baseToken}→${config.targetToken} flash loan arbitrage on ${config.chain}`,
-    scripts:     { start: "tsx src/index.ts", dev: "tsx src/index.ts" },
-    dependencies: { ethers: "^6.13.0", dotenv: "^16.4.0" },
+    scripts: { start: "tsx src/index.ts", dev: "tsx src/index.ts" },
+    dependencies:    { ethers: "^6.13.0", dotenv: "^16.4.0" },
     devDependencies: { typescript: "^5.4.0", "@types/node": "^20.0.0", tsx: "^4.7.0" },
   }, null, 2);
 
-  // Files stored in DB — .env is NOT here, it's stored encrypted in envConfig column
   const files = [
     { filepath: "package.json",  content: packageJson,  language: "json"       },
     { filepath: "src/config.ts", content: configTs,     language: "typescript" },
     { filepath: "src/index.ts",  content: indexTs,      language: "typescript" },
   ];
+
+  // ── Fallback intent ────────────────────────────────────────────────────────
+  const fallbackIntent = {
+    chain:           "evm",
+    network:          config.chain,
+    strategy:        "arbitrage",
+    execution_model: "polling",
+    required_mcps:   ["one_inch", ...(config.securityProvider === "webacy" ? ["webacy"] : [])],
+    bot_type:        `${config.botName} — Fallback`,
+    requires_openai_key:    false,
+    requires_solana_wallet: false,
+  };
+
+  const configRecord = {
+    chain:             config.chain,
+    baseToken:         config.baseToken,
+    targetToken:       config.targetToken,
+    dex:               config.dex,
+    securityProvider:  config.securityProvider,
+    borrowAmountHuman: config.borrowAmountHuman,
+    minProfitUsd:      config.minProfitUsd,
+    simulationMode:    config.simulationMode,
+    generatedAt:       new Date().toISOString(),
+    source:            "fallback",
+    // ✅ Always save intent even for fallback bots
+    intent:            fallbackIntent,
+  };
 
   try {
     const userId = "public-user";
@@ -455,23 +498,11 @@ process.on("SIGTERM",()=>{ clearInterval(timer); process.exit(0); });
 
     const agent = await prisma.agent.create({
       data: {
-        name:   config.botName,
+        name:          config.botName,
         userId,
-        status: "STOPPED",
-        configuration: {
-          chain:             config.chain,
-          baseToken:         config.baseToken,
-          targetToken:       config.targetToken,
-          dex:               config.dex,
-          securityProvider:  config.securityProvider,
-          borrowAmountHuman: config.borrowAmountHuman,
-          minProfitUsd:      config.minProfitUsd,
-          simulationMode:    config.simulationMode,
-          generatedAt:       new Date().toISOString(),
-          source:            "bot-configurator-fallback",
-        },
-        // Use the real encrypted env — credentials are preserved
-        envConfig: encryptedEnv,
+        status:        "STOPPED",
+        configuration: configRecord,
+        envConfig:     encryptedEnv,
         files: {
           create: files.map(f => ({
             filepath: f.filepath,
@@ -487,8 +518,9 @@ process.on("SIGTERM",()=>{ clearInterval(timer); process.exit(0); });
       agentId:  agent.id,
       botName:  config.botName,
       files,
-      thoughts: `${config.botName}: ${config.baseToken}→${config.targetToken} arbitrage on ${config.chain} via ${config.dex}. ${config.simulationMode ? "Simulation mode." : "Live mode."}`,
-      config,
+      thoughts: `${config.botName}: ${config.baseToken}→${config.targetToken} on ${config.chain} via ${config.dex}. ${config.simulationMode ? "Simulation." : "Live."}`,
+      config:   configRecord,
+      intent:   fallbackIntent,
       source:   "fallback",
     });
   } catch {
@@ -497,7 +529,8 @@ process.on("SIGTERM",()=>{ clearInterval(timer); process.exit(0); });
       botName:  config.botName,
       files,
       thoughts: `${config.botName} generated offline (DB unavailable).`,
-      config,
+      config:   configRecord,
+      intent:   fallbackIntent,
       source:   "offline-fallback",
     });
   }

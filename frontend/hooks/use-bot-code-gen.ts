@@ -4,13 +4,15 @@
  * frontend/hooks/use-bot-code-gen.ts
  *
  * Fetches bot files — either a specific agentId or the latest bot.
- * Works with both the old hardcoded bot and new custom-configured bots.
+ * Now also extracts and returns the `intent` object stored in the agent's
+ * configuration so the UI can render the correct env fields and badges.
  */
 
 import { useState } from "react";
 import type { MutableRefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
-import type { BotEnvConfig } from "@/lib/bot-constant";
+import type { BotEnvConfig, BotIntent } from "@/lib/bot-constant";
+import { DEFAULT_BOT_ENV_CONFIG } from "@/lib/bot-constant";
 
 export interface BotFile {
   filepath: string;
@@ -18,11 +20,7 @@ export interface BotFile {
   language?: string;
 }
 
-/**
- * Parse a .env file string into a key→value map.
- * Handles values that contain "=" (e.g. Alchemy URLs, base64 keys).
- * Ignores blank lines and comment lines.
- */
+/** Parse a .env file string into a key→value map. */
 function parseEnvFile(envContent: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const rawLine of envContent.split("\n")) {
@@ -37,20 +35,51 @@ function parseEnvFile(envContent: string): Record<string, string> {
   return result;
 }
 
+/** Extract BotIntent from whatever shape the DB stores it in. */
+function extractIntent(config: Record<string, unknown> | null | undefined): BotIntent | null {
+  if (!config) return null;
+
+  // The orchestrator stores it under `intent`
+  if (config.intent && typeof config.intent === "object") {
+    return config.intent as BotIntent;
+  }
+
+  // Fallback: reconstruct a minimal intent from flat config fields
+  const chain   = typeof config.chain === "string" && config.chain.includes("solana")
+    ? "solana" : "evm";
+  const network = typeof config.chain === "string" ? config.chain : undefined;
+
+  if (config.strategy || config.chain) {
+    return {
+      chain,
+      network,
+      strategy:        typeof config.strategy === "string" ? config.strategy : undefined,
+      execution_model: typeof config.execution_model === "string" ? config.execution_model as BotIntent["execution_model"] : "polling",
+      required_mcps:   Array.isArray(config.required_mcps) ? config.required_mcps as string[] : [],
+      bot_type:        typeof config.bot_type === "string" ? config.bot_type : undefined,
+      requires_openai_key:    Boolean(config.requires_openai_key),
+      requires_solana_wallet: chain === "solana",
+    };
+  }
+
+  return null;
+}
+
 export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
   const [generatedFiles, setGeneratedFiles] = useState<BotFile[]>([]);
   const [selectedFile,   setSelectedFile]   = useState<string | null>(null);
   const [agentId,        setAgentId]        = useState<string | null>(null);
   const [botName,        setBotName]        = useState<string>("ArbitrageBot");
+  const [intent,         setIntent]         = useState<BotIntent | null>(null);
 
   const generateFiles = async (specificAgentId?: string) => {
     const term = termRef.current;
-    if (!term) return;
+    if (!term) return null;
     term.clear();
-    term.writeln("\x1b[36m[System]\x1b[0m Loading bot files...");
+    term.writeln("\x1b[36m[System]\x1b[0m Loading bot files…");
 
     try {
-      // Try to load from DB (custom-configured bot or latest)
+      // ── Try DB first ───────────────────────────────────────────────────
       const url = specificAgentId
         ? `/api/get-latest-bot?agentId=${specificAgentId}`
         : `/api/get-latest-bot`;
@@ -58,63 +87,69 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
       const dbRes = await fetch(url);
 
       if (dbRes.ok) {
-        const data: { agentId: string; name: string; files: BotFile[]; config?: Record<string, unknown> } = await dbRes.json();
+        const data: {
+          agentId:  string;
+          name:     string;
+          files:    BotFile[];
+          config?:  Record<string, unknown>;
+        } = await dbRes.json();
 
         if (data.files?.length) {
-          // Keep ALL files (including .env) so they show in the sidebar
           setGeneratedFiles(data.files);
 
-          // Default to opening index.ts (or main.py) instead of .env
-          const mainFile = data.files.find(
-            (f) =>
-              f.filepath === "src/index.ts" ||
-              f.filepath === "src/index.js" ||
-              f.filepath === "main.py"
+          // Default to index.ts or main.py (not .env)
+          const mainFile = data.files.find(f =>
+            f.filepath === "src/index.ts" ||
+            f.filepath === "src/index.js" ||
+            f.filepath === "main.py"
           );
           setSelectedFile(mainFile?.filepath ?? data.files[0]?.filepath ?? null);
 
           if (data.agentId) setAgentId(data.agentId);
           if (data.name)    setBotName(data.name);
 
-          // Parse the decrypted .env file back into a BotEnvConfig object
-          const envFile = data.files.find((f) => f.filepath === ".env");
+          // ── Extract intent ───────────────────────────────────────────
+          const detectedIntent = extractIntent(data.config ?? null);
+          if (detectedIntent) {
+            setIntent(detectedIntent);
+            term.writeln(
+              `\x1b[36m[System]\x1b[0m Intent: \x1b[32m${detectedIntent.strategy ?? "unknown"}\x1b[0m` +
+              ` on \x1b[32m${detectedIntent.network ?? detectedIntent.chain ?? "evm"}\x1b[0m`
+            );
+          }
+
+          // ── Parse .env file ──────────────────────────────────────────
+          const envFile = data.files.find(f => f.filepath === ".env");
           let loadedEnvConfig: BotEnvConfig | null = null;
 
           if (envFile?.content) {
             const parsed = parseEnvFile(envFile.content);
-
-            // Only populate if we actually got meaningful values
             loadedEnvConfig = {
-              SIMULATION_MODE:     parsed.SIMULATION_MODE     ?? "true",
-              RPC_PROVIDER_URL:    parsed.RPC_PROVIDER_URL    ?? "",
-              WALLET_PRIVATE_KEY:  parsed.WALLET_PRIVATE_KEY  ?? "",
-              ONEINCH_API_KEY:     parsed.ONEINCH_API_KEY     ?? "",
-              WEBACY_API_KEY:      parsed.WEBACY_API_KEY      ?? "",
-              BORROW_AMOUNT_HUMAN: parsed.BORROW_AMOUNT_HUMAN ?? "1",
-              POLL_INTERVAL:       parsed.POLL_INTERVAL       ?? "5",
+              ...DEFAULT_BOT_ENV_CONFIG,
+              ...parsed,
             };
 
-            // Log which keys were found (values redacted for security)
             const foundKeys = Object.entries(loadedEnvConfig)
-              .filter(([, v]) => v && v !== "true" && v !== "1" && v !== "5")
+              .filter(([, v]) => v && v !== "true" && v !== "1" && v !== "5" && !v.startsWith("http://localhost"))
               .map(([k]) => k);
+
             term.writeln(
-              `\x1b[36m[System]\x1b[0m .env loaded — keys found: \x1b[32m${foundKeys.join(", ") || "none"}\x1b[0m`
+              `\x1b[36m[System]\x1b[0m .env loaded — keys: \x1b[32m${foundKeys.join(", ") || "none"}\x1b[0m`
             );
           } else {
-            term.writeln("\x1b[33m[System]\x1b[0m No .env file found in DB — credentials will need to be entered manually.");
+            term.writeln("\x1b[33m[System]\x1b[0m No .env in DB — please fill in credentials.");
           }
 
           term.writeln(
             `\x1b[32m[System]\x1b[0m Loaded \x1b[1m${data.name || "bot"}\x1b[0m (${data.files.length} files)`
           );
 
-          return { success: true, loadedEnvConfig };
+          return { success: true, loadedEnvConfig, intent: detectedIntent };
         }
       }
 
-      // Fallback: fetch the hardcoded demo bot
-      term.writeln("\x1b[33m[System]\x1b[0m No custom bot found, loading demo bot...");
+      // ── Fallback: hardcoded demo bot ────────────────────────────────────
+      term.writeln("\x1b[33m[System]\x1b[0m No custom bot found — loading demo bot…");
       const res = await fetch("/api/get-bot-code", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
@@ -130,17 +165,35 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
       setSelectedFile("src/index.ts");
       if (data.agentId) setAgentId(data.agentId);
 
+      // Demo bot is always EVM arbitrage
+      const demoIntent: BotIntent = {
+        chain: "evm", network: "base-sepolia",
+        strategy: "arbitrage", execution_model: "polling",
+        required_mcps: ["one_inch", "webacy", "goat_evm"],
+        bot_type: "Flash Loan Arbitrage Bot",
+        requires_openai_key: false, requires_solana_wallet: false,
+      };
+      setIntent(demoIntent);
+
       term.writeln(`\x1b[32m[System]\x1b[0m ${data.files.length} demo files loaded.`);
       term.writeln(`\x1b[33m[Bot]\x1b[0m ${data.thoughts}`);
 
-      return { success: true, loadedEnvConfig: null };
+      return { success: true, loadedEnvConfig: null, intent: demoIntent };
 
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       term.writeln(`\x1b[31m[Error]\x1b[0m ${msg}`);
-      return { success: false, loadedEnvConfig: null };
+      return { success: false, loadedEnvConfig: null, intent: null };
     }
   };
 
-  return { generateFiles, generatedFiles, selectedFile, setSelectedFile, agentId, botName };
+  return {
+    generateFiles,
+    generatedFiles,
+    selectedFile,
+    setSelectedFile,
+    agentId,
+    botName,
+    intent,
+  };
 }
