@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     const files = (output.files ?? []).filter((f: any) => !['.env', '.env.example'].includes(f.filepath));
 
     // NEW: Inject collected keys from the chat directly into the environment
-    let envPlaintext = `SIMULATION_MODE=true\nMCP_GATEWAY_URL=${process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp"}\n`;
+    let envPlaintext = `SIMULATION_MODE=true\nMCP_GATEWAY_URL=${process.env.MCP_GATEWAY_URL ?? "http://192.168.1.50:8000/mcp"}\n`;
     for (const [key, val] of Object.entries(envConfig)) {
       if (val) envPlaintext += `${key}=${val}\n`;
     }

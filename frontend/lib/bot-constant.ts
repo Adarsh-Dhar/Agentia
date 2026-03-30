@@ -24,7 +24,7 @@ export interface BotIntent {
 export interface BotEnvConfig {
   // ── Core (present for every bot) ───────────────────────────────────────────
   SIMULATION_MODE:     string;   // "true" | "false"
-  MCP_GATEWAY_URL:     string;   // e.g. "http://localhost:8000/mcp"
+  MCP_GATEWAY_URL:     string;   // e.g. "http://192.168.1.50:8000/mcp"
 
   // ── EVM wallet ─────────────────────────────────────────────────────────────
   RPC_PROVIDER_URL:    string;   // e.g. https://base-sepolia.g.alchemy.com/v2/...
@@ -60,7 +60,7 @@ export interface BotEnvConfig {
 
 export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   SIMULATION_MODE:     "true",
-  MCP_GATEWAY_URL:     "http://localhost:8000/mcp",
+  MCP_GATEWAY_URL:     "http://192.168.1.50:8000/mcp",
 
   RPC_PROVIDER_URL:    "",
   WALLET_PRIVATE_KEY:  "",
@@ -100,7 +100,7 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
       label:       "MCP Gateway URL",
       type:        "text",
       required:    true,
-      placeholder: "http://localhost:8000/mcp",
+      placeholder: "http://192.168.1.50:8000/mcp",
       helpText:    "URL of the running Python Meta-Agent server (uvicorn main:app).",
     },
     {

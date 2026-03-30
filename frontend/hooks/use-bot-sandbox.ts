@@ -93,7 +93,7 @@ function buildProcessEnv(cfg: BotEnvConfig): Record<string, string> {
   }
   // Ensure MCP_GATEWAY_URL always present
   if (!env.MCP_GATEWAY_URL) {
-    env.MCP_GATEWAY_URL = "http://localhost:8000/mcp";
+    env.MCP_GATEWAY_URL = "http://192.168.1.50:8000/mcp";
   }
   // Ensure SIMULATION_MODE always present
   if (!env.SIMULATION_MODE) {
@@ -142,7 +142,7 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
       const envContent = buildEnvFileContent({
         ...envConfig,
         // Ensure MCP_GATEWAY_URL is always written to .env
-        MCP_GATEWAY_URL: envConfig.MCP_GATEWAY_URL || "http://localhost:8000/mcp",
+        MCP_GATEWAY_URL: envConfig.MCP_GATEWAY_URL || "http://192.168.1.50:8000/mcp",
       });
 
       const allFiles: BotFile[] = [

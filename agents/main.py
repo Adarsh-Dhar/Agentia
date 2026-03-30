@@ -47,7 +47,30 @@ async def classify_intent(request: PromptRequest):
     try:
         intent = await builder.classify_intent(request.prompt)
         return {"intent": intent}
+
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- MCP Proxy Route: Forwards tool calls from WebContainer bots to MCP servers ---
+from fastapi import Request
+
+@app.post("/mcp/{server_name}/{tool_name}")
+async def proxy_mcp_tool(server_name: str, tool_name: str, args: dict):
+    """
+    Acts as a gateway. Receives HTTP POST from the WebContainer bot,
+    executes the tool via the active MCP session, and returns the result.
+    """
+    try:
+        # Check if the server session exists
+        if server_name not in builder.mcp_manager.sessions:
+            raise HTTPException(status_code=404, detail=f"MCP Server '{server_name}' not connected.")
+
+        # Execute the tool via your MultiMCPClient
+        result = await builder.mcp_manager.call_tool(server_name, tool_name, args)
+        return result
+    except Exception as e:
+        print(f"❌ Tool Execution Failed ({server_name}/{tool_name}): {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

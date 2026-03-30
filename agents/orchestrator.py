@@ -38,7 +38,7 @@ export async function callMcpTool(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const MCP_GATEWAY = process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp";
+  const MCP_GATEWAY = process.env.MCP_GATEWAY_URL ?? "http://192.168.1.50:8000/mcp";
   const response = await fetch(`${MCP_GATEWAY}/${server}/${tool}`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
@@ -52,7 +52,7 @@ export async function callMcpTool(
 ```
 
 Import and use `callMcpTool` in src/index.ts for all MCP server interactions.
-Add `MCP_GATEWAY_URL=http://localhost:8000/mcp` to your .env.example file.
+Add `MCP_GATEWAY_URL=http://192.168.1.50:8000/mcp` to your .env.example file.
 """
 
 
@@ -530,8 +530,28 @@ TypeScript pattern:
 import { Connection, Keypair, VersionedTransaction, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import bs58 from 'bs58';
 
-const connection = new Connection(process.env.SOLANA_RPC_URL!, 'confirmed');
-const keypair    = Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY!));
+const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
+
+// Safely load the keypair, or generate a random dummy one for Simulation Mode
+const keypair = process.env.SOLANA_PRIVATE_KEY 
+  ? Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY)) 
+  : Keypair.generate();
+
+async function jupiterSwap(
+  inputMint: string, outputMint: string, amountBaseUnits: bigint, slippageBps = 50,
+): Promise<string> {
+  const quote = await (await fetch(
+    `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountBaseUnits}&slippageBps=${slippageBps}`
+  )).json();
+  const { swapTransaction } = await (await fetch('https://quote-api.jup.ag/v6/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quoteResponse: quote, userPublicKey: keypair.publicKey.toBase58(), wrapAndUnwrapSol: true }),
+  })).json();
+  const vtx = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'));
+  vtx.sign([keypair]);
+  return connection.sendRawTransaction(vtx.serialize(), { skipPreflight: true });
+}
 
 async function jupiterSwap(
   inputMint: string, outputMint: string, amountBaseUnits: bigint, slippageBps = 50,
