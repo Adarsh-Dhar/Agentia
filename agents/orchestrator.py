@@ -29,34 +29,55 @@ load_dotenv()
 TS_MCP_BRIDGE = """
 ## FILE INSTRUCTION: src/mcp_bridge.ts
 You MUST generate a file named `src/mcp_bridge.ts` to communicate with the host MCP servers.
-Use exactly this implementation:
+Use EXACTLY this implementation — do not deviate, especially the headers and URL sourcing:
 
 ```typescript
 // src/mcp_bridge.ts
+import { CONFIG } from './config.js';
+
 export async function callMcpTool(
   server: string,
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const MCP_GATEWAY = process.env.MCP_GATEWAY_URL ?? "http://192.168.1.50:8000/mcp";
-  const response = await fetch(`${MCP_GATEWAY}/${server}/${tool}`, {
+  // CRITICAL: Read URL from CONFIG (which reads from process.env via dotenv).
+  // NEVER hardcode a fallback IP address like 192.168.x.x — WebContainers
+  // cannot reach LAN IPs; attempting to do so causes an immediate UND_ERR_SOCKET crash.
+  const gatewayBase = CONFIG.MCP_GATEWAY_URL.replace(/\/+$/, "");
+  const url = `${gatewayBase}/${server}/${tool}`;
+
+  console.log(`[${new Date().toISOString()}] [DEBUG] MCP call → ${url}`);
+
+  const response = await fetch(url, {
     method:  "POST",
     headers: {
       "Content-Type": "application/json",
-      "Bypass-Tunnel-Reminder": "true"
+      // ngrok-specific header to skip the browser-warning interstitial page.
+      // Without this, ngrok returns an HTML page instead of JSON, causing a parse crash.
+      "ngrok-skip-browser-warning": "true",
+      // Keep this for compatibility with other tunnel providers (localtunnel, etc.)
+      "Bypass-Tunnel-Reminder":     "true",
     },
-    body:    JSON.stringify(args),
+    body: JSON.stringify(args),
   });
+
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`MCP Tool ${server}/${tool} failed: ${response.status} ${response.statusText} - ${errText}`);
+    throw new Error(
+      `MCP Tool ${server}/${tool} failed: ${response.status} ${response.statusText} — ${errText}`
+    );
   }
+
   return response.json();
 }
 ```
 
-Import and use `callMcpTool` in src/index.ts for all MCP server interactions.
-Add `MCP_GATEWAY_URL=http://192.168.1.50:8000/mcp` to your .env.example file.
+RULES for src/config.ts that you MUST follow:
+- MCP_GATEWAY_URL must be read from process.env.MCP_GATEWAY_URL with NO hardcoded fallback IP.
+- The only acceptable fallback is a thrown error, so misconfiguration is immediately obvious:
+    MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL is not set in .env"); })(),
+- Add the following line to .env.example (do NOT add an actual URL — the user fills this in):
+    MCP_GATEWAY_URL=   # e.g. https://xxxx-xx-xx-xx-xx.ngrok-free.app/mcp
 """
 
 
@@ -686,7 +707,7 @@ class MetaAgentBuilder:
 
         # ── New credentials (Phase 2 MCPs) ───────────────────────────────────
         self.nansen_key     = os.environ.get("NANSEN_API_KEY")
-        self.debridge_key   = os.environ.get("DEBRIDGE_API_KEY")   # optional — DeBridge is keyless for reads
+        self.debridge_key   = os.environ.get("DEBRIDGE_API_KEY")
 
         if not self.token:
             raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
@@ -778,8 +799,8 @@ class MetaAgentBuilder:
                     await self.mcp_manager.connect_to_server(
                         "goat_evm", "npx", ["tsx", goat_path],
                         custom_env={
-                            "WALLET_PRIVATE_KEY": self.wallet_key,
-                            "RPC_PROVIDER_URL":   self.rpc_url,
+                            "WALLET_PRIVATE_KEY": wallet_key,
+                            "RPC_PROVIDER_URL":   rpc_url,
                         },
                     )
                 except Exception as e:
@@ -928,7 +949,6 @@ class MetaAgentBuilder:
                 "--streamableHttp", "https://api.debridge.finance/mcp",
                 "--outputTransport", "stdio",
             ]
-            # DeBridge read endpoints are keyless; inject key only if provided
             if self.debridge_key:
                 debridge_args += ["--header", f"Authorization: Bearer {self.debridge_key}"]
             await self.mcp_manager.connect_to_server(
@@ -972,7 +992,6 @@ class MetaAgentBuilder:
             raw = raw.strip()
 
             intent = json.loads(raw)
-            # Defensive parsing: If the LLM wrapped the JSON in a list, unwrap it.
             if isinstance(intent, list):
                 intent = intent[0] if len(intent) > 0 else {}
             if not isinstance(intent, dict):
@@ -1010,25 +1029,17 @@ class MetaAgentBuilder:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _collect_sdk_snippets(self, intent: dict) -> str:
-        """
-        Collect all SDK reference snippets relevant to this intent.
-        Sources: strategy mapping + required_mcps + execution_model flags.
-        Returns a formatted string ready for injection into the system prompt.
-        """
         strategy      = intent.get("strategy", "unknown")
         required_mcps = intent.get("required_mcps", [])
         snippet_keys: set[str] = set()
 
-        # From strategy
         for key in STRATEGY_SNIPPETS.get(strategy, []):
             snippet_keys.add(key)
 
-        # From required MCPs
         for mcp in required_mcps:
             if mcp in MCP_TO_SNIPPET:
                 snippet_keys.add(MCP_TO_SNIPPET[mcp])
 
-        # From execution model flags
         if intent.get("execution_model") == "websocket":
             snippet_keys.add("websocket_mempool")
         if intent.get("requires_openai_key") or intent.get("execution_model") == "agentic":
@@ -1078,7 +1089,6 @@ class MetaAgentBuilder:
         tokens = token_table.get(network, token_table["base-sepolia"])
         token_lines = "\n".join(f"  {sym}: {addr}" for sym, addr in tokens.items())
 
-        # Only inject the flashloan ABI if we are actually doing arbitrage
         flashloan_text = (
             f"If using Aave V3 flash loans, embed this ABI in src/config.ts:\n  FLASHLOAN_ABI = {abi_str}"
             if strategy == "arbitrage" else ""
@@ -1164,20 +1174,16 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
         required_mcps   = intent.get("required_mcps", [])
         available_tools = await self.mcp_manager.list_all_tools()
 
-        # Minify tool list to fit token budget (Safely handles malformed MCP schemas)
+        # Minify tool list to fit token budget
         compressed_tools = []
         for t in available_tools:
             server_name = t.get("server", "unknown") if isinstance(t, dict) else "unknown"
-            # Strip out thousands of tokens by ignoring irrelevant MCPs
             if required_mcps and server_name not in required_mcps:
                 continue
-            # Safely extract input schema
             schema = t.get("input_schema") if isinstance(t, dict) else {}
             if not isinstance(schema, dict): schema = {}
-            # Safely extract properties
             props = schema.get("properties") or {}
             if not isinstance(props, dict): props = {}
-            # Safely map argument types
             args = {}
             for k, v in props.items():
                 if isinstance(v, dict):
@@ -1248,6 +1254,16 @@ package.json must include: "start": "tsx src/index.ts"
           const client = new OpenAIClass({{ apiKey: process.env.OPENAI_API_KEY }});
     NEVER declare `const openai = new OpenAI(...)` or any variant at module top-level.
     This rule overrides all other patterns you may have been trained on.
+11. MCP_GATEWAY_URL RULE — MANDATORY: NEVER hardcode any IP address (e.g. 192.168.x.x)
+    as a fallback for MCP_GATEWAY_URL. WebContainers cannot reach LAN IPs and will
+    crash immediately with UND_ERR_SOCKET. If MCP_GATEWAY_URL is not set, THROW an
+    error at startup so the misconfiguration is immediately obvious.
+    The correct pattern in src/config.ts is:
+      MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => {{ throw new Error("MCP_GATEWAY_URL is not set in .env"); }})(),
+12. NGROK HEADER RULE — MANDATORY: ALL fetch calls to the MCP gateway MUST include the
+    header "ngrok-skip-browser-warning": "true". Without this header, ngrok returns
+    an HTML interstitial page instead of JSON, which causes a parse crash.
+    The mcp_bridge.ts template above already includes this — do not remove it.
 
 ## PROJECT CONFIGURATION RULES (CRITICAL)
 1.  package.json MUST contain the top-level property: "type": "module"
@@ -1271,33 +1287,49 @@ package.json must include: "start": "tsx src/index.ts"
 
         raw_text = response.choices[0].message.content.strip()
 
-        # Strip any markdown fences the model adds despite instructions
-        if raw_text.startswith("```json"):
-            raw_text = raw_text[7:]
-        elif raw_text.startswith("```"):
-            raw_text = raw_text[3:]
-        if raw_text.endswith("```"):
-            raw_text = raw_text[:-3]
-        raw_text = raw_text.strip()
+    import re
 
-        try:
-            structured_output = json.loads(raw_text)
-            files = structured_output.get("files", [])
-            got      = {f.get("filepath") for f in files}
-            required = {"package.json", "src/index.ts"}
-            missing  = required - got
-            if missing:
-                print(f"⚠️  Model did not generate: {missing}")
-        except Exception as parse_err:
-            print(f"⚠️  JSON parse error: {parse_err}")
-            structured_output = {
-                "thoughts": "JSON parsing failed — raw output saved.",
-                "files": [{"filepath": "error.ts", "content": raw_text}],
-            }
+    # Intelligently extract the JSON payload, ignoring preambles and markdown
+    start_idx = raw_text.find('{')
+    end_idx = raw_text.rfind('}')
+        
+    if start_idx != -1 and end_idx != -1:
+      raw_text = raw_text[start_idx:end_idx + 1]
+            
+      # FIX 1: Remove invalid trailing commas (e.g., {"a": 1,} -> {"a": 1})
+      raw_text = re.sub(r',\s*([}\]])', r'\1', raw_text)
+            
+      # FIX 2: Convert invalid JavaScript backticks to valid JSON double quotes
+      # LLMs often write: "content": `import ...` instead of "content": "import ..."
+      def escape_backtick_string(match):
+        inner_text = match.group(1)
+        # Escape existing double quotes and literal newlines so json.loads doesn't crash
+        inner_text = inner_text.replace('"', '\\"').replace('\n', '\\n')
+        return f'"{inner_text}"'
+                
+      raw_text = re.sub(r':\s*`(.*?)`', escape_backtick_string, raw_text, flags=re.DOTALL)
+            
+    else:
+      print("⚠️  Warning: No JSON object brackets found in the response.")
 
-        return {
-            "status":     "blueprint_ready",
-            "output":     structured_output,
-            "intent":     intent,           # ← expose classification to callers
-            "tools_used": [t["name"] for t in available_tools],
-        }
+    try:
+      structured_output = json.loads(raw_text, strict=False)
+      files = structured_output.get("files", [])
+      got      = {f.get("filepath") for f in files}
+      required = {"package.json", "src/index.ts"}
+      missing  = required - got
+      if missing:
+        print(f"⚠️  Model did not generate: {missing}")
+    except Exception as parse_err:
+      print(f"⚠️  JSON parse error: {parse_err}")
+      structured_output = {
+        "thoughts": "JSON parsing failed — raw output saved.",
+        "files": [{"filepath": "error.ts", "content": raw_text}],
+      }
+
+    # return {
+    #     "status":     "blueprint_ready",
+    #     "output":     structured_output,
+    #     "intent":     intent,
+    #     "tools_used": [t["name"] for t in available_tools],
+    # }
