@@ -7,7 +7,7 @@ Supports 20+ bot archetypes across EVM chains and Solana.
 Pipeline:
   1. classify_intent()        → GPT-4o classifies chain / strategy / execution model
   2. _select_template()       → injects the correct base template (Polling / WSS / Agentic / Solana)
-  3. _collect_sdk_snippets()  → RAG-injects relevant SDK docs (CoW, Jupiter, Nansen, …)
+  3. _collect_sdk_snippets()  → RAG-injects relevant SDK docs (CoW, Jupiter, Nansen, Pyth, …)
   4. build_bot_logic()        → GPT-4o generates the full bot with a narrowed context window
 """
 
@@ -19,7 +19,7 @@ from mcp_client import MultiMCPClient
 from azure.ai.inference import ChatCompletionsClient
 from azure.ai.inference.models import SystemMessage, UserMessage
 from azure.core.credentials import AzureKeyCredential
-from json_repair import repair_json  # <--- ADD THIS LINE
+from json_repair import repair_json
 
 load_dotenv()
 
@@ -395,8 +395,8 @@ CRITICAL WEBCONTAINER OPENAI RULE:
   Always resolve the class INSIDE the async function. Never at module scope.
 
   BANNED:
-    const openai = new OpenAI({…});              // ❌ top-level
-    const openai = new (OpenAI as any).default(…); // ❌ .default may be undefined
+    const openai = new OpenAI({...});              // top-level
+    const openai = new (OpenAI as any).default(...); // .default may be undefined
 
   REQUIRED inside every function that calls the API:
     const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
@@ -437,6 +437,68 @@ Full ReAct agent (LangGraph — use for multi-step research tasks):
   const agent  = createReactAgent({ llm: new ChatOpenAI({ model: 'gpt-4o-mini', temperature: 0 }), tools: [fetchSentiment] });
   const result = await agent.invoke({ messages: [{ role: 'user', content: 'Should I long WETH right now?' }] });
 """,
+
+    # ── Pyth Network price oracle snippet (replaces Chainlink) ───────────────
+    "pyth_oracle": """
+## Pyth Network — Real-Time Price Oracle SDK Reference
+Pyth provides low-latency, high-fidelity price feeds for crypto, equities, FX, and commodities.
+All prices carry a confidence interval and an exponent for base-unit conversion.
+
+MCP server: pyth  (transport HTTP at https://mcp.pyth.network/mcp)
+
+### Key MCP tools (prefer over REST):
+  list_price_feeds          args: { query?: string, assetType?: "crypto"|"equity"|"fx"|"metal" }
+                            returns: array of { symbol, id, exponent }
+
+  get_latest_price_updates  args: { ids: string[] }   // pass Pyth numeric feed IDs
+                            returns: array of { id, price, conf, expo, publish_time }
+
+  get_price_feed_ohlc       args: { id: string, from: number, to: number, resolution: "1D"|"1H"|"15M" }
+                            returns: array of OHLC candles
+
+  get_price_feed_snapshot   args: { ids: string[], publish_time: number }
+                            returns: historical prices at a specific Unix timestamp
+
+### Price decoding (CRITICAL — always apply the exponent):
+  raw_price * 10^expo = human-readable price
+  e.g. price=9750000000, expo=-8  →  97.50 USD
+
+TypeScript helper:
+  function decodePrice(price: bigint, expo: number): number {
+    return Number(price) * Math.pow(10, expo);
+  }
+
+### Common feed IDs:
+  Crypto.BTC/USD  → e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43
+  Crypto.ETH/USD  → ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace
+  Crypto.SOL/USD  → ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d
+  Equity.US.AAPL  → (query list_price_feeds with query="AAPL")
+  FX.EUR/USD      → (query list_price_feeds with assetType="fx")
+
+### Pre-swap price validation pattern (mandatory before every execution):
+  const feeds = await callMcpTool('pyth', 'get_latest_price_updates', {
+    ids: [BTC_USD_FEED_ID, ETH_USD_FEED_ID],
+  }) as PythPriceUpdate[];
+
+  for (const feed of feeds) {
+    const price     = decodePrice(BigInt(feed.price), feed.expo);
+    const confBand  = decodePrice(BigInt(feed.conf),  feed.expo);
+    const staleness = Date.now() / 1000 - feed.publish_time;
+
+    if (staleness > 60)         throw new Error(`Pyth price stale: ${staleness}s old`);
+    if (confBand / price > 0.005) throw new Error(`Pyth confidence too wide: ${(confBand/price*100).toFixed(3)}%`);
+    log('INFO', `Pyth ${feed.id}: $${price.toFixed(4)} +/-${confBand.toFixed(4)} (${staleness.toFixed(1)}s ago)`);
+  }
+
+### Funding rate monitoring:
+  Use assetType="crypto" and a query containing "funding-rate" in list_price_feeds.
+  Positive funding -> long-biased (bullish). Negative -> short-biased (bearish).
+
+### Required .env additions:
+  # No API key required for public feeds.
+  # Pyth Pro feeds (equities, FX, metals) require:
+  PYTH_PRO_ACCESS_TOKEN=   # obtain from https://pyth.network/price-feeds/pro
+""",
 }
 
 
@@ -445,20 +507,20 @@ Full ReAct agent (LangGraph — use for multi-step research tasks):
 # ─────────────────────────────────────────────────────────────────────────────
 
 STRATEGY_SNIPPETS: dict[str, list[str]] = {
-    "arbitrage":     [],
-    "mev_intent":    ["cow_protocol"],
-    "sniping":       ["websocket_mempool"],
-    "dca":           [],
-    "grid":          [],
-    "sentiment":     ["lunarcrush_sentiment"],
-    "whale_mirror":  ["nansen_whale"],
-    "news_reactive": ["langchain_agent", "lunarcrush_sentiment"],
-    "yield":         ["debridge_crosschain"],
-    "perp":          ["hyperliquid_perp"],
-    "scalper":       ["websocket_mempool"],
-    "rebalancing":   [],
-    "ta_scripter":   ["langchain_agent"],
-    "unknown":       [],
+    "arbitrage":     ["pyth_oracle"],
+    "mev_intent":    ["cow_protocol", "pyth_oracle"],
+    "sniping":       ["websocket_mempool", "pyth_oracle"],
+    "dca":           ["pyth_oracle"],
+    "grid":          ["pyth_oracle"],
+    "sentiment":     ["lunarcrush_sentiment", "pyth_oracle"],
+    "whale_mirror":  ["nansen_whale", "pyth_oracle"],
+    "news_reactive": ["langchain_agent", "lunarcrush_sentiment", "pyth_oracle"],
+    "yield":         ["debridge_crosschain", "pyth_oracle"],
+    "perp":          ["hyperliquid_perp", "pyth_oracle"],
+    "scalper":       ["websocket_mempool", "pyth_oracle"],
+    "rebalancing":   ["pyth_oracle"],
+    "ta_scripter":   ["langchain_agent", "pyth_oracle"],
+    "unknown":       ["pyth_oracle"],
 }
 
 # MCP server name → SDK snippet key
@@ -470,6 +532,7 @@ MCP_TO_SNIPPET: dict[str, str] = {
     "debridge":     "debridge_crosschain",
     "lifi":         "debridge_crosschain",
     "jupiter":      "jupiter_solana",
+    "pyth":         "pyth_oracle",
 }
 
 
@@ -486,7 +549,7 @@ TypeScript pattern:
 let cycle = 0;
 async function runCycle(): Promise<void> {
   cycle++;
-  try { /* fetch → analyse → execute */ }
+  try { /* fetch -> analyse -> execute */ }
   catch (err: unknown) { log('ERROR', `Cycle #${cycle}: ${(err as Error).message}`); }
 }
 runCycle();
@@ -543,11 +606,6 @@ Calling `new OpenAI(...)` at the module top-level throws:
 You MUST resolve the constructor safely INSIDE the function that uses it.
 NEVER instantiate OpenAI at module scope.
 
-BANNED patterns — never emit these:
-  ❌  const openai = new OpenAI({ ... });              // top-level — always breaks
-  ❌  const openai = new (OpenAI as any).default({…}); // .default may be undefined
-  ❌  import { OpenAI } from 'openai';                 // named import also broken
-
 REQUIRED pattern — resolve inside every async function that calls the API:
 ```typescript
 import OpenAI from 'openai';
@@ -555,7 +613,6 @@ import OpenAI from 'openai';
 interface TradeDecision { action: 'buy' | 'sell' | 'hold'; confidence: number; reasoning: string; }
 
 async function getTradeDecision(context: object): Promise<TradeDecision> {
-  // Safe WebContainer interop — resolve constructor inside the function
   const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
   const client = new OpenAIClass({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -572,16 +629,13 @@ async function getTradeDecision(context: object): Promise<TradeDecision> {
 }
 
 async function runCycle(): Promise<void> {
-        try:
-          # Use json-repair to automatically fix unescaped quotes and broken formatting
-          structured_output = repair_json(raw_text, return_objects=True) # <--- CHANGED TO return_objects
-          
-          # If repair_json completely fails and returns a string, force it to dict
-          if isinstance(structured_output, str):
-            structured_output = json.loads(structured_output)
+  try {
+    /* fetch signals -> getTradeDecision -> execute if confidence > threshold */
+  } catch (err: unknown) {
+    log('ERROR', (err as Error).message);
+  }
 }
 
-// CRITICAL: call once immediately, THEN set interval
 runCycle();
 const interval = setInterval(runCycle, 60_000);
 process.on('SIGINT',  () => { clearInterval(interval); process.exit(0); });
@@ -607,7 +661,6 @@ import bs58 from 'bs58';
 
 const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
 
-// Safely load the keypair, or generate a random dummy one for Simulation Mode
 const keypair = process.env.SOLANA_PRIVATE_KEY
   ? Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY))
   : Keypair.generate();
@@ -658,28 +711,31 @@ Required schema:
   "network":                "base-sepolia" | "base-mainnet" | "arbitrum" | "solana-mainnet",
   "execution_model":        "polling" | "websocket" | "agentic",
   "strategy":               "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
-  "required_mcps":          [zero or more of: "one_inch","webacy","lunarcrush","jupiter","nansen","cow_protocol","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","chainlink"],
+  "required_mcps":          [zero or more of: "one_inch","webacy","lunarcrush","jupiter","nansen","cow_protocol","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","pyth"],
   "bot_type":               "human-readable bot name e.g. Aave Flash Loan Arbitrage Bot",
   "requires_openai_key":    true | false,
   "requires_solana_wallet": true | false
 }
 
 Classification rules (apply in order — first match wins):
-  flash loan | arbitrage                → execution_model:"polling",  strategy:"arbitrage",    required_mcps:["one_inch","webacy","goat_evm"]
-  CoW | MEV intent | MEV-protected      → execution_model:"polling",  strategy:"mev_intent",   required_mcps:[...,"cow_protocol"]
-  sniper | memecoin | mempool           → execution_model:"websocket", strategy:"sniping",      required_mcps:["one_inch","webacy","alchemy"]
-  DCA | dollar cost                     → execution_model:"polling",  strategy:"dca",          required_mcps:["one_inch"]
-  grid | range | ladder                 → execution_model:"polling",  strategy:"grid",         required_mcps:["one_inch"]
-  sentiment | social | LunarCrush       → execution_model:"agentic",  strategy:"sentiment",    required_mcps:["lunarcrush","one_inch"], requires_openai_key:true
-  whale | smart money | Nansen | mirror → execution_model:"polling",  strategy:"whale_mirror", required_mcps:["nansen","one_inch","webacy"]
-  news | GPT trader | AI trader         → execution_model:"agentic",  strategy:"news_reactive",required_mcps:["twitter","one_inch"],    requires_openai_key:true
-  cross-chain | bridge | yield arb      → execution_model:"polling",  strategy:"yield",        required_mcps:["debridge","one_inch"]
-  perp | perpetual | funding rate       → execution_model:"polling",  strategy:"perp",         required_mcps:["hyperliquid"]
-  HF | high frequency | scalper         → execution_model:"websocket", strategy:"scalper",     required_mcps:["one_inch","alchemy"]
-  rebalance | portfolio                 → execution_model:"polling",  strategy:"rebalancing",  required_mcps:["one_inch"]
-  TA | technical analysis | indicator   → execution_model:"agentic",  strategy:"ta_scripter",  required_mcps:["coingecko"],             requires_openai_key:true
-  Solana keyword in any request         → chain:"solana", network:"solana-mainnet", required_mcps includes "jupiter", requires_solana_wallet:true
-  default network if unspecified        → "base-sepolia"
+  flash loan | arbitrage                -> execution_model:"polling",  strategy:"arbitrage",    required_mcps:["one_inch","webacy","goat_evm","pyth"]
+  CoW | MEV intent | MEV-protected      -> execution_model:"polling",  strategy:"mev_intent",   required_mcps:[...,"cow_protocol","pyth"]
+  sniper | memecoin | mempool           -> execution_model:"websocket", strategy:"sniping",     required_mcps:["one_inch","webacy","alchemy","pyth"]
+  DCA | dollar cost                     -> execution_model:"polling",  strategy:"dca",          required_mcps:["one_inch","pyth"]
+  grid | range | ladder                 -> execution_model:"polling",  strategy:"grid",         required_mcps:["one_inch","pyth"]
+  sentiment | social | LunarCrush       -> execution_model:"agentic",  strategy:"sentiment",    required_mcps:["lunarcrush","one_inch","pyth"], requires_openai_key:true
+  whale | smart money | Nansen | mirror -> execution_model:"polling",  strategy:"whale_mirror", required_mcps:["nansen","one_inch","webacy","pyth"]
+  news | GPT trader | AI trader         -> execution_model:"agentic",  strategy:"news_reactive",required_mcps:["twitter","one_inch","pyth"],    requires_openai_key:true
+  cross-chain | bridge | yield arb      -> execution_model:"polling",  strategy:"yield",        required_mcps:["debridge","one_inch","pyth"]
+  perp | perpetual | funding rate       -> execution_model:"polling",  strategy:"perp",         required_mcps:["hyperliquid","pyth"]
+  HF | high frequency | scalper         -> execution_model:"websocket", strategy:"scalper",     required_mcps:["one_inch","alchemy","pyth"]
+  rebalance | portfolio                 -> execution_model:"polling",  strategy:"rebalancing",  required_mcps:["one_inch","pyth"]
+  TA | technical analysis | indicator   -> execution_model:"agentic",  strategy:"ta_scripter",  required_mcps:["coingecko","pyth"],             requires_openai_key:true
+  Solana keyword in any request         -> chain:"solana", network:"solana-mainnet", required_mcps includes "jupiter" and "pyth", requires_solana_wallet:true
+  pyth | oracle | price feed            -> always include "pyth" in required_mcps
+  default network if unspecified        -> "base-sepolia"
+
+IMPORTANT: "pyth" must appear in required_mcps for every bot type without exception.
 """
 
 
@@ -691,8 +747,7 @@ class MetaAgentBuilder:
     def __init__(self):
         self.mcp_manager = MultiMCPClient()
 
-        # ── Existing credentials ─────────────────────────────────────────────
-
+        # ── Credentials ──────────────────────────────────────────────────────
         self.token          = os.environ.get("GITHUB_TOKEN")
         self.alchemy_key    = os.environ.get("ALCHEMY_API_KEY")
         self.webacy_key     = os.environ.get("WEBACY_API_KEY")
@@ -706,20 +761,19 @@ class MetaAgentBuilder:
         self.twitter_tsecret= os.environ.get("TWITTER_ACCESS_TOKEN_SECRET")
         self.infura_key     = os.environ.get("INFURA_KEY")
         self.uniswap_path   = os.environ.get("UNISWAP_MCP_PATH")
-        # OpenAI key is no longer required
-
-        # ── New credentials (Phase 2 MCPs) ───────────────────────────────────
         self.nansen_key     = os.environ.get("NANSEN_API_KEY")
         self.debridge_key   = os.environ.get("DEBRIDGE_API_KEY")
+        # Pyth Pro token is optional — public feeds work without it
+        self.pyth_pro_token = os.environ.get("PYTH_PRO_ACCESS_TOKEN")
 
         if not self.token:
-          raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
+            raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
 
         self.endpoint   = os.environ.get("GITHUB_MODEL_ENDPOINT", "https://models.inference.ai.azure.com")
         self.model_name = "gpt-4o"
         self.client = ChatCompletionsClient(
-          endpoint=self.endpoint,
-          credential=AzureKeyCredential(self.token),
+            endpoint=self.endpoint,
+            credential=AzureKeyCredential(self.token),
         )
 
         self.arb_bot_address = os.environ.get(
@@ -731,12 +785,10 @@ class MetaAgentBuilder:
     # ─────────────────────────────────────────────────────────────────────────
 
     async def setup_environment(self):
-        """Connect to all DeFi MCP servers — core + extended + Phase 2."""
+        """Connect to all DeFi MCP servers."""
         print("=" * 60)
         print("Connecting to MCP Servers...")
         print("=" * 60)
-
-        # ── CORE MCPs ────────────────────────────────────────────────────────
 
         # 1. 1inch — EVM swap quotes + calldata
         try:
@@ -747,13 +799,11 @@ class MetaAgentBuilder:
             if self.oneinch_key:
                 one_inch_args += ["--header", f"Authorization: Bearer {self.oneinch_key}"]
             one_inch_args += ["--outputTransport", "stdio"]
-            await self.mcp_manager.connect_to_server(
-                "one_inch", "npx", one_inch_args
-            )
+            await self.mcp_manager.connect_to_server("one_inch", "npx", one_inch_args)
         except Exception as e:
             print(f"⚠️  1inch: {e}")
 
-        # 2. Jupiter — Solana swap quotes (no API key needed)
+        # 2. Jupiter — Solana swap quotes
         try:
             await self.mcp_manager.connect_to_server(
                 "jupiter", "npx",
@@ -813,9 +863,7 @@ class MetaAgentBuilder:
         else:
             print("⚠️  WALLET_PRIVATE_KEY / RPC_PROVIDER_URL / GOAT_EVM_PATH missing.")
 
-        # ── EXTENDED MCPs ────────────────────────────────────────────────────
-
-        # 6. CoinGecko — Market prices, trending coins
+        # 6. CoinGecko — Market prices
         if self.coingecko_demo or self.coingecko_pro:
             try:
                 cg_env = {}
@@ -849,7 +897,7 @@ class MetaAgentBuilder:
         else:
             print("⚠️  LUNARCRUSH_API_KEY missing. Skipping LunarCrush.")
 
-        # 8. Twitter — Post trade alerts, scan market sentiment
+        # 8. Twitter
         if all([self.twitter_key, self.twitter_secret,
                 self.twitter_token, self.twitter_tsecret]):
             try:
@@ -868,7 +916,7 @@ class MetaAgentBuilder:
         else:
             print("⚠️  Twitter API keys incomplete. Skipping Twitter.")
 
-        # 9. Hyperliquid — Perp market prices, L2 order books
+        # 9. Hyperliquid — Perp market
         try:
             await self.mcp_manager.connect_to_server(
                 "hyperliquid", "npx",
@@ -885,7 +933,7 @@ class MetaAgentBuilder:
         except Exception as e:
             print(f"⚠️  LiFi (install: go install github.com/lifinance/lifi-mcp@latest): {e}")
 
-        # 11. Uniswap — Direct Uniswap V3 swaps, multi-chain
+        # 11. Uniswap
         if self.uniswap_path and self.infura_key:
             if os.path.exists(self.uniswap_path):
                 try:
@@ -904,23 +952,7 @@ class MetaAgentBuilder:
         else:
             print("⚠️  UNISWAP_MCP_PATH or INFURA_KEY missing. Skipping Uniswap.")
 
-        # 12. Chainlink — On-chain price feeds, CCIP documentation
-        # Chainlink MCP server disabled (OpenAI dependency removed)
-        # if self.openai_key:
-        #     try:
-        #         await self.mcp_manager.connect_to_server(
-        #             "chainlink", "npx",
-        #             ["-y", "@chainlink/mcp-server"],
-        #             custom_env={"OPENAI_API_KEY": self.openai_key},
-        #         )
-        #     except Exception as e:
-        #         print(f"⚠️  Chainlink: {e}")
-        # else:
-        #     print("⚠️  OPENAI_API_KEY missing. Skipping Chainlink MCP.")
-
-        # ── PHASE 2 MCPs ─────────────────────────────────────────────────────
-
-        # 13. CoW Protocol — MEV-protected swap orderbook
+        # 12. CoW Protocol — MEV-protected swap orderbook
         try:
             await self.mcp_manager.connect_to_server(
                 "cow_protocol", "npx",
@@ -931,7 +963,7 @@ class MetaAgentBuilder:
         except Exception as e:
             print(f"⚠️  CoW Protocol: {e}")
 
-        # 14. Nansen — Smart money / whale wallet intelligence
+        # 13. Nansen — Smart money / whale wallet intelligence
         if self.nansen_key:
             try:
                 await self.mcp_manager.connect_to_server(
@@ -946,7 +978,7 @@ class MetaAgentBuilder:
         else:
             print("⚠️  NANSEN_API_KEY missing. Skipping Nansen.")
 
-        # 15. DeBridge — Cross-chain intent-based swaps
+        # 14. DeBridge — Cross-chain intent-based swaps
         try:
             debridge_args = [
                 "-y", "supergateway",
@@ -955,11 +987,24 @@ class MetaAgentBuilder:
             ]
             if self.debridge_key:
                 debridge_args += ["--header", f"Authorization: Bearer {self.debridge_key}"]
-            await self.mcp_manager.connect_to_server(
-                "debridge", "npx", debridge_args,
-            )
+            await self.mcp_manager.connect_to_server("debridge", "npx", debridge_args)
         except Exception as e:
             print(f"⚠️  DeBridge: {e}")
+
+        # 15. Pyth Network — Real-time & historical price feeds
+        #     Public feeds require no API key. Pro feeds (equities, FX, metals) require
+        #     PYTH_PRO_ACCESS_TOKEN set in .env.
+        try:
+            pyth_args = [
+                "-y", "supergateway",
+                "--streamableHttp", "https://mcp.pyth.network/mcp",
+                "--outputTransport", "stdio",
+            ]
+            if self.pyth_pro_token:
+                pyth_args += ["--header", f"Authorization: Bearer {self.pyth_pro_token}"]
+            await self.mcp_manager.connect_to_server("pyth", "npx", pyth_args)
+        except Exception as e:
+            print(f"⚠️  Pyth Network: {e}")
 
         # Summary
         connected = list(self.mcp_manager.sessions.keys())
@@ -987,7 +1032,6 @@ class MetaAgentBuilder:
             )
             raw = response.choices[0].message.content.strip()
 
-            # Strip any errant markdown fences
             if raw.startswith("```"):
                 parts = raw.split("```")
                 raw = parts[1] if len(parts) > 1 else raw
@@ -1001,6 +1045,12 @@ class MetaAgentBuilder:
             if not isinstance(intent, dict):
                 raise ValueError("Parsed intent is not a valid JSON object.")
 
+            # Ensure pyth is always present in required_mcps
+            required_mcps = intent.get("required_mcps", [])
+            if "pyth" not in required_mcps:
+                required_mcps.append("pyth")
+                intent["required_mcps"] = required_mcps
+
             print(f"\n🎯 Intent classified:\n{json.dumps(intent, indent=2)}\n")
             return intent
 
@@ -1011,7 +1061,7 @@ class MetaAgentBuilder:
                 "network":                "base-sepolia",
                 "execution_model":        "polling",
                 "strategy":               "arbitrage",
-                "required_mcps":          ["one_inch", "webacy", "goat_evm"],
+                "required_mcps":          ["one_inch", "webacy", "goat_evm", "pyth"],
                 "bot_type":               "EVM Flash Loan Arbitrage Bot",
                 "requires_openai_key":    False,
                 "requires_solana_wallet": False,
@@ -1022,7 +1072,6 @@ class MetaAgentBuilder:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _select_template(self, intent: dict) -> str:
-        """Return the correct execution template string for this intent."""
         if intent.get("chain") == "solana":
             return TEMPLATES["solana"]
         execution_model = intent.get("execution_model", "polling")
@@ -1048,6 +1097,9 @@ class MetaAgentBuilder:
             snippet_keys.add("websocket_mempool")
         if intent.get("requires_openai_key") or intent.get("execution_model") == "agentic":
             snippet_keys.add("langchain_agent")
+
+        # Pyth is always injected regardless of strategy
+        snippet_keys.add("pyth_oracle")
 
         if not snippet_keys:
             return ""
@@ -1101,7 +1153,7 @@ class MetaAgentBuilder:
         return f"""
 ## EVM-SPECIFIC CONFIGURATION
 Network:  {network}
-Chain ID: {chain_id}  ← use this exact integer in all 1inch tool calls
+Chain ID: {chain_id}  <- use this exact integer in all 1inch tool calls
 
 Token addresses ({network}):
 {token_lines}
@@ -1114,17 +1166,27 @@ Contract addresses:
 
 1inch MCP tool signatures (NEVER deviate from these):
   get_quote      server="one_inch"  args={{tokenIn, tokenOut, amount:"<str int>", chain:{chain_id}}}
-                 parse → int(response.toTokenAmount)
+                 parse -> int(response.toTokenAmount)
   get_swap_data  server="one_inch"  args={{tokenIn, tokenOut, amount:"<str int>", chain:{chain_id}, from:"<addr>", slippage:1}}
-                 parse → response.tx.data
+                 parse -> response.tx.data
 
 Webacy risk check:
-  get_token_risk server="webacy"    args={{address:"<addr>", chain:"{network}"}}  ← STRING not int
+  get_token_risk server="webacy"    args={{address:"<addr>", chain:"{network}"}}  <- STRING not int
                  pass if response.risk==="low" OR response.score<20
 
 GOAT EVM signatures:
   convert_to_base_units  args={{tokenAddress, amount:"<str human>"}}
   write_contract         args={{address:"<NOT contractAddress>", abi, functionName, args:[]}}
+
+Pyth price validation (MANDATORY before every swap execution):
+  server="pyth"  tool="get_latest_price_updates"  args={{ids:[<feedId>]}}
+  Decode: human_price = Number(raw_price) * Math.pow(10, expo)
+  Reject if: staleness > 60s  OR  conf/price > 0.5%
+  Common feed IDs:
+    BTC/USD -> e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43
+    ETH/USD -> ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace
+    SOL/USD -> ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d
+  Use list_price_feeds to discover feed IDs for equities, FX, or less common assets.
 """
 
     def _solana_output_format(self) -> str:
@@ -1146,7 +1208,13 @@ Jupiter MCP tools (prefer over direct REST):
 
 Token amounts: SOL uses 9 decimals (1 SOL = 1_000_000_000 lamports). USDC uses 6.
 
-Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
+Pyth price validation (MANDATORY before every swap execution):
+  server="pyth"  tool="get_latest_price_updates"  args={ids:[<feedId>]}
+  SOL/USD feed ID: ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d
+  Decode: human_price = Number(raw_price) * Math.pow(10, expo)
+  Reject if staleness > 60s or conf/price > 0.5%
+
+Files to generate: package.json, tsconfig.json, src/config.ts, src/mcp_bridge.ts, src/index.ts
 """
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1156,11 +1224,10 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
     async def build_bot_logic(self, prompt: str) -> dict:
         """
         Full two-step pipeline:
-          1. classify_intent()           → structured intent dict
+          1. classify_intent()  -> structured intent dict
           2. Assemble dynamic system prompt (template + SDK snippets + tool list)
           3. Call GPT-4o to generate the complete bot
         """
-        # ── Step 1: Classify intent ──────────────────────────────────────────
         intent = await self.classify_intent(prompt)
 
         chain           = intent.get("chain", "evm")
@@ -1171,14 +1238,12 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/index.ts
 
         print(f"🔧 Template: {execution_model.upper()}  |  Strategy: {strategy}  |  Chain: {chain}")
 
-        # ── Step 2: Assemble dynamic system prompt ───────────────────────────
         execution_template = self._select_template(intent)
         sdk_context        = self._collect_sdk_snippets(intent)
 
         required_mcps   = intent.get("required_mcps", [])
         available_tools = await self.mcp_manager.list_all_tools()
 
-        # Minify tool list to fit token budget
         compressed_tools = []
         for t in available_tools:
             server_name = t.get("server", "unknown") if isinstance(t, dict) else "unknown"
@@ -1259,15 +1324,16 @@ package.json must include: "start": "tsx src/index.ts"
     NEVER declare `const openai = new OpenAI(...)` or any variant at module top-level.
     This rule overrides all other patterns you may have been trained on.
 11. MCP_GATEWAY_URL RULE — MANDATORY: NEVER hardcode any IP address (e.g. 192.168.x.x)
-    as a fallback for MCP_GATEWAY_URL. WebContainers cannot reach LAN IPs and will
-    crash immediately with UND_ERR_SOCKET. If MCP_GATEWAY_URL is not set, THROW an
-    error at startup so the misconfiguration is immediately obvious.
-    The correct pattern in src/config.ts is:
+    as a fallback for MCP_GATEWAY_URL. If MCP_GATEWAY_URL is not set, THROW an error at
+    startup. Pattern in src/config.ts:
       MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => {{ throw new Error("MCP_GATEWAY_URL is not set in .env"); }})(),
 12. NGROK HEADER RULE — MANDATORY: ALL fetch calls to the MCP gateway MUST include the
-    header "ngrok-skip-browser-warning": "true". Without this header, ngrok returns
-    an HTML interstitial page instead of JSON, which causes a parse crash.
-    The mcp_bridge.ts template above already includes this — do not remove it.
+    header "ngrok-skip-browser-warning": "true".
+13. PYTH ORACLE RULE — MANDATORY: Before executing ANY swap or trade, validate price
+    freshness using the Pyth MCP server (server="pyth", tool="get_latest_price_updates").
+    Reject if staleness > 60s or confidence band > 0.5% of price.
+    Decode raw price: human_price = Number(price) * Math.pow(10, expo).
+    Use list_price_feeds to discover feed IDs for assets not listed in the config.
 
 ## PROJECT CONFIGURATION RULES (CRITICAL)
 1.  package.json MUST contain the top-level property: "type": "module"
@@ -1278,17 +1344,15 @@ package.json must include: "start": "tsx src/index.ts"
 {tools_str}
 """
 
-  # Append strict JSON formatting rules to prevent invalid JSON from LLM
         system_instructions += """
 
         CRITICAL JSON FORMATTING RULES:
         1. You must output 100% valid JSON.
-        2. Every string property, especially the `content` of files, MUST have all internal double quotes escaped as \\". 
+        2. Every string property, especially the `content` of files, MUST have all internal double quotes escaped as \\".
         3. Do not use literal backticks (`) to enclose the content block inside the JSON, use standard double quotes ("...").
-        4. Ensure all newlines in the code are properly escaped as \n.
+        4. Ensure all newlines in the code are properly escaped as \\n.
         """
 
-        # ── Step 3: Generate bot ─────────────────────────────────────────────
         response = self.client.complete(
             messages=[
                 SystemMessage(content=system_instructions),
@@ -1301,23 +1365,18 @@ package.json must include: "start": "tsx src/index.ts"
 
         raw_text = response.choices[0].message.content.strip()
 
-        # ── Step 4: Parse and validate the JSON response ─────────────────────
-
-        # Intelligently extract the JSON payload, ignoring preambles and markdown
         start_idx = raw_text.find('{')
         end_idx   = raw_text.rfind('}')
 
         if start_idx != -1 and end_idx != -1:
             raw_text = raw_text[start_idx:end_idx + 1]
 
-            # FIX 1: Remove invalid trailing commas (e.g., {"a": 1,} -> {"a": 1})
+            # Remove invalid trailing commas
             raw_text = re.sub(r',\s*([}\]])', r'\1', raw_text)
 
-            # FIX 2: Convert invalid JavaScript backticks to valid JSON double quotes.
-            # LLMs often write: "content": `import ...` instead of "content": "import ..."
+            # Convert backtick strings to valid JSON double-quoted strings
             def escape_backtick_string(match: re.Match) -> str:
                 inner_text = match.group(1)
-                # Escape existing double quotes and literal newlines so json.loads doesn't crash
                 inner_text = inner_text.replace('"', '\\"').replace('\n', '\\n')
                 return f'"{inner_text}"'
 
@@ -1326,32 +1385,26 @@ package.json must include: "start": "tsx src/index.ts"
         else:
             print("⚠️  Warning: No JSON object brackets found in the response.")
 
-
         try:
-            # 1. Use the drop-in loads function from json_repair (handles markdown natively)
             from json_repair import loads as repair_loads
             structured_output = repair_loads(raw_text)
 
-            # 2. If the LLM double-stringified the JSON, parse it one more time
             if isinstance(structured_output, str):
                 try:
                     structured_output = json.loads(structured_output)
-                except:
+                except Exception:
                     pass
 
-            # 3. Safety Check: Ensure it is actually a dictionary before calling .get()
             if not isinstance(structured_output, dict):
                 raise ValueError(f"Expected a dictionary, but got {type(structured_output)}")
 
-            files   = structured_output.get("files", [])
-            
-            # 4. Safely check for required files
-            got     = {f.get("filepath") for f in files if isinstance(f, dict)}
+            files    = structured_output.get("files", [])
+            got      = {f.get("filepath") for f in files if isinstance(f, dict)}
             required = {"package.json", "src/index.ts"}
             missing  = required - got
             if missing:
                 print(f"⚠️  Model did not generate: {missing}")
-                
+
         except Exception as parse_err:
             print(f"⚠️  JSON parse error: {parse_err}")
             structured_output = {
