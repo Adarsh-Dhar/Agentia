@@ -572,13 +572,13 @@ async function getTradeDecision(context: object): Promise<TradeDecision> {
 }
 
 async function runCycle(): Promise<void> {
-  try {
-    // 1. Fetch market context via MCP / REST
-    // 2. const decision = await getTradeDecision(context);
-    // 3. Execute trade if decision.action !== 'hold'
-  } catch (err: unknown) {
-    console.error(`[${new Date().toISOString()}] [ERROR]`, (err as Error).message);
-  }
+        try:
+          # Use json-repair to automatically fix unescaped quotes and broken formatting
+          structured_output = repair_json(raw_text, return_objects=True) # <--- CHANGED TO return_objects
+          
+          # If repair_json completely fails and returns a string, force it to dict
+          if isinstance(structured_output, str):
+            structured_output = json.loads(structured_output)
 }
 
 // CRITICAL: call once immediately, THEN set interval
@@ -692,6 +692,7 @@ class MetaAgentBuilder:
         self.mcp_manager = MultiMCPClient()
 
         # ── Existing credentials ─────────────────────────────────────────────
+
         self.token          = os.environ.get("GITHUB_TOKEN")
         self.alchemy_key    = os.environ.get("ALCHEMY_API_KEY")
         self.webacy_key     = os.environ.get("WEBACY_API_KEY")
@@ -705,20 +706,20 @@ class MetaAgentBuilder:
         self.twitter_tsecret= os.environ.get("TWITTER_ACCESS_TOKEN_SECRET")
         self.infura_key     = os.environ.get("INFURA_KEY")
         self.uniswap_path   = os.environ.get("UNISWAP_MCP_PATH")
-        self.openai_key     = os.environ.get("OPENAI_API_KEY")
+        # OpenAI key is no longer required
 
         # ── New credentials (Phase 2 MCPs) ───────────────────────────────────
         self.nansen_key     = os.environ.get("NANSEN_API_KEY")
         self.debridge_key   = os.environ.get("DEBRIDGE_API_KEY")
 
         if not self.token:
-            raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
+          raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
 
-        self.endpoint   = "https://models.inference.ai.azure.com"
+        self.endpoint   = os.environ.get("GITHUB_MODEL_ENDPOINT", "https://models.inference.ai.azure.com")
         self.model_name = "gpt-4o"
         self.client = ChatCompletionsClient(
-            endpoint=self.endpoint,
-            credential=AzureKeyCredential(self.token),
+          endpoint=self.endpoint,
+          credential=AzureKeyCredential(self.token),
         )
 
         self.arb_bot_address = os.environ.get(
@@ -904,17 +905,18 @@ class MetaAgentBuilder:
             print("⚠️  UNISWAP_MCP_PATH or INFURA_KEY missing. Skipping Uniswap.")
 
         # 12. Chainlink — On-chain price feeds, CCIP documentation
-        if self.openai_key:
-            try:
-                await self.mcp_manager.connect_to_server(
-                    "chainlink", "npx",
-                    ["-y", "@chainlink/mcp-server"],
-                    custom_env={"OPENAI_API_KEY": self.openai_key},
-                )
-            except Exception as e:
-                print(f"⚠️  Chainlink: {e}")
-        else:
-            print("⚠️  OPENAI_API_KEY missing. Skipping Chainlink MCP.")
+        # Chainlink MCP server disabled (OpenAI dependency removed)
+        # if self.openai_key:
+        #     try:
+        #         await self.mcp_manager.connect_to_server(
+        #             "chainlink", "npx",
+        #             ["-y", "@chainlink/mcp-server"],
+        #             custom_env={"OPENAI_API_KEY": self.openai_key},
+        #         )
+        #     except Exception as e:
+        #         print(f"⚠️  Chainlink: {e}")
+        # else:
+        #     print("⚠️  OPENAI_API_KEY missing. Skipping Chainlink MCP.")
 
         # ── PHASE 2 MCPs ─────────────────────────────────────────────────────
 
@@ -1326,24 +1328,36 @@ package.json must include: "start": "tsx src/index.ts"
 
 
         try:
-          # Use json-repair to automatically fix unescaped quotes and broken formatting
-          structured_output = repair_json(raw_text, return_dict=True)
-          # If repair_json completely fails and returns a string, force it to dict
-          if isinstance(structured_output, str):
-            structured_output = json.loads(structured_output)
+            # 1. Use the drop-in loads function from json_repair (handles markdown natively)
+            from json_repair import loads as repair_loads
+            structured_output = repair_loads(raw_text)
 
-          files   = structured_output.get("files", [])
-          got     = {f.get("filepath") for f in files}
-          required = {"package.json", "src/index.ts"}
-          missing  = required - got
-          if missing:
-            print(f"⚠️  Model did not generate: {missing}")
+            # 2. If the LLM double-stringified the JSON, parse it one more time
+            if isinstance(structured_output, str):
+                try:
+                    structured_output = json.loads(structured_output)
+                except:
+                    pass
+
+            # 3. Safety Check: Ensure it is actually a dictionary before calling .get()
+            if not isinstance(structured_output, dict):
+                raise ValueError(f"Expected a dictionary, but got {type(structured_output)}")
+
+            files   = structured_output.get("files", [])
+            
+            # 4. Safely check for required files
+            got     = {f.get("filepath") for f in files if isinstance(f, dict)}
+            required = {"package.json", "src/index.ts"}
+            missing  = required - got
+            if missing:
+                print(f"⚠️  Model did not generate: {missing}")
+                
         except Exception as parse_err:
-          print(f"⚠️  JSON parse error: {parse_err}")
-          structured_output = {
-            "thoughts": "JSON parsing failed — raw output saved.",
-            "files": [{"filepath": "error.ts", "content": raw_text}],
-          }
+            print(f"⚠️  JSON parse error: {parse_err}")
+            structured_output = {
+                "thoughts": "JSON parsing failed — raw output saved.",
+                "files": [{"filepath": "error.ts", "content": raw_text}],
+            }
 
         return {
             "status":     "blueprint_ready",
