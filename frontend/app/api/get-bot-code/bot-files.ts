@@ -8,7 +8,6 @@
  *   • Webacy REST API    → token risk checks
  *   • ethers.js v6       → on-chain flash loan execution
  *
- * Files generated:
  *   package.json / tsconfig.json / .env.example
  *   src/config.ts   — constants + env validation + ABI
  *   src/oneinch.ts  — 1inch REST API wrapper
@@ -186,6 +185,7 @@ export const FLASHLOAN_ABI = [
     name: "withdrawProfit",
     outputs: [],
     stateMutability: "nonpayable",
+const INDEX_TS = `/**
     type: "function",
   },
 ] as const;

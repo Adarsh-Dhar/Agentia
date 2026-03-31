@@ -12,6 +12,7 @@ Pipeline:
 """
 
 import os
+import re
 import json
 from dotenv import load_dotenv
 from mcp_client import MultiMCPClient
@@ -43,7 +44,7 @@ export async function callMcpTool(
   // CRITICAL: Read URL from CONFIG (which reads from process.env via dotenv).
   // NEVER hardcode a fallback IP address like 192.168.x.x — WebContainers
   // cannot reach LAN IPs; attempting to do so causes an immediate UND_ERR_SOCKET crash.
-  const gatewayBase = CONFIG.MCP_GATEWAY_URL.replace(/\/+$/, "");
+  const gatewayBase = CONFIG.MCP_GATEWAY_URL.replace(/\\/+$/, "");
   const url = `${gatewayBase}/${server}/${tool}`;
 
   console.log(`[${new Date().toISOString()}] [DEBUG] MCP call → ${url}`);
@@ -1274,6 +1275,16 @@ package.json must include: "start": "tsx src/index.ts"
 {tools_str}
 """
 
+  # Append strict JSON formatting rules to prevent invalid JSON from LLM
+        system_instructions += """
+
+        CRITICAL JSON FORMATTING RULES:
+        1. You must output 100% valid JSON.
+        2. Every string property, especially the `content` of files, MUST have all internal double quotes escaped as \\". 
+        3. Do not use literal backticks (`) to enclose the content block inside the JSON, use standard double quotes ("...").
+        4. Ensure all newlines in the code are properly escaped as \n.
+        """
+
         # ── Step 3: Generate bot ─────────────────────────────────────────────
         response = self.client.complete(
             messages=[
@@ -1287,49 +1298,49 @@ package.json must include: "start": "tsx src/index.ts"
 
         raw_text = response.choices[0].message.content.strip()
 
-    import re
+        # ── Step 4: Parse and validate the JSON response ─────────────────────
 
-    # Intelligently extract the JSON payload, ignoring preambles and markdown
-    start_idx = raw_text.find('{')
-    end_idx = raw_text.rfind('}')
-        
-    if start_idx != -1 and end_idx != -1:
-      raw_text = raw_text[start_idx:end_idx + 1]
-            
-      # FIX 1: Remove invalid trailing commas (e.g., {"a": 1,} -> {"a": 1})
-      raw_text = re.sub(r',\s*([}\]])', r'\1', raw_text)
-            
-      # FIX 2: Convert invalid JavaScript backticks to valid JSON double quotes
-      # LLMs often write: "content": `import ...` instead of "content": "import ..."
-      def escape_backtick_string(match):
-        inner_text = match.group(1)
-        # Escape existing double quotes and literal newlines so json.loads doesn't crash
-        inner_text = inner_text.replace('"', '\\"').replace('\n', '\\n')
-        return f'"{inner_text}"'
-                
-      raw_text = re.sub(r':\s*`(.*?)`', escape_backtick_string, raw_text, flags=re.DOTALL)
-            
-    else:
-      print("⚠️  Warning: No JSON object brackets found in the response.")
+        # Intelligently extract the JSON payload, ignoring preambles and markdown
+        start_idx = raw_text.find('{')
+        end_idx   = raw_text.rfind('}')
 
-    try:
-      structured_output = json.loads(raw_text, strict=False)
-      files = structured_output.get("files", [])
-      got      = {f.get("filepath") for f in files}
-      required = {"package.json", "src/index.ts"}
-      missing  = required - got
-      if missing:
-        print(f"⚠️  Model did not generate: {missing}")
-    except Exception as parse_err:
-      print(f"⚠️  JSON parse error: {parse_err}")
-      structured_output = {
-        "thoughts": "JSON parsing failed — raw output saved.",
-        "files": [{"filepath": "error.ts", "content": raw_text}],
-      }
+        if start_idx != -1 and end_idx != -1:
+            raw_text = raw_text[start_idx:end_idx + 1]
 
-    # return {
-    #     "status":     "blueprint_ready",
-    #     "output":     structured_output,
-    #     "intent":     intent,
-    #     "tools_used": [t["name"] for t in available_tools],
-    # }
+            # FIX 1: Remove invalid trailing commas (e.g., {"a": 1,} -> {"a": 1})
+            raw_text = re.sub(r',\s*([}\]])', r'\1', raw_text)
+
+            # FIX 2: Convert invalid JavaScript backticks to valid JSON double quotes.
+            # LLMs often write: "content": `import ...` instead of "content": "import ..."
+            def escape_backtick_string(match: re.Match) -> str:
+                inner_text = match.group(1)
+                # Escape existing double quotes and literal newlines so json.loads doesn't crash
+                inner_text = inner_text.replace('"', '\\"').replace('\n', '\\n')
+                return f'"{inner_text}"'
+
+            raw_text = re.sub(r':\s*`(.*?)`', escape_backtick_string, raw_text, flags=re.DOTALL)
+
+        else:
+            print("⚠️  Warning: No JSON object brackets found in the response.")
+
+        try:
+            structured_output = json.loads(raw_text, strict=False)
+            files   = structured_output.get("files", [])
+            got     = {f.get("filepath") for f in files}
+            required = {"package.json", "src/index.ts"}
+            missing  = required - got
+            if missing:
+                print(f"⚠️  Model did not generate: {missing}")
+        except Exception as parse_err:
+            print(f"⚠️  JSON parse error: {parse_err}")
+            structured_output = {
+                "thoughts": "JSON parsing failed — raw output saved.",
+                "files": [{"filepath": "error.ts", "content": raw_text}],
+            }
+
+        return {
+            "status":     "blueprint_ready",
+            "output":     structured_output,
+            "intent":     intent,
+            "tools_used": [t["name"] for t in available_tools],
+        }

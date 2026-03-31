@@ -70,13 +70,17 @@ export async function POST(req: NextRequest) {
       throw fetchErr;
     }
 
+
     console.log("[generate-bot] Received meta-agent response");
-    const output = metaData.output ?? {};
-    const intent = metaData.intent ?? {};
+    // Fallback to metaData itself if the agent returned a flat structure
+    const output = metaData.output || metaData;
+    const intent = metaData.intent || {};
     const botName: string = (intent.bot_type as string) || "Universal DeFi Bot";
 
+    // Extract files safely
+    const filesList = output.files || (metaData as any).files || [];
     // Filter out .env and .env.example — we handle these ourselves
-    const files = (output.files ?? []).filter(
+    const files = filesList.filter(
       (f: { filepath: string }) => ![".env", ".env.example"].includes(f.filepath)
     );
 

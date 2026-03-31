@@ -121,7 +121,7 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
         label:       "EVM RPC URL",
         type:        "text",
         required:    !intent?.requires_solana_wallet,
-        liveOnly:    true,
+        // liveOnly:    true, // removed
         placeholder: "https://base-sepolia.g.alchemy.com/v2/YOUR_KEY",
         helpText:    "Required for live mode. Free from Alchemy, Infura, or QuickNode.",
       },
@@ -129,10 +129,10 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
         key:         "WALLET_PRIVATE_KEY",
         label:       "Wallet Private Key",
         type:        "password",
-        required:    false,
-        liveOnly:    true,
+        required:    true, // always required
+        // liveOnly:    true, // removed
         placeholder: "64-char hex (no 0x prefix)",
-        helpText:    "Required for live mode. Never share this key.",
+        helpText:    "Required to initialize the wallet.",
       },
     );
   }
@@ -154,8 +154,8 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
         key:         "SOLANA_PRIVATE_KEY",
         label:       "Solana Private Key (bs58)",
         type:        "password",
-        required:    false,
-        liveOnly:    true,
+        required:    true, // always required
+        // liveOnly:    true, // removed
         placeholder: "base58-encoded keypair secret",
         helpText:    "Export from Phantom: Settings → Export Private Key.",
       },
