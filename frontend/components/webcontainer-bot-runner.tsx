@@ -21,7 +21,7 @@ import { useBotSandbox }     from "@/hooks/use-bot-sandbox";
 import { FileExplorer }      from "@/components/ui/FileExplorer";
 import { CodeEditor }        from "@/components/ui/code-editor";
 import { TerminalPanel }     from "@/components/ui/TerminalPanel";
-import { BotEnvConfigModal } from "@/components/ui/Botenvconfigmodal";
+// import { BotEnvConfigModal } from "@/components/ui/Botenvconfigmodal";
 import type { BotEnvConfig, BotIntent } from "@/lib/bot-constant";
 import { DEFAULT_BOT_ENV_CONFIG } from "@/lib/bot-constant";
 
@@ -174,7 +174,7 @@ export function WebContainerBotRunner() {
     }}>
 
       {/* ── Env config overlay ─────────────────────────────────────────────── */}
-      {showEnvModal && (
+      {/* {showEnvModal && (
         <BotEnvConfigModal
           envConfig={envConfig}
           intent={intent}
@@ -182,7 +182,7 @@ export function WebContainerBotRunner() {
           onLaunch={handleLaunch}
           isDryRun={isDryRun}
         />
-      )}
+      )} */}
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div style={{

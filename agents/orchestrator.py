@@ -19,6 +19,7 @@ from mcp_client import MultiMCPClient
 from azure.ai.inference import ChatCompletionsClient
 from azure.ai.inference.models import SystemMessage, UserMessage
 from azure.core.credentials import AzureKeyCredential
+from json_repair import repair_json  # <--- ADD THIS LINE
 
 load_dotenv()
 
@@ -1323,20 +1324,26 @@ package.json must include: "start": "tsx src/index.ts"
         else:
             print("⚠️  Warning: No JSON object brackets found in the response.")
 
+
         try:
-            structured_output = json.loads(raw_text, strict=False)
-            files   = structured_output.get("files", [])
-            got     = {f.get("filepath") for f in files}
-            required = {"package.json", "src/index.ts"}
-            missing  = required - got
-            if missing:
-                print(f"⚠️  Model did not generate: {missing}")
+          # Use json-repair to automatically fix unescaped quotes and broken formatting
+          structured_output = repair_json(raw_text, return_dict=True)
+          # If repair_json completely fails and returns a string, force it to dict
+          if isinstance(structured_output, str):
+            structured_output = json.loads(structured_output)
+
+          files   = structured_output.get("files", [])
+          got     = {f.get("filepath") for f in files}
+          required = {"package.json", "src/index.ts"}
+          missing  = required - got
+          if missing:
+            print(f"⚠️  Model did not generate: {missing}")
         except Exception as parse_err:
-            print(f"⚠️  JSON parse error: {parse_err}")
-            structured_output = {
-                "thoughts": "JSON parsing failed — raw output saved.",
-                "files": [{"filepath": "error.ts", "content": raw_text}],
-            }
+          print(f"⚠️  JSON parse error: {parse_err}")
+          structured_output = {
+            "thoughts": "JSON parsing failed — raw output saved.",
+            "files": [{"filepath": "error.ts", "content": raw_text}],
+          }
 
         return {
             "status":     "blueprint_ready",
