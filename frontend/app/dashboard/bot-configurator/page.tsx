@@ -28,8 +28,17 @@ function TypingIndicator() {
   )
 }
 
-function DynamicCredentialsCard({ fields, onSubmit, disabled }: { fields: any[], onSubmit: (d: any) => void, disabled: boolean }) {
+function DynamicCredentialsCard({ fields, onSubmit, disabled, defaultValues }: { fields: any[], onSubmit: (d: any) => void, disabled: boolean, defaultValues: Record<string, string> }) {
   const [data, setData] = useState<Record<string, string>>({});
+  React.useEffect(() => {
+    const seeded: Record<string, string> = {};
+    for (const f of fields) {
+      seeded[f.key] = defaultValues[f.key] ?? "";
+    }
+    setData(seeded);
+  }, [fields, defaultValues]);
+
+  const hasMissingRequired = fields.some((f) => !(data[f.key] ?? '').trim());
   return (
     <div className="mt-3 bg-slate-900 border border-slate-700 rounded-xl p-4 w-full max-w-md">
       <div className="space-y-4">
@@ -48,7 +57,7 @@ function DynamicCredentialsCard({ fields, onSubmit, disabled }: { fields: any[],
         ))}
         <button
           onClick={() => onSubmit(data)}
-          disabled={disabled || fields.some(f => !data[f.key]?.trim())}
+          disabled={disabled || hasMissingRequired}
           className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium py-2 rounded-lg transition-colors"
         >
           Generate Bot
@@ -88,7 +97,7 @@ export default function BotConfiguratorPage() {
   const {
     messages, input, isTyping, isGenerating, chips, bottomRef,
     generatedAgentId, handleSend, handleKeyDown, handleInputChange,
-    submitDynamicKeys, step
+    submitDynamicKeys, step, envDefaults
   } = useBotConfigChat()
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -144,6 +153,7 @@ export default function BotConfiguratorPage() {
                       fields={msg.card.fields}
                       onSubmit={submitDynamicKeys}
                       disabled={step !== 'ask_keys'}
+                      defaultValues={envDefaults}
                     />
                   )}
                   <p className="text-[10px] text-slate-600 mt-1 ml-1">

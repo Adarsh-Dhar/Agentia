@@ -40,6 +40,7 @@ export interface BotEnvConfig {
 
   // ── Security providers ──────────────────────────────────────────────────────
   WEBACY_API_KEY:      string;   // https://webacy.com
+  GOPLUS_API_KEY:      string;   // https://gopluslabs.io
 
   // ── AI / agentic ────────────────────────────────────────────────────────────
   OPENAI_API_KEY:      string;   // https://platform.openai.com
@@ -47,6 +48,9 @@ export interface BotEnvConfig {
   // ── Social / data ────────────────────────────────────────────────────────────
   LUNARCRUSH_API_KEY:  string;   // https://lunarcrush.com
   NANSEN_API_KEY:      string;   // https://nansen.ai
+  SERUM_API_URL:       string;   // Solana market-data endpoint used by some arbitrage templates
+  PYTH_NETWORK_API_KEY: string;  // https://pyth.network (if required by generated bot)
+  PYTH_PRO_ACCESS_TOKEN: string; // Optional token for Pyth pro feeds
 
   // ── Bot tuning ───────────────────────────────────────────────────────────────
   BORROW_AMOUNT_HUMAN: string;   // Human-readable base-token borrow amount
@@ -72,11 +76,15 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   ALCHEMY_API_KEY:     "",
 
   WEBACY_API_KEY:      "",
+  GOPLUS_API_KEY:      "",
 
   OPENAI_API_KEY:      "",
 
   LUNARCRUSH_API_KEY:  "",
   NANSEN_API_KEY:      "",
+  SERUM_API_URL:       "",
+  PYTH_NETWORK_API_KEY: "",
+  PYTH_PRO_ACCESS_TOKEN: "",
 
   BORROW_AMOUNT_HUMAN: "1",
   POLL_INTERVAL:       "5",
@@ -92,6 +100,8 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
   const mcps  = intent?.required_mcps ?? [];
   const chain = intent?.chain ?? "evm";
   const model = intent?.execution_model ?? "polling";
+  const strategy = (intent?.strategy ?? "").toString().toLowerCase();
+  const botType = (intent?.bot_type ?? "").toString().toLowerCase();
 
   const fields: EnvFieldDef[] = [
     // ── Always ────────────────────────────────────────────────────────────────
@@ -160,6 +170,18 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
         helpText:    "Export from Phantom: Settings → Export Private Key.",
       },
     );
+
+    // Some Solana arbitrage templates rely on a Serum endpoint for market discovery.
+    if (strategy.includes("arbitrage") || strategy.includes("flash")) {
+      fields.push({
+        key:          "SERUM_API_URL",
+        label:        "Serum API URL",
+        type:         "text",
+        required:     true,
+        placeholder:  "https://api.mainnet-beta.solana.com",
+        helpText:     "Used by Solana arbitrage templates for market data routing.",
+      });
+    }
   }
 
   // ── 1inch ────────────────────────────────────────────────────────────────
@@ -191,7 +213,27 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
   }
 
   // ── Webacy ────────────────────────────────────────────────────────────────
-  if (mcps.includes("webacy")) {
+  const needsWebacyByStrategy =
+    strategy.includes("arbitrage") ||
+    strategy.includes("flash") ||
+    strategy.includes("mev") ||
+    botType.includes("arbitrage") ||
+    botType.includes("flash") ||
+    botType.includes("mev")
+
+  const needsGoPlusByStrategy =
+    strategy.includes("sentiment") ||
+    strategy.includes("arbitrage") ||
+    strategy.includes("flash") ||
+    strategy.includes("mev") ||
+    strategy.includes("sniper") ||
+    botType.includes("sentiment") ||
+    botType.includes("arbitrage") ||
+    botType.includes("flash") ||
+    botType.includes("mev") ||
+    botType.includes("sniper")
+
+  if (mcps.includes("webacy") || needsWebacyByStrategy) {
     fields.push({
       key:          "WEBACY_API_KEY",
       label:        "Webacy API Key",
@@ -200,6 +242,20 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
       placeholder:  "your-webacy-api-key",
       helpText:     "Token risk scoring run before every trade execution.",
       helpLink:     "https://webacy.com",
+      helpLinkLabel: "Get key →",
+    });
+  }
+
+  // ── GoPlus ───────────────────────────────────────────────────────────────
+  if (mcps.includes("goplus") || needsGoPlusByStrategy) {
+    fields.push({
+      key:          "GOPLUS_API_KEY",
+      label:        "GoPlus API Key (Optional)",
+      type:         "password",
+      required:     false,
+      placeholder:  "optional-for-public-endpoint",
+      helpText:     "Optional. GoPlus public token security endpoint works without an API key.",
+      helpLink:     "https://gopluslabs.io",
       helpLinkLabel: "Get key →",
     });
   }
@@ -244,6 +300,30 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
       helpLink:     "https://nansen.ai",
       helpLinkLabel: "Get key →",
     });
+  }
+
+  // ── Pyth ─────────────────────────────────────────────────────────────────
+  if (mcps.includes("pyth")) {
+    fields.push(
+      {
+        key:          "PYTH_NETWORK_API_KEY",
+        label:        "Pyth Network API Key (Optional)",
+        type:         "password",
+        required:     false,
+        placeholder:  "optional-for-public-feeds",
+        helpText:     "Optional. Public Pyth feeds work without this key.",
+        helpLink:     "https://www.pyth.network",
+        helpLinkLabel: "Pyth docs →",
+      },
+      {
+        key:          "PYTH_PRO_ACCESS_TOKEN",
+        label:        "Pyth Pro Access Token (Optional)",
+        type:         "password",
+        required:     false,
+        placeholder:  "optional-pro-token",
+        helpText:     "Optional. Needed only for pro feeds such as equities/FX/metals.",
+      },
+    );
   }
 
   // ── Bot tuning (polling bots) ─────────────────────────────────────────────

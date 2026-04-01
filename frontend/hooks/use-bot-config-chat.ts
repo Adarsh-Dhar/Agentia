@@ -28,8 +28,10 @@ export function useBotConfigChat() {
   const [pendingOriginalPrompt,  setPendingOriginalPrompt]  = useState('')
   const [pendingExpandedPrompt,  setPendingExpandedPrompt]  = useState('')
   const [pendingIntent,          setPendingIntent]          = useState<Record<string, unknown> | null>(null)
+  const [pendingRequiredFields,  setPendingRequiredFields]  = useState<EnvFieldDef[]>([])
 
   const [generatedAgentId, setGeneratedAgentId] = useState<string | null>(null)
+  const [envDefaults, setEnvDefaults] = useState<Record<string, string>>({})
 
   const bottomRef  = useRef<HTMLDivElement>(null)
   const initialized = useRef(false)
@@ -42,6 +44,22 @@ export function useBotConfigChat() {
     "Whale Mirror Bot",
   ]
   const [chips, setChips] = useState<string[]>(defaultChips)
+
+  const normalizeIntent = useCallback((intent: Record<string, unknown>) => {
+    const requiredRaw = Array.isArray(intent.required_mcps) ? intent.required_mcps : []
+    const required = requiredRaw
+      .map((m) => String(m || "").trim())
+      .filter(Boolean)
+
+    if (!required.includes("pyth")) {
+      required.push("pyth")
+    }
+
+    return {
+      ...intent,
+      required_mcps: required,
+    }
+  }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -69,6 +87,26 @@ export function useBotConfigChat() {
       )
     })()
   }, [pushA])
+
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const res = await fetch('/api/env-defaults')
+        const data = await res.json().catch(() => ({}))
+        if (!cancelled && data?.values && typeof data.values === 'object') {
+          setEnvDefaults(data.values as Record<string, string>)
+        }
+      } catch {
+        if (!cancelled) setEnvDefaults({})
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // ── Main send handler ──────────────────────────────────────────────────────
 
@@ -102,7 +140,8 @@ export function useBotConfigChat() {
         throw new Error(classData.error ?? `Classification failed (HTTP ${classRes.status})`)
       }
 
-      const intent: Record<string, unknown>  = classData.intent  ?? {}
+      const rawIntent: Record<string, unknown> = classData.intent ?? {}
+      const intent: Record<string, unknown> = normalizeIntent(rawIntent)
       const expandedPrompt: string           = classData.expandedPrompt ?? text
 
       console.log("[chat] Intent:", JSON.stringify(intent))
@@ -137,6 +176,7 @@ export function useBotConfigChat() {
         setPendingOriginalPrompt(text)
         setPendingExpandedPrompt(expandedPrompt)
         setPendingIntent(intent)
+        setPendingRequiredFields(fields)
 
         setIsTyping(true)
         await delay(400)
@@ -149,7 +189,7 @@ export function useBotConfigChat() {
         setIsGenerating(false)
       } else {
         // No keys needed — generate immediately
-        await generateBot(text, expandedPrompt, {})
+        await generateBot(text, expandedPrompt, envDefaults)
       }
 
     } catch (err: unknown) {
@@ -167,16 +207,35 @@ export function useBotConfigChat() {
       )
       setChips(defaultChips)
     }
-  }, [input, isGenerating, step, pushA, pushU]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [input, isGenerating, step, pushA, pushU, normalizeIntent]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Submit keys from the credentials form ─────────────────────────────────
 
   const submitDynamicKeys = async (envData: Record<string, string>) => {
+    const mergedEnv = {
+      ...envDefaults,
+      ...envData,
+    }
+
+    const missing = pendingRequiredFields
+      .map(f => f.key)
+      .filter((k) => !(mergedEnv[k] ?? "").trim())
+
+    if (missing.length > 0) {
+      pushA(
+        `❌ Missing required keys: ${missing.join(", ")}.\n\n` +
+        `Please provide all required .env keys before generation can continue.`
+      )
+      setStep('ask_keys')
+      setIsGenerating(false)
+      return
+    }
+
     setStep('generating')
     setIsGenerating(true)
     pushU("API keys provided ✓")
 
-    await generateBot(pendingOriginalPrompt, pendingExpandedPrompt, envData)
+    await generateBot(pendingOriginalPrompt, pendingExpandedPrompt, mergedEnv)
   }
 
   // ── Core generation function ───────────────────────────────────────────────
@@ -273,6 +332,7 @@ export function useBotConfigChat() {
     chips,
     bottomRef,
     generatedAgentId,
+    envDefaults,
     handleSend,
     handleKeyDown,
     handleInputChange,

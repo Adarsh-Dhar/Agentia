@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const USE_PYTHON_CLASSIFIER = process.env.USE_PYTHON_CLASSIFIER === "true";
 
 // ─── Rich Expander System Prompt ─────────────────────────────────────────────
 // This prompt produces a deeply detailed technical spec so the downstream
@@ -21,7 +22,7 @@ Cover ALL of the following in your expansion:
    - Graceful shutdown, SIGINT/SIGTERM handling
 
 3. **Required Data Sources & APIs**:
-   - List every MCP server or REST API needed (e.g. 1inch for EVM swaps, Jupiter for Solana, LunarCrush for sentiment, Nansen for whale tracking, Hyperliquid for perps, DeBridge for cross-chain, CoW Protocol for MEV-protected swaps, Alchemy for mempool)
+  - List every MCP server or REST API needed (e.g. 1inch for EVM swaps, Jupiter for Solana, LunarCrush for sentiment, Nansen for whale tracking, Hyperliquid for perps, DeBridge for cross-chain, Alchemy for mempool)
    - For each: what data it provides, what endpoint/tool to call, what fields to parse
 
 4. **Step-by-Step Trading Logic**:
@@ -62,7 +63,7 @@ Required schema:
   "network": "base-sepolia" | "base-mainnet" | "arbitrum" | "solana-mainnet",
   "execution_model": "polling" | "websocket" | "agentic",
   "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
-  "required_mcps": ["one_inch","webacy","lunarcrush","jupiter","nansen","cow_protocol","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","chainlink"],
+  "required_mcps": ["one_inch","webacy","lunarcrush","jupiter","nansen","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","chainlink"],
   "bot_type": "human-readable bot name",
   "requires_openai_key": true | false,
   "requires_solana_wallet": true | false
@@ -70,7 +71,7 @@ Required schema:
 
 Classification rules (first match wins):
 - flash loan | arbitrage → execution_model:"polling", strategy:"arbitrage", required_mcps:["one_inch","webacy","goat_evm"]
-- CoW | MEV intent | MEV-protected → execution_model:"polling", strategy:"mev_intent", required_mcps:[...,"cow_protocol"]
+- MEV intent | MEV-protected → execution_model:"polling", strategy:"mev_intent", required_mcps:["one_inch","webacy"]
 - sniper | memecoin | mempool → execution_model:"websocket", strategy:"sniping", required_mcps:["one_inch","webacy","alchemy"]
 - DCA | dollar cost → execution_model:"polling", strategy:"dca", required_mcps:["one_inch"]
 - grid | range → execution_model:"polling", strategy:"grid", required_mcps:["one_inch"]
@@ -196,16 +197,35 @@ export async function POST(req: NextRequest) {
       console.warn("[classify-intent] No GITHUB_TOKEN — skipping expansion.");
     }
 
-    // ── Step 2: Classify intent — try Python Meta-Agent first ───────────────
+    // Keep expanded specs concise so downstream generation stays within model limits.
+    const MAX_EXPANDED_PROMPT_CHARS = Number(process.env.MAX_EXPANDED_PROMPT_CHARS ?? "3200");
+    if (expandedPrompt.length > MAX_EXPANDED_PROMPT_CHARS) {
+      console.warn(
+        "[classify-intent] Expanded prompt too long; truncating:",
+        expandedPrompt.length,
+        "->",
+        MAX_EXPANDED_PROMPT_CHARS,
+      );
+      expandedPrompt = expandedPrompt.slice(0, MAX_EXPANDED_PROMPT_CHARS);
+    }
+
+    // ── Step 2: Classify intent — default to local LLM classifier ───────────
+    // Rationale: The Python classifier can keep the single-worker Meta-Agent
+    // busy even after client timeout/abort, which then makes /generate-bot
+    // health checks fail with false "unreachable" errors.
     let intent: Record<string, unknown> | null = null;
 
-    try {
-      console.log("[classify-intent] Calling Python Meta-Agent for classification...");
-      intent = await callPythonClassifier(expandedPrompt, 20_000); // 20 second timeout
-      console.log("[classify-intent] Python classification succeeded:", JSON.stringify(intent));
-    } catch (pyErr: unknown) {
-      const msg = pyErr instanceof Error ? pyErr.message : String(pyErr);
-      console.warn("[classify-intent] Python Meta-Agent unavailable, falling back to LLM classifier:", msg);
+    if (USE_PYTHON_CLASSIFIER) {
+      try {
+        console.log("[classify-intent] Calling Python Meta-Agent for classification...");
+        intent = await callPythonClassifier(expandedPrompt, 20_000); // 20 second timeout
+        console.log("[classify-intent] Python classification succeeded:", JSON.stringify(intent));
+      } catch (pyErr: unknown) {
+        const msg = pyErr instanceof Error ? pyErr.message : String(pyErr);
+        console.warn("[classify-intent] Python Meta-Agent unavailable, falling back to LLM classifier:", msg);
+      }
+    } else {
+      console.log("[classify-intent] Skipping Python classifier (USE_PYTHON_CLASSIFIER=false).");
     }
 
     // ── Step 3: Fallback — classify directly via GitHub Models if Python failed
@@ -275,7 +295,7 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
   const isGrid    = lower.includes("grid") || lower.includes("range");
   const isDCA     = lower.includes("dca") || lower.includes("dollar cost");
   const isNews    = lower.includes("news") || lower.includes("gpt trader") || lower.includes("ai trader");
-  const isMEV     = lower.includes("cow") || lower.includes("mev") || lower.includes("protected swap");
+  const isMEV     = lower.includes("mev") || lower.includes("protected swap");
   const isScalper = lower.includes("scalper") || lower.includes("high frequency") || lower.includes("hf ");
 
   if (isSolana) {
@@ -349,7 +369,7 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       chain: "evm", network: "base-mainnet",
       execution_model: "polling",
       strategy: "mev_intent",
-      required_mcps: ["cow_protocol", "one_inch", "webacy"],
+      required_mcps: ["one_inch", "webacy"],
       bot_type: "MEV-Protected Swap Bot",
       requires_openai_key: false,
       requires_solana_wallet: false,

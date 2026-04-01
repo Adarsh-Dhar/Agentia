@@ -36,7 +36,7 @@ export function useTerminal(): {
     fit.fit();
     termRef.current = term;
     fitRef.current  = fit;
-    term.writeln("\x1b[36m[System]\x1b[0m Terminal ready. Click \x1b[1mGenerate Bot\x1b[0m to start.");
+    term.writeln("\x1b[36m[System]\x1b[0m Terminal ready. Auto-starting bot…");
     const obs = new ResizeObserver(() => fit.fit());
     obs.observe(terminalRef.current);
     return () => { obs.disconnect(); term.dispose(); termRef.current = null; };

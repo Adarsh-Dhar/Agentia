@@ -12,7 +12,7 @@
  *  - Shows strategy/chain badges in the header
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Zap, Play, Square, Bot } from "lucide-react";
 
 import { useTerminal }       from "@/hooks/use-terminal";
@@ -65,6 +65,8 @@ export function WebContainerBotRunner() {
   const [envLoaded, setEnvLoaded] = useState(false);
   const [intent,    setIntent]    = useState<BotIntent | null>(null);
   const [showEnvModal, setShowEnvModal] = useState(false);
+  const didAutoLaunchRef = useRef(false);
+  const shouldAutoLaunchRef = useRef(false);
 
   const { terminalRef, termRef } = useTerminal();
 
@@ -99,12 +101,29 @@ export function WebContainerBotRunner() {
       if (result?.intent) {
         setIntent(result.intent);
       }
+
+      // Mark for auto-launch; actual boot happens after generatedFiles state is populated.
+      if (result?.success) {
+        shouldAutoLaunchRef.current = true;
+      }
+
       setPhase("idle");
-      // Show env modal on first load so user can review/fill credentials
-      setShowEnvModal(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-launch only when generated files are truly in state.
+  useEffect(() => {
+    if (didAutoLaunchRef.current) return;
+    if (!shouldAutoLaunchRef.current) return;
+    if (generatedFiles.length === 0) return;
+
+    didAutoLaunchRef.current = true;
+    shouldAutoLaunchRef.current = false;
+    setShowEnvModal(false);
+    setPhase("running");
+    void bootAndRun();
+  }, [generatedFiles.length, bootAndRun, setPhase]);
 
   // Sync .env file edits back to envConfig
   useEffect(() => {

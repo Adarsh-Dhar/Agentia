@@ -7,13 +7,14 @@ Supports 20+ bot archetypes across EVM chains and Solana.
 Pipeline:
   1. classify_intent()        → GPT-4o classifies chain / strategy / execution model
   2. _select_template()       → injects the correct base template (Polling / WSS / Agentic / Solana)
-  3. _collect_sdk_snippets()  → RAG-injects relevant SDK docs (CoW, Jupiter, Nansen, Pyth, …)
+  3. _collect_sdk_snippets()  → RAG-injects relevant SDK docs (Jupiter, Nansen, Pyth, …)
   4. build_bot_logic()        → GPT-4o generates the full bot with a narrowed context window
 """
 
 import os
 import re
 import json
+from pathlib import Path
 from dotenv import load_dotenv
 from mcp_client import MultiMCPClient
 from azure.ai.inference import ChatCompletionsClient
@@ -21,7 +22,10 @@ from azure.ai.inference.models import SystemMessage, UserMessage
 from azure.core.credentials import AzureKeyCredential
 from json_repair import repair_json
 
-load_dotenv()
+# Load env files from the agents directory regardless of current working directory.
+_BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(_BASE_DIR / ".env")
+load_dotenv(_BASE_DIR / ".env.local", override=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,6 +41,10 @@ Use EXACTLY this implementation — do not deviate, especially the headers and U
 // src/mcp_bridge.ts
 import { CONFIG } from './config.js';
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function callMcpTool(
   server: string,
   tool: string,
@@ -49,28 +57,60 @@ export async function callMcpTool(
   const url = `${gatewayBase}/${server}/${tool}`;
 
   console.log(`[${new Date().toISOString()}] [DEBUG] MCP call → ${url}`);
+  const attempts = 3;
+  let lastError = "unknown error";
 
-  const response = await fetch(url, {
-    method:  "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // ngrok-specific header to skip the browser-warning interstitial page.
-      // Without this, ngrok returns an HTML page instead of JSON, causing a parse crash.
-      "ngrok-skip-browser-warning": "true",
-      // Keep this for compatibility with other tunnel providers (localtunnel, etc.)
-      "Bypass-Tunnel-Reminder":     "true",
-    },
-    body: JSON.stringify(args),
-  });
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(url, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // ngrok-specific header to skip the browser-warning interstitial page.
+          // Without this, ngrok returns an HTML page instead of JSON, causing a parse crash.
+          "ngrok-skip-browser-warning": "true",
+          // Keep this for compatibility with other tunnel providers (localtunnel, etc.)
+          "Bypass-Tunnel-Reminder":     "true",
+        },
+        body: JSON.stringify(args),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(
-      `MCP Tool ${server}/${tool} failed: ${response.status} ${response.statusText} — ${errText}`
-    );
+      if (!response.ok) {
+        const errText = await response.text();
+        lastError = `MCP Tool ${server}/${tool} failed: ${response.status} ${response.statusText} — ${errText}`;
+      } else {
+        const data = await response.json();
+        const result = (data as { result?: { isError?: boolean; content?: unknown } })?.result;
+        if (result?.isError) {
+          const detail = (() => {
+            const content = result.content;
+            if (Array.isArray(content) && content.length > 0) {
+              const first = content[0] as { text?: unknown; content?: unknown };
+              if (typeof first?.text === 'string') return first.text;
+              if (typeof first?.content === 'string') return first.content;
+            }
+            return JSON.stringify(content ?? data);
+          })();
+          throw new Error(`MCP Tool ${server}/${tool} returned error: ${detail}`);
+        }
+        return data;
+      }
+    } catch (err) {
+      clearTimeout(timeout);
+      const msg = err instanceof Error ? err.message : String(err);
+      lastError = msg;
+    }
+
+    if (attempt < attempts) {
+      await sleep(400 * attempt);
+    }
   }
 
-  return response.json();
+  throw new Error(`MCP Tool ${server}/${tool} unavailable after retries: ${lastError}`);
 }
 ```
 
@@ -135,47 +175,6 @@ FLASHLOAN_ABI = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 SDK_SNIPPETS: dict[str, str] = {
-
-    "cow_protocol": """
-## CoW Protocol — MEV-Protected Swap SDK Reference
-CoW Protocol uses EIP-712 signed orders submitted to an off-chain orderbook.
-The protocol guarantees Coincidence of Wants (CoW) or best on-chain execution — never sandwich-attackable.
-
-Order submission flow:
-  1. Build an order struct: sellToken, buyToken, sellAmount, buyAmount=0 (market), validTo, receiver.
-  2. Encode with EIP-712 and sign with ethers.js _signTypedData().
-  3. POST the signed order to the CoW API.
-  4. Poll GET /api/v1/orders/{uid} until status === "fulfilled".
-
-REST API base: https://api.cow.fi/{network}/api/v1
-  networks: mainnet | xdai | arbitrum_one | base
-
-Key endpoints:
-  POST /orders       — submit a new order
-  GET  /orders/{uid} — poll order status ("open" | "fulfilled" | "cancelled" | "expired")
-  GET  /quote        — get fee + price estimate before submitting
-
-TypeScript SDK (@cowprotocol/cow-sdk):
-  import { CowSdk, OrderKind, OrderSigningUtils, SupportedChainId } from '@cowprotocol/cow-sdk';
-  const cowSdk = new CowSdk(SupportedChainId.BASE, { signer });
-  const order  = {
-    sellToken: USDC_ADDRESS, buyToken: WETH_ADDRESS, sellAmount: amountIn.toString(),
-    buyAmount: '0', receiver: walletAddress, validTo: Math.floor(Date.now()/1000) + 3600,
-    appData: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    feeAmount: '0', kind: OrderKind.SELL, partiallyFillable: false,
-  };
-  const { signature, signingScheme } = await OrderSigningUtils.signOrder(order, chainId, signer);
-  const { id: orderId } = await cowSdk.cowApi.sendOrder({ order, signature });
-
-EIP-712 Domain (GPv2Settlement):
-  name: "Gnosis Protocol", version: "v2", chainId: <int>
-  verifyingContract: "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
-
-MCP tools available (cow_protocol server):
-  get_quote          args: { sellToken, buyToken, sellAmount, kind, from }
-  create_order       args: { order, signature }
-  get_order_status   args: { orderId }
-""",
 
     "lunarcrush_sentiment": """
 ## LunarCrush — Social Sentiment SDK Reference
@@ -334,7 +333,19 @@ TypeScript signing + broadcasting:
   import bs58 from 'bs58';
 
   const connection = new Connection(process.env.SOLANA_RPC_URL!, 'confirmed');
-  const keypair    = Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY!));
+
+  function parseSolanaSecretKey(raw?: string): Uint8Array | null {
+    if (!raw || !raw.trim()) return null;
+    const value = raw.trim();
+    if (value.startsWith('[') && value.endsWith(']')) {
+      const arr = JSON.parse(value) as number[];
+      return Uint8Array.from(arr);
+    }
+    return bs58.decode(value);
+  }
+
+  const secret = parseSolanaSecretKey(process.env.SOLANA_PRIVATE_KEY);
+  const keypair = secret ? Keypair.fromSecretKey(secret) : Keypair.generate();
 
   // After getting swapTransaction from Jupiter swap API:
   const vtx = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'));
@@ -508,7 +519,7 @@ TypeScript helper:
 
 STRATEGY_SNIPPETS: dict[str, list[str]] = {
     "arbitrage":     ["pyth_oracle"],
-    "mev_intent":    ["cow_protocol", "pyth_oracle"],
+  "mev_intent":    ["pyth_oracle"],
     "sniping":       ["websocket_mempool", "pyth_oracle"],
     "dca":           ["pyth_oracle"],
     "grid":          ["pyth_oracle"],
@@ -525,7 +536,6 @@ STRATEGY_SNIPPETS: dict[str, list[str]] = {
 
 # MCP server name → SDK snippet key
 MCP_TO_SNIPPET: dict[str, str] = {
-    "cow_protocol": "cow_protocol",
     "lunarcrush":   "lunarcrush_sentiment",
     "nansen":       "nansen_whale",
     "hyperliquid":  "hyperliquid_perp",
@@ -661,9 +671,32 @@ import bs58 from 'bs58';
 
 const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
 
-const keypair = process.env.SOLANA_PRIVATE_KEY
-  ? Keypair.fromSecretKey(bs58.decode(process.env.SOLANA_PRIVATE_KEY))
+function parseSolanaSecretKey(raw?: string): Uint8Array | null {
+  if (!raw || !raw.trim()) return null;
+  const value = raw.trim();
+  try {
+    // Support JSON array export format from some wallets.
+    if (value.startsWith('[') && value.endsWith(']')) {
+      const arr = JSON.parse(value) as number[];
+      if (!Array.isArray(arr) || arr.length < 32) throw new Error('Invalid JSON secret array');
+      return Uint8Array.from(arr);
+    }
+    // Standard Solana bs58 private key.
+    return bs58.decode(value);
+  } catch (err) {
+    throw new Error(`Invalid SOLANA_PRIVATE_KEY format: ${(err as Error).message}`);
+  }
+}
+
+const secretKey = parseSolanaSecretKey(process.env.SOLANA_PRIVATE_KEY);
+const simulationMode = process.env.SIMULATION_MODE !== 'false';
+const keypair = secretKey
+  ? Keypair.fromSecretKey(secretKey)
   : Keypair.generate();
+
+if (!secretKey && !simulationMode) {
+  throw new Error('SOLANA_PRIVATE_KEY is required when SIMULATION_MODE=false. Provide a bs58 or JSON-array key.');
+}
 
 async function jupiterSwap(
   inputMint: string, outputMint: string, amountBaseUnits: bigint, slippageBps = 50,
@@ -685,7 +718,8 @@ async function jupiterSwap(
 Required packages (add to package.json):
   dependencies: "@solana/web3.js": "^1.91.0", "bs58": "^6.0.0"
 
-Required env: SOLANA_RPC_URL, SOLANA_PRIVATE_KEY (bs58-encoded keypair secret).
+Required env: SOLANA_RPC_URL. SOLANA_PRIVATE_KEY is optional in simulation mode.
+If SOLANA_PRIVATE_KEY is provided, generated code must support bs58 and JSON-array formats.
 Common mints: SOL=So11111111111111111111111111111111111111112, USDC=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
 Suitable for: Solana Memecoin Sniper, Jupiter DCA, Raydium LP Bot.
 """
@@ -711,7 +745,7 @@ Required schema:
   "network":                "base-sepolia" | "base-mainnet" | "arbitrum" | "solana-mainnet",
   "execution_model":        "polling" | "websocket" | "agentic",
   "strategy":               "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
-  "required_mcps":          [zero or more of: "one_inch","webacy","lunarcrush","jupiter","nansen","cow_protocol","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","pyth"],
+  "required_mcps":          [zero or more of: "one_inch","webacy","lunarcrush","jupiter","nansen","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","pyth"],
   "bot_type":               "human-readable bot name e.g. Aave Flash Loan Arbitrage Bot",
   "requires_openai_key":    true | false,
   "requires_solana_wallet": true | false
@@ -719,7 +753,7 @@ Required schema:
 
 Classification rules (apply in order — first match wins):
   flash loan | arbitrage                -> execution_model:"polling",  strategy:"arbitrage",    required_mcps:["one_inch","webacy","goat_evm","pyth"]
-  CoW | MEV intent | MEV-protected      -> execution_model:"polling",  strategy:"mev_intent",   required_mcps:[...,"cow_protocol","pyth"]
+  MEV intent | MEV-protected            -> execution_model:"polling",  strategy:"mev_intent",   required_mcps:["one_inch","webacy","pyth"]
   sniper | memecoin | mempool           -> execution_model:"websocket", strategy:"sniping",     required_mcps:["one_inch","webacy","alchemy","pyth"]
   DCA | dollar cost                     -> execution_model:"polling",  strategy:"dca",          required_mcps:["one_inch","pyth"]
   grid | range | ladder                 -> execution_model:"polling",  strategy:"grid",         required_mcps:["one_inch","pyth"]
@@ -770,7 +804,9 @@ class MetaAgentBuilder:
             raise ValueError("GITHUB_TOKEN not found. Please check your .env file.")
 
         self.endpoint   = os.environ.get("GITHUB_MODEL_ENDPOINT", "https://models.inference.ai.azure.com")
-        self.model_name = "gpt-4o"
+        # Default to a faster model to keep end-to-end generation under API time limits.
+        self.model_name = os.environ.get("GITHUB_MODEL_NAME", "gpt-4o-mini")
+        self.generation_max_tokens = int(os.environ.get("GENERATION_MAX_TOKENS", "3072"))
         self.client = ChatCompletionsClient(
             endpoint=self.endpoint,
             credential=AzureKeyCredential(self.token),
@@ -790,44 +826,73 @@ class MetaAgentBuilder:
         print("Connecting to MCP Servers...")
         print("=" * 60)
 
+        async def connect_supergateway(
+            name: str,
+            url: str,
+            headers: dict[str, str] | None = None,
+            prefer_sse: bool = False,
+        ):
+            """Try supergateway with streamableHttp/SSE fallback for flaky hosted MCP endpoints."""
+            attempts = ["sse", "streamable"] if prefer_sse else ["streamable", "sse"]
+            last_error: Exception | None = None
+
+            for mode in attempts:
+                args = ["-y", "supergateway"]
+                if mode == "streamable":
+                    args += ["--streamableHttp", url]
+                else:
+                    args += ["--sse", url]
+
+                for key, value in (headers or {}).items():
+                    args += ["--header", f"{key}: {value}"]
+                args += ["--outputTransport", "stdio"]
+
+                try:
+                    await self.mcp_manager.connect_to_server(name, "npx", args)
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    print(f"⚠️  {name}: {mode} transport failed ({exc})")
+
+            if last_error:
+                raise last_error
+
         # 1. 1inch — EVM swap quotes + calldata
         try:
-            one_inch_args = [
-                "-y", "supergateway",
-                "--streamableHttp", "https://api.1inch.com/mcp/protocol",
-            ]
-            if self.oneinch_key:
-                one_inch_args += ["--header", f"Authorization: Bearer {self.oneinch_key}"]
-            one_inch_args += ["--outputTransport", "stdio"]
-            await self.mcp_manager.connect_to_server("one_inch", "npx", one_inch_args)
+          await connect_supergateway(
+            "one_inch",
+            os.environ.get("ONEINCH_MCP_URL", "https://api.1inch.com/mcp/protocol"),
+            headers={"Authorization": f"Bearer {self.oneinch_key}"} if self.oneinch_key else None,
+          )
         except Exception as e:
-            print(f"⚠️  1inch: {e}")
+          print(f"⚠️  1inch: {e}")
 
-        # 2. Jupiter — Solana swap quotes
-        try:
-            await self.mcp_manager.connect_to_server(
-                "jupiter", "npx",
-                ["-y", "supergateway",
-                 "--streamableHttp", "https://dev.jup.ag/mcp",
-                 "--outputTransport", "stdio"],
+        # 2. Jupiter
+        jupiter_url = os.environ.get("JUPITER_MCP_URL")
+        if jupiter_url:
+          try:
+            await connect_supergateway(
+              "jupiter",
+              jupiter_url,
+              prefer_sse=True,
             )
-        except Exception as e:
+          except Exception as e:
             print(f"⚠️  Jupiter: {e}")
+        else:
+          print("⚠️  JUPITER_MCP_URL missing. Skipping Jupiter hosted MCP.")
 
         # 3. Webacy — Token risk scoring
         if self.webacy_key:
-            try:
-                await self.mcp_manager.connect_to_server(
-                    "webacy", "npx",
-                    ["-y", "supergateway",
-                     "--streamableHttp", "https://api.webacy.com/mcp",
-                     "--header", f"x-api-key: {self.webacy_key}",
-                     "--outputTransport", "stdio"],
-                )
-            except Exception as e:
-                print(f"⚠️  Webacy: {e}")
+          try:
+            await connect_supergateway(
+              "webacy",
+              os.environ.get("WEBACY_MCP_URL", "https://api.webacy.com/mcp"),
+              headers={"x-api-key": self.webacy_key},
+            )
+          except Exception as e:
+            print(f"⚠️  Webacy: {e}")
         else:
-            print("⚠️  WEBACY_API_KEY missing. Skipping Webacy.")
+          print("⚠️  WEBACY_API_KEY missing. Skipping Webacy.")
 
         # 4. Alchemy — RPC + mempool
         if self.alchemy_key:
@@ -865,32 +930,38 @@ class MetaAgentBuilder:
 
         # 6. CoinGecko — Market prices
         if self.coingecko_demo or self.coingecko_pro:
+          try:
+            cg_env = {}
+            if self.coingecko_demo:
+              cg_env["COINGECKO_DEMO_API_KEY"] = self.coingecko_demo
+            if self.coingecko_pro:
+              cg_env["COINGECKO_PRO_API_KEY"] = self.coingecko_pro
+              cg_env["COINGECKO_ENVIRONMENT"] = "pro"
             try:
-                cg_env = {}
-                if self.coingecko_demo:
-                    cg_env["COINGECKO_DEMO_API_KEY"] = self.coingecko_demo
-                if self.coingecko_pro:
-                    cg_env["COINGECKO_PRO_API_KEY"] = self.coingecko_pro
-                    cg_env["COINGECKO_ENVIRONMENT"] = "pro"
-                await self.mcp_manager.connect_to_server(
-                    "coingecko", "npx",
-                    ["-y", "@coingecko/coingecko-mcp"],
-                    custom_env=cg_env,
-                )
-            except Exception as e:
-                print(f"⚠️  CoinGecko: {e}")
+              await self.mcp_manager.connect_to_server(
+                "coingecko", "npx",
+                ["-y", "@coingecko/coingecko-mcp"],
+                custom_env=cg_env,
+              )
+            except Exception as inner_exc:
+              # Some npx temp installs fail on Node 24; retry via pnpm dlx if available.
+              print(f"⚠️  CoinGecko npx failed ({inner_exc}); retrying via pnpm dlx...")
+              await self.mcp_manager.connect_to_server(
+                "coingecko", "pnpm",
+                ["dlx", "@coingecko/coingecko-mcp"],
+                custom_env=cg_env,
+              )
+          except Exception as e:
+            print(f"⚠️  CoinGecko: {e}")
         else:
-            print("⚠️  COINGECKO_DEMO_API_KEY missing. Skipping CoinGecko.")
+          print("⚠️  COINGECKO_DEMO_API_KEY missing. Skipping CoinGecko.")
 
         # 7. LunarCrush — Social sentiment signals
         if self.lunarcrush_key:
             try:
-                await self.mcp_manager.connect_to_server(
-                    "lunarcrush", "npx",
-                    ["-y", "supergateway",
-                     "--streamableHttp",
-                     f"https://lunarcrush.ai/mcp?key={self.lunarcrush_key}",
-                     "--outputTransport", "stdio"],
+                await connect_supergateway(
+                    "lunarcrush",
+                    os.environ.get("LUNARCRUSH_MCP_URL", f"https://lunarcrush.ai/mcp?key={self.lunarcrush_key}"),
                 )
             except Exception as e:
                 print(f"⚠️  LunarCrush: {e}")
@@ -927,84 +998,74 @@ class MetaAgentBuilder:
 
         # 10. LiFi — Cross-chain bridge route discovery
         try:
-            await self.mcp_manager.connect_to_server(
-                "lifi", "/Users/adarsh/go/bin/lifi-mcp", [],
-            )
+          await self.mcp_manager.connect_to_server(
+            "lifi", "/Users/adarsh/go/bin/lifi-mcp", [],
+          )
         except Exception as e:
-            print(f"⚠️  LiFi (install: go install github.com/lifinance/lifi-mcp@latest): {e}")
+          print(f"⚠️  LiFi (install: go install github.com/lifinance/lifi-mcp@latest): {e}")
 
         # 11. Uniswap
         if self.uniswap_path and self.infura_key:
-            if os.path.exists(self.uniswap_path):
-                try:
-                    await self.mcp_manager.connect_to_server(
-                        "uniswap", "node",
-                        [self.uniswap_path],
-                        custom_env={
-                            "INFURA_KEY":         self.infura_key,
-                            "WALLET_PRIVATE_KEY": os.environ.get("WALLET_PRIVATE_KEY", ""),
-                        },
-                    )
-                except Exception as e:
-                    print(f"⚠️  Uniswap: {e}")
-            else:
-                print(f"⚠️  UNISWAP_MCP_PATH not found: {self.uniswap_path}")
-        else:
-            print("⚠️  UNISWAP_MCP_PATH or INFURA_KEY missing. Skipping Uniswap.")
-
-        # 12. CoW Protocol — MEV-protected swap orderbook
-        try:
-            await self.mcp_manager.connect_to_server(
-                "cow_protocol", "npx",
-                ["-y", "supergateway",
-                 "--streamableHttp", "https://mcp.api.cow.fi/mcp",
-                 "--outputTransport", "stdio"],
-            )
-        except Exception as e:
-            print(f"⚠️  CoW Protocol: {e}")
-
-        # 13. Nansen — Smart money / whale wallet intelligence
-        if self.nansen_key:
+          if os.path.exists(self.uniswap_path):
             try:
-                await self.mcp_manager.connect_to_server(
-                    "nansen", "npx",
-                    ["-y", "supergateway",
-                     "--streamableHttp", "https://api.nansen.ai/mcp",
-                     "--header", f"x-api-key: {self.nansen_key}",
-                     "--outputTransport", "stdio"],
-                )
+              await self.mcp_manager.connect_to_server(
+                "uniswap", "node",
+                [self.uniswap_path],
+                custom_env={
+                  "INFURA_KEY":         self.infura_key,
+                  "WALLET_PRIVATE_KEY": os.environ.get("WALLET_PRIVATE_KEY", ""),
+                },
+              )
             except Exception as e:
-                print(f"⚠️  Nansen: {e}")
+              print(f"⚠️  Uniswap: {e}")
+          else:
+            print(f"⚠️  UNISWAP_MCP_PATH not found: {self.uniswap_path}")
         else:
-            print("⚠️  NANSEN_API_KEY missing. Skipping Nansen.")
+          print("⚠️  UNISWAP_MCP_PATH or INFURA_KEY missing. Skipping Uniswap.")
 
-        # 14. DeBridge — Cross-chain intent-based swaps
+        # 12. Nansen — Smart money / whale wallet intelligence
+        # Preferred provider path is mcp-remote against Nansen's MCP endpoint.
+        if self.nansen_key:
+          nansen_url = os.environ.get("NANSEN_MCP_URL", "https://mcp.nansen.ai/ra/mcp/")
+          try:
+            await self.mcp_manager.connect_to_server(
+              "nansen", "npx",
+              [
+                "-y", "mcp-remote", nansen_url,
+                "--header", f"NANSEN-API-KEY:{self.nansen_key}",
+                "--allow-http",
+              ],
+            )
+          except Exception as e:
+            print(f"⚠️  Nansen (mcp-remote): {e}")
+        else:
+          print("⚠️  NANSEN_API_KEY missing. Skipping Nansen.")
+
+        # 13. DeBridge — Cross-chain intent-based swaps
+        # Use official stdio MCP package by default.
         try:
-            debridge_args = [
-                "-y", "supergateway",
-                "--streamableHttp", "https://api.debridge.finance/mcp",
-                "--outputTransport", "stdio",
-            ]
-            if self.debridge_key:
-                debridge_args += ["--header", f"Authorization: Bearer {self.debridge_key}"]
-            await self.mcp_manager.connect_to_server("debridge", "npx", debridge_args)
+          debridge_env = {
+            "DEBRIDGE_API_KEY": self.debridge_key,
+          } if self.debridge_key else None
+          await self.mcp_manager.connect_to_server(
+            "debridge", "npx",
+            ["-y", "@debridge-finance/debridge-mcp@latest"],
+            custom_env=debridge_env,
+          )
         except Exception as e:
-            print(f"⚠️  DeBridge: {e}")
+          print(f"⚠️  DeBridge: {e}")
 
-        # 15. Pyth Network — Real-time & historical price feeds
+        # 14. Pyth Network — Real-time & historical price feeds
         #     Public feeds require no API key. Pro feeds (equities, FX, metals) require
         #     PYTH_PRO_ACCESS_TOKEN set in .env.
         try:
-            pyth_args = [
-                "-y", "supergateway",
-                "--streamableHttp", "https://mcp.pyth.network/mcp",
-                "--outputTransport", "stdio",
-            ]
-            if self.pyth_pro_token:
-                pyth_args += ["--header", f"Authorization: Bearer {self.pyth_pro_token}"]
-            await self.mcp_manager.connect_to_server("pyth", "npx", pyth_args)
+          await connect_supergateway(
+            "pyth",
+            os.environ.get("PYTH_MCP_URL", "https://mcp.pyth.network/mcp"),
+            headers={"Authorization": f"Bearer {self.pyth_pro_token}"} if self.pyth_pro_token else None,
+          )
         except Exception as e:
-            print(f"⚠️  Pyth Network: {e}")
+          print(f"⚠️  Pyth Network: {e}")
 
         # Summary
         connected = list(self.mcp_manager.sessions.keys())
@@ -1110,6 +1171,14 @@ class MetaAgentBuilder:
                 lines.append(SDK_SNIPPETS[key])
         return "\n".join(lines)
 
+    def _trim_block(self, value: str, max_chars: int) -> str:
+        value = (value or "").strip()
+        if len(value) <= max_chars:
+            return value
+        head = int(max_chars * 0.75)
+        tail = max(200, max_chars - head - 64)
+        return f"{value[:head]}\n\n[...truncated for model limit...]\n\n{value[-tail:]}"
+
     # ─────────────────────────────────────────────────────────────────────────
     # Chain-specific output format helpers
     # ─────────────────────────────────────────────────────────────────────────
@@ -1193,7 +1262,7 @@ Pyth price validation (MANDATORY before every swap execution):
         return """
 ## SOLANA-SPECIFIC CONFIGURATION
 RPC:  process.env.SOLANA_RPC_URL  (e.g. https://mainnet.helius-rpc.com/?api-key=...)
-Key:  process.env.SOLANA_PRIVATE_KEY  (bs58-encoded, NOT hex)
+Key:  process.env.SOLANA_PRIVATE_KEY  (optional in simulation; if provided, support bs58 OR JSON-array format; never require hex)
 
 Common token mints:
   SOL (wrapped): So11111111111111111111111111111111111111112
@@ -1242,7 +1311,8 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/mcp_bridge.ts
         sdk_context        = self._collect_sdk_snippets(intent)
 
         required_mcps   = intent.get("required_mcps", [])
-        available_tools = await self.mcp_manager.list_all_tools()
+        target_servers = required_mcps if isinstance(required_mcps, list) and required_mcps else None
+        available_tools = await self.mcp_manager.list_all_tools(servers=target_servers)
 
         compressed_tools = []
         for t in available_tools:
@@ -1266,6 +1336,14 @@ Files to generate: package.json, tsconfig.json, src/config.ts, src/mcp_bridge.ts
             })
         tools_str = json.dumps(compressed_tools, separators=(',', ':'))
         abi_str   = json.dumps(FLASHLOAN_ABI,   separators=(',', ':'))
+
+        # Keep request size below gpt-4o-mini request-body token limits.
+        max_prompt_chars = int(os.environ.get("ORCH_PROMPT_MAX_CHARS", "3500"))
+        max_sdk_chars    = int(os.environ.get("ORCH_SDK_MAX_CHARS", "5000"))
+        max_tools_chars  = int(os.environ.get("ORCH_TOOLS_MAX_CHARS", "3500"))
+        prompt           = self._trim_block(prompt, max_prompt_chars)
+        sdk_context      = self._trim_block(sdk_context, max_sdk_chars)
+        tools_str        = self._trim_block(tools_str, max_tools_chars)
 
         chain_config = (
             self._solana_output_format()
@@ -1334,6 +1412,38 @@ package.json must include: "start": "tsx src/index.ts"
     Reject if staleness > 60s or confidence band > 0.5% of price.
     Decode raw price: human_price = Number(price) * Math.pow(10, expo).
     Use list_price_feeds to discover feed IDs for assets not listed in the config.
+14. PYTH PUBLIC MODE RULE — MANDATORY: Use public Pyth feeds by default.
+  Do NOT require PYTH_NETWORK_API_KEY in src/config.ts.
+  Never throw an error if PYTH_NETWORK_API_KEY is absent.
+  PYTH_PRO_ACCESS_TOKEN may be used optionally for pro feeds only.
+15. SOLANA KEY SAFETY RULE — MANDATORY: Never call bs58.decode directly on process.env.SOLANA_PRIVATE_KEY.
+    First validate it is a non-empty string, then parse safely via a helper that supports:
+      a) bs58 key string
+      b) JSON array string (wallet export format)
+    NEVER decode in src/config.ts. src/config.ts must expose SOLANA_PRIVATE_KEY as a plain string.
+    Decoding must happen exactly once in runtime code near Keypair creation.
+    In simulation mode (SIMULATION_MODE !== "false"), allow missing SOLANA_PRIVATE_KEY and use an ephemeral keypair.
+    In live mode (SIMULATION_MODE === "false"), throw a clear error if key is missing/invalid.
+  16. ASYNC LOOP SAFETY RULE — MANDATORY: NEVER schedule `setInterval(runCycle, ...)` directly for an async function.
+    Use a guarded scheduler so only one cycle runs at a time:
+      let cycleInFlight = false;
+      const runCycleSafely = async () => {{ if (cycleInFlight) return; cycleInFlight = true; try {{ await runCycle(); }} finally {{ cycleInFlight = false; }} }};
+      void runCycleSafely();
+      const timer = setInterval(() => {{ void runCycleSafely(); }}, POLL_INTERVAL_MS);
+  17. DATA SOURCE RESILIENCE RULE — MANDATORY: One failing data source must NOT abort the entire cycle.
+    Fetch external inputs using Promise.allSettled (or per-source try/catch), log warnings for failures,
+    and continue with available signals. Only throw when core safety checks fail.
+  18. SENTIMENT EXECUTION GATE RULE — MANDATORY (for sentiment strategies): Treat LunarCrush as optional input.
+    If LunarCrush call fails, log warning and continue the cycle with other sources.
+    Never abort the cycle only because LunarCrush is unavailable.
+  19. MINIMUM SIGNAL HEALTH RULE — MANDATORY (for sentiment strategies): Require at least 2 healthy data sources
+    before any trade decision or execution. If fewer than 2 sources are healthy, log:
+      no_trade_reason=insufficient_sources
+    and skip execution for that cycle.
+  20. GOPLUS PUBLIC-ENDPOINT RULE — MANDATORY: Do NOT require GOPLUS_API_KEY in src/config.ts.
+    Use GoPlus token security public endpoint directly:
+      https://api.gopluslabs.io/api/v1/token_security/<chain_id>?contract_addresses=<address>
+    If GOPLUS_API_KEY exists, it may be used optionally, but missing key must never throw.
 
 ## PROJECT CONFIGURATION RULES (CRITICAL)
 1.  package.json MUST contain the top-level property: "type": "module"
@@ -1360,7 +1470,7 @@ package.json must include: "start": "tsx src/index.ts"
             ],
             model=self.model_name,
             temperature=0.1,
-            max_tokens=4096,
+          max_tokens=self.generation_max_tokens,
         )
 
         raw_text = response.choices[0].message.content.strip()

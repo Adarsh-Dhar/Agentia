@@ -8,9 +8,27 @@ single call_tool() convenience method for use by any bot instance.
 
 import os
 import shutil
+import logging
+import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.sse import sse_client
 from contextlib import AsyncExitStack
+
+
+class _InitializedNotificationFilter(logging.Filter):
+    """Filter out known non-fatal MCP notification validation noise."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if "Failed to validate notification" in message and "notifications/initialized" in message:
+            return False
+        return True
+
+
+# Keep warning logs, but remove this one high-volume known-benign case.
+logging.getLogger().addFilter(_InitializedNotificationFilter())
+
 
 
 class MultiMCPClient:
@@ -53,7 +71,7 @@ class MultiMCPClient:
             args=args,
             env=env,
         )
-
+        print(f"Starting {name} MCP server...")
         transport = await self.exit_stack.enter_async_context(
             stdio_client(server_params)
         )
@@ -62,15 +80,42 @@ class MultiMCPClient:
             ClientSession(read_stream, write_stream)
         )
         await session.initialize()
-
         self.sessions[name] = session
         print(f"✅ Connected to '{name}' MCP server")
 
-    async def list_all_tools(self) -> list[dict]:
-        """Return aggregated tool definitions from every connected server."""
+    async def connect_to_sse_server(self, name: str, url: str, headers: dict = None):
+        """Connect directly to a cloud MCP server via SSE, bypassing local node wrappers."""
+        transport = await self.exit_stack.enter_async_context(
+            sse_client(url=url, headers=headers or {})
+        )
+        read_stream, write_stream = transport
+        session = await self.exit_stack.enter_async_context(
+            ClientSession(read_stream, write_stream)
+        )
+        await session.initialize()
+        self.sessions[name] = session
+        print(f"✅ Connected to '{name}' MCP server (via Direct SSE)")
+
+    async def list_all_tools(
+        self,
+        servers: list[str] | None = None,
+        timeout_seconds: float = 4.0,
+    ) -> list[dict]:
+        """Return aggregated tool definitions from connected servers, skipping slow/unhealthy sessions."""
         all_tools = []
+        server_filter = set(servers) if servers else None
+
         for server_name, session in self.sessions.items():
-            result = await session.list_tools()
+            if server_filter and server_name not in server_filter:
+                continue
+            try:
+                result = await asyncio.wait_for(
+                    session.list_tools(),
+                    timeout=timeout_seconds,
+                )
+            except Exception as exc:
+                print(f"⚠️  Skipping tool discovery for '{server_name}' ({exc})")
+                continue
             for tool in result.tools:
                 all_tools.append({
                     "server":       server_name,
@@ -95,6 +140,7 @@ class MultiMCPClient:
         Raises:
             ValueError: If the server is not connected or returns empty content.
         """
+        import asyncio
         session = self.sessions.get(server)
         if not session:
             raise ValueError(
@@ -102,7 +148,11 @@ class MultiMCPClient:
                 f"Connected servers: {list(self.sessions.keys())}"
             )
 
-        result = await session.call_tool(tool, args)
+        try:
+            # Wait maximum 10 seconds for the MCP to respond
+            result = await asyncio.wait_for(session.call_tool(tool, args), timeout=10.0)
+        except asyncio.TimeoutError:
+            raise ValueError(f"MCP server '{server}' timed out. The connection might be dead.")
 
         if not result.content:
             raise ValueError(
@@ -113,5 +163,9 @@ class MultiMCPClient:
 
     async def shutdown(self):
         """Close all sessions cleanly. Always call this on bot exit."""
-        await self.exit_stack.aclose()
+        try:
+            await self.exit_stack.aclose()
+        except BaseException as exc:
+            # Some stdio transports can raise during forced teardown; log and continue.
+            print(f"⚠️  MCP shutdown completed with non-fatal errors: {exc}")
         print("🔒 All MCP sessions closed.")
