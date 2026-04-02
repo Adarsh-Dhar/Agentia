@@ -127,6 +127,19 @@ function patchUnsafePriceAccess(content: string): string {
   return `${helper}${rewritten}`;
 }
 
+function isLocalGateway(value: string): boolean {
+  return /(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(String(value || ""));
+}
+
+function isProxyGateway(value: string): boolean {
+  return /\/api\/mcp-proxy\/?$/i.test(String(value || ""));
+}
+
+function isPublicGateway(value: string): boolean {
+  const trimmed = String(value || "").trim();
+  return /^https:\/\//i.test(trimmed) && !isLocalGateway(trimmed) && !isProxyGateway(trimmed);
+}
+
 function patchEthersV6GasPriceCompatibility(content: string): string {
   if (!content.includes("getGasPrice") && !content.includes(".mul(")) {
     return content;
@@ -925,6 +938,8 @@ function buildFallbackSentimentIndexTs(): string {
 function buildCompatMcpBridgeTs(): string {
   return [
     "const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL || '';",
+    "const MCP_GATEWAY_UPSTREAM_URL = process.env.MCP_GATEWAY_UPSTREAM_URL || '';",
+    "const SIMULATION_MODE = String(process.env.SIMULATION_MODE || 'true').toLowerCase() !== 'false';",
     "",
     "function isLocalGateway(value) {",
     "  return /(^|\\/\\/)(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|192\\.168\\.)/i.test(String(value || ''));",
@@ -932,42 +947,65 @@ function buildCompatMcpBridgeTs(): string {
     "",
     "function normalizeGatewayBase(raw) {",
     "  const value = String(raw || '').trim();",
-    "  if (!value) {",
-    "    throw new Error('MCP_GATEWAY_URL is empty. Set it to your HTTPS gateway (for example an ngrok URL ending with /mcp).');",
-    "  }",
+    "  if (!value) return null;",
     "  let base = value.replace(/\\\/+$/, '');",
     "  if (!/\\/mcp$/i.test(base)) base += '/mcp';",
     "  return base;",
     "}",
     "",
-    "function buildFetchFailedMessage(url, err) {",
-    "  const details = err && err.message ? String(err.message) : String(err || 'unknown network error');",
-    "  if (isLocalGateway(url)) {",
-    "    return 'Cannot reach local MCP gateway from WebContainer URL ' + url + '. Use a public HTTPS tunnel (ngrok) or the app proxy endpoint. Details: ' + details;",
-    "  }",
-    "  return 'Network error calling MCP at ' + url + ': ' + details;",
+    "async function tryFetchMcp(url, upstreamUrl, server, tool, args) {",
+    "  try {",
+    "    const response = await fetch(url, {",
+    "      method: 'POST',",
+    "      headers: {",
+    "        'Content-Type': 'application/json',",
+    "        'x-mcp-upstream-url': upstreamUrl || '',",
+    "        'ngrok-skip-browser-warning': 'true',",
+    "        'Bypass-Tunnel-Reminder': 'true',",
+    "      },",
+    "      timeout: 5000,",
+    "      body: JSON.stringify(args),",
+    "    });",
+    "    if (response.ok) return await response.json();",
+    "  } catch (e) { }",
+    "  return null;",
     "}",
     "",
-    "function simulationFallback(server, tool, args) {",
-    "  if (String(process.env.SIMULATION_MODE || 'true').toLowerCase() === 'false') return null;",
-    "  if (String(server).toLowerCase() !== 'initia') return null;",
-    "  if (String(tool).toLowerCase() === 'move_view') {",
-    "    return {",
-    "      ok: true,",
-    "      mock: true,",
-    "      server: 'initia',",
-    "      tool: 'move_view',",
-    "      result: { content: [{ type: 'text', text: JSON.stringify({ price_num: 1.005 }) }] },",
-    "      echoed: args || {},",
-    "    };",
+    "function createMockResponse(server, tool, args) {",
+    "  if (String(server).toLowerCase() !== 'initia' && String(server).toLowerCase() !== 'pyth') {",
+    "    return null;",
     "  }",
-    "  if (String(tool).toLowerCase() === 'move_execute') {",
+    "  if (String(server).toLowerCase() === 'initia') {",
+    "    if (String(tool).toLowerCase() === 'move_view') {",
+    "      return {",
+    "        ok: true,",
+    "        mock: true,",
+    "        server: 'initia',",
+    "        tool: 'move_view',",
+    "        result: { content: [{ type: 'text', text: JSON.stringify({ price_num: 1.005 }) }] },",
+    "        echoed: args || {},",
+    "      };",
+    "    }",
+    "    if (String(tool).toLowerCase() === 'move_execute') {",
+    "      return {",
+    "        ok: true,",
+    "        mock: true,",
+    "        server: 'initia',",
+    "        tool: 'move_execute',",
+    "        tx_hash: '0xsim_' + Date.now().toString(16),",
+    "        echoed: args || {},",
+    "      };",
+    "    }",
+    "  }",
+    "  if (String(server).toLowerCase() === 'pyth') {",
     "    return {",
     "      ok: true,",
     "      mock: true,",
-    "      server: 'initia',",
-    "      tool: 'move_execute',",
-    "      tx_hash: '0xsim_' + Date.now().toString(16),",
+    "      server: 'pyth',",
+    "      tool: tool,",
+    "      price: 1.234,",
+    "      confidence: 0.01,",
+    "      timestamp: Math.floor(Date.now() / 1000),",
     "      echoed: args || {},",
     "    };",
     "  }",
@@ -975,33 +1013,37 @@ function buildCompatMcpBridgeTs(): string {
     "}",
     "",
     "export async function callMcpTool(server, tool, args = {}) {",
-    "  const base = normalizeGatewayBase(MCP_GATEWAY_URL);",
-    "  const url = base + '/' + server + '/' + tool;",
-    "  let response;",
-    "  try {",
-    "    response = await fetch(url, {",
-    "      method: 'POST',",
-    "      headers: {",
-    "        'Content-Type': 'application/json',",
-    "        'ngrok-skip-browser-warning': 'true',",
-    "        'Bypass-Tunnel-Reminder': 'true',",
-    "      },",
-    "      body: JSON.stringify(args),",
-    "    });",
-    "  } catch (err) {",
-    "    const fallback = simulationFallback(server, tool, args);",
-    "    if (fallback) return fallback;",
-    "    throw new Error(buildFetchFailedMessage(url, err));",
+    "  const primaryBase = normalizeGatewayBase(MCP_GATEWAY_URL);",
+    "  const localhostBase = 'http://127.0.0.1:8000/mcp';",
+    "  const primaryUrl = primaryBase ? primaryBase + '/' + server + '/' + tool : null;",
+    "  const localhostUrl = localhostBase + '/' + server + '/' + tool;",
+    "",
+    "  console.log('[MCP] request start server=' + server + ' tool=' + tool + ' base=' + (primaryBase || 'none') + ' url=' + (primaryUrl || 'none') + ' upstream=' + (MCP_GATEWAY_UPSTREAM_URL || '<empty>'));",
+    "",
+    "  // Try primary gateway if configured",
+    "  if (primaryUrl) {",
+    "    const result = await tryFetchMcp(primaryUrl, MCP_GATEWAY_UPSTREAM_URL, server, tool, args);",
+    "    if (result) return result;",
     "  }",
     "",
-    "  if (!response.ok) {",
-    "    const body = await response.text().catch(() => '');",
-    "    const fallback = simulationFallback(server, tool, args);",
-    "    if (fallback) return fallback;",
-    "    throw new Error('MCP ' + server + '/' + tool + ' HTTP ' + response.status + ': ' + body.slice(0, 200));",
+    "  // Try localhost fallback",
+    "  const localResult = await tryFetchMcp(localhostUrl, MCP_GATEWAY_UPSTREAM_URL, server, tool, args);",
+    "  if (localResult) return localResult;",
+    "",
+    "  // If SIMULATION_MODE is on, return mock",
+    "  if (SIMULATION_MODE) {",
+    "    const mock = createMockResponse(server, tool, args);",
+    "    if (mock) {",
+    "      console.log('[MCP] returning mock (simulation mode) for ' + server + '/' + tool);",
+    "      return mock;",
+    "    }",
     "  }",
     "",
-    "  return await response.json();",
+    "  // All attempts failed",
+    "  const triedUrls = [primaryUrl, localhostUrl].filter(Boolean).join(', ');",
+    "  const msg = 'MCP ' + server + '/' + tool + ' unreachable. Tried: ' + triedUrls + '. Enable SIMULATION_MODE or fix gateway.';",
+    "  console.error('[MCP] all fallbacks exhausted: ' + msg);",
+    "  throw new Error(msg);",
     "}",
     "",
   ].join('\n');
@@ -1274,22 +1316,24 @@ function buildProcessEnv(cfg: BotEnvConfig, botFamily: "evm" | "solana"): Record
       env[k] = normalizeEnvValue(v);
     }
   }
+  const upstreamGateway = env.MCP_GATEWAY_UPSTREAM_URL || "";
+  const currentGateway = env.MCP_GATEWAY_URL || "";
+
   // Ensure MCP_GATEWAY_URL always present
   if (!env.MCP_GATEWAY_URL) {
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    if (origin) {
-      env.MCP_GATEWAY_URL = `${origin}/api/mcp-proxy`;
+    if (upstreamGateway) {
+      env.MCP_GATEWAY_URL = upstreamGateway;
     } else {
       env.MCP_GATEWAY_URL = "http://localhost:8000/mcp";
     }
   }
 
-  // Localhost URLs fail from browser-hosted WebContainer sandboxes. Route via same-origin proxy.
-  if (/(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(env.MCP_GATEWAY_URL)) {
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    if (origin) {
-      env.MCP_GATEWAY_URL = `${origin}/api/mcp-proxy`;
-    }
+  // Preserve a valid public gateway. Never downgrade to the browser-local
+  // app proxy from inside the WebContainer; it cannot reach localhost.
+  if (currentGateway && isPublicGateway(currentGateway)) {
+    env.MCP_GATEWAY_URL = currentGateway;
+  } else if (upstreamGateway) {
+    env.MCP_GATEWAY_URL = upstreamGateway;
   }
   // Ensure SIMULATION_MODE always present
   if (!env.SIMULATION_MODE) {

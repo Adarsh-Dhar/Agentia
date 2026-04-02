@@ -35,6 +35,32 @@ function parseEnvFile(envContent: string): Record<string, string> {
   return result;
 }
 
+async function loadSharedEnvDefaults(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch('/api/env-defaults');
+    if (!res.ok) return {};
+    const data = await res.json().catch(() => ({}));
+    if (data && typeof data.values === 'object' && data.values) {
+      return data.values as Record<string, string>;
+    }
+  } catch {
+    // Ignore and fall back to the DB/env record.
+  }
+  return {};
+}
+
+function normalizeGatewayUrl(value: string | undefined, fallback: string): string {
+  const current = String(value ?? '').trim();
+  if (!current) return fallback;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(current)) {
+    return fallback || current;
+  }
+  if (/^\/api\/mcp-proxy\/?/i.test(current)) {
+    return fallback || current;
+  }
+  return current;
+}
+
 /** Extract BotIntent from whatever shape the DB stores it in. */
 function extractIntent(config: Record<string, unknown> | null | undefined): BotIntent | null {
   if (!config) return null;
@@ -147,9 +173,15 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
 
           if (envFile?.content) {
             const parsed = parseEnvFile(envFile.content);
+            const sharedDefaults = await loadSharedEnvDefaults();
+            const publicGateway = normalizeGatewayUrl(
+              parsed.MCP_GATEWAY_URL,
+              sharedDefaults.MCP_GATEWAY_URL ?? DEFAULT_BOT_ENV_CONFIG.MCP_GATEWAY_URL,
+            );
             loadedEnvConfig = {
               ...DEFAULT_BOT_ENV_CONFIG,
               ...parsed,
+              MCP_GATEWAY_URL: publicGateway,
             };
 
             const foundKeys = Object.entries(loadedEnvConfig)

@@ -24,6 +24,11 @@ import { TerminalPanel }     from "@/components/ui/TerminalPanel";
 import type { BotEnvConfig, BotIntent } from "@/lib/bot-constant";
 import { DEFAULT_BOT_ENV_CONFIG } from "@/lib/bot-constant";
 
+function isLocalOrProxyGateway(value?: string | null): boolean {
+  const normalized = String(value || "").trim();
+  return /(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(normalized) || /\/api\/mcp-proxy\/?$/i.test(normalized);
+}
+
 // ─── Strategy display helpers ─────────────────────────────────────────────────
 
 function strategyBadge(intent?: BotIntent | null) {
@@ -86,18 +91,27 @@ export function WebContainerBotRunner() {
   // On mount: load files + env + intent from DB
   useEffect(() => {
     (async () => {
+      const envDefaultsResponse = await fetch("/api/env-defaults").catch(() => null);
+      const envDefaultsJson = envDefaultsResponse && envDefaultsResponse.ok ? await envDefaultsResponse.json().catch(() => null) : null;
+      const sharedGateway = typeof envDefaultsJson?.values?.MCP_GATEWAY_URL === "string"
+        ? envDefaultsJson.values.MCP_GATEWAY_URL
+        : "";
+
       const result = await generateFiles();
       if (result?.loadedEnvConfig) {
+        const loadedGateway = result.loadedEnvConfig?.MCP_GATEWAY_URL || "";
         setEnvConfig(prev => ({
           ...prev,
           ...result.loadedEnvConfig,
           // Always ensure MCP_GATEWAY_URL is present
-          MCP_GATEWAY_URL: result.loadedEnvConfig?.MCP_GATEWAY_URL
-            || prev.MCP_GATEWAY_URL
-            || DEFAULT_BOT_ENV_CONFIG.MCP_GATEWAY_URL,
+          MCP_GATEWAY_URL: isLocalOrProxyGateway(loadedGateway)
+            ? (sharedGateway || prev.MCP_GATEWAY_URL || DEFAULT_BOT_ENV_CONFIG.MCP_GATEWAY_URL)
+            : (loadedGateway || prev.MCP_GATEWAY_URL || sharedGateway || DEFAULT_BOT_ENV_CONFIG.MCP_GATEWAY_URL),
         }));
-        setEnvLoaded(true);
       }
+      // Mark env hydration complete even when no .env exists,
+      // so auto-launch can safely proceed with defaults.
+      setEnvLoaded(true);
       if (result?.intent) {
         setIntent(result.intent);
       }
@@ -112,18 +126,19 @@ export function WebContainerBotRunner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-launch only when generated files are truly in state.
+  // Auto-launch only after both files and env state are hydrated.
   useEffect(() => {
     if (didAutoLaunchRef.current) return;
     if (!shouldAutoLaunchRef.current) return;
     if (generatedFiles.length === 0) return;
+    if (!envLoaded) return;
 
     didAutoLaunchRef.current = true;
     shouldAutoLaunchRef.current = false;
     setShowEnvModal(false);
     setPhase("running");
     void bootAndRun();
-  }, [generatedFiles.length, bootAndRun, setPhase]);
+  }, [generatedFiles.length, envLoaded, bootAndRun, setPhase]);
 
   // Sync .env file edits back to envConfig
   useEffect(() => {

@@ -1,0 +1,4 @@
+agentia-api:
+  type: http
+  region: ap
+  to: localhost:8000

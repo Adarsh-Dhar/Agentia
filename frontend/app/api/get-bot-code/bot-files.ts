@@ -89,6 +89,10 @@ const INITIA_TSCONFIG = JSON.stringify(
 const INITIA_ENV_EXAMPLE = `MCP_GATEWAY_URL=http://localhost:8000/mcp
 INITIA_KEY=replace_me
 INITIA_RPC_URL=
+INITIA_POOL_A_ADDRESS=
+INITIA_POOL_B_ADDRESS=
+INITIA_FLASH_POOL_ADDRESS=
+INITIA_SWAP_ROUTER_ADDRESS=
 SIMULATION_MODE=true
 POLL_INTERVAL=5
 `;
@@ -97,8 +101,13 @@ const INITIA_CONFIG_TS = `import "dotenv/config";
 
 export const CONFIG = {
   MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),
+  MCP_GATEWAY_UPSTREAM_URL: process.env.MCP_GATEWAY_UPSTREAM_URL ?? "",
   INITIA_KEY: process.env.INITIA_KEY ?? (() => { throw new Error("INITIA_KEY not set"); })(),
   INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",
+  INITIA_POOL_A_ADDRESS: process.env.INITIA_POOL_A_ADDRESS ?? "",
+  INITIA_POOL_B_ADDRESS: process.env.INITIA_POOL_B_ADDRESS ?? "",
+  INITIA_FLASH_POOL_ADDRESS: process.env.INITIA_FLASH_POOL_ADDRESS ?? "",
+  INITIA_SWAP_ROUTER_ADDRESS: process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "",
   SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",
   POLL_MS: Math.max(1000, (parseInt(process.env.POLL_INTERVAL ?? "5", 10) || 5) * 1000),
   NETWORK: process.env.INITIA_NETWORK ?? "initia-mainnet",
@@ -107,42 +116,77 @@ export const CONFIG = {
 
 const INITIA_MCP_BRIDGE_TS = `import { CONFIG } from "./config.js";
 
-function isLocalGateway(value: string): boolean {
-  return /(^|\\/\\/)(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|192\\.168\\.)/i.test(String(value || ""));
-}
-
-function normalizeGatewayBase(raw: string): string {
+function normalizeGatewayBase(raw: string): string | null {
   const value = String(raw || "").trim();
-  if (!value) throw new Error("MCP_GATEWAY_URL is empty.");
+  if (!value) return null;
   let base = value.replace(/\\/+$/, "");
   if (!/\\/mcp$/i.test(base)) base += "/mcp";
   return base;
 }
 
-function simulationFallback(server: string, tool: string, args: Record<string, unknown>): unknown | null {
-  if (!CONFIG.SIMULATION_MODE) return null;
-  if (server.toLowerCase() !== "initia") return null;
+async function tryFetchMcp(
+  url: string,
+  serverLower: string,
+  toolLower: string,
+  args: Record<string, unknown>,
+): Promise<unknown | null> {
+  try {
+    const response = await Promise.race([
+      fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-mcp-upstream-url": CONFIG.MCP_GATEWAY_UPSTREAM_URL || "",
+          "ngrok-skip-browser-warning": "true",
+          "Bypass-Tunnel-Reminder": "true",
+        },
+        body: JSON.stringify(args ?? {}),
+      }),
+      new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+    ]);
+    if (response.ok) return await response.json();
+  } catch (e) {}
+  return null;
+}
 
-  if (tool.toLowerCase() === "move_view") {
-    return {
-      ok: true,
-      mock: true,
-      server: "initia",
-      tool: "move_view",
-      result: { content: [{ type: "text", text: JSON.stringify({ price_num: 1.005 }) }] },
-      echoed: args,
-    };
+function createMockResponse(server: string, tool: string, args: Record<string, unknown>): unknown | null {
+  const serverLower = server.toLowerCase();
+  const toolLower = tool.toLowerCase();
+
+  if (serverLower === "initia") {
+    if (toolLower === "move_view") {
+      return {
+        ok: true,
+        mock: true,
+        server: "initia",
+        tool: "move_view",
+        result: { content: [{ type: "text", text: JSON.stringify({ price_num: 1.005 }) }] },
+        echoed: args,
+      };
+    }
+    if (toolLower === "move_execute") {
+      return {
+        ok: true,
+        mock: true,
+        server: "initia",
+        tool: "move_execute",
+        tx_hash: "0xsim_" + Date.now().toString(16),
+        echoed: args,
+      };
+    }
   }
 
-  if (tool.toLowerCase() === "move_execute") {
-    return {
-      ok: true,
-      mock: true,
-      server: "initia",
-      tool: "move_execute",
-      tx_hash: "0xsim_" + Date.now().toString(16),
-      echoed: args,
-    };
+  if (serverLower === "pyth") {
+    if (toolLower === "get_latest_price_updates") {
+      return {
+        ok: true,
+        mock: true,
+        server: "pyth",
+        tool: "get_latest_price_updates",
+        result: { content: [{ type: "text", text: JSON.stringify({ price_num: 1.234, timestamp: Math.floor(Date.now() / 1000) }) }] },
+        echoed: args,
+      };
+    }
   }
 
   return null;
@@ -153,37 +197,37 @@ export async function callMcpTool(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const base = normalizeGatewayBase(CONFIG.MCP_GATEWAY_URL);
-  const url = base + "/" + server + "/" + tool;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true",
-        "Bypass-Tunnel-Reminder": "true",
-      },
-      body: JSON.stringify(args ?? {}),
-    });
-  } catch (err) {
-    const fallback = simulationFallback(server, tool, args ?? {});
-    if (fallback) return fallback;
-    const details = err instanceof Error ? err.message : String(err);
-    if (isLocalGateway(url)) {
-      throw new Error("Cannot reach local MCP gateway from WebContainer URL " + url + ". Use a public HTTPS tunnel or proxy endpoint. Details: " + details);
+  const primaryBase = normalizeGatewayBase(CONFIG.MCP_GATEWAY_URL);
+  const localhostBase = "http://127.0.0.1:8000/mcp";
+  const primaryUrl = primaryBase ? primaryBase + "/" + server + "/" + tool : null;
+  const localhostUrl = localhostBase + "/" + server + "/" + tool;
+
+  console.log("[MCP] request start server=" + server + " tool=" + tool + " base=" + (primaryBase || "none") + " url=" + (primaryUrl || "none") + " upstream=" + (CONFIG.MCP_GATEWAY_UPSTREAM_URL || "<empty>"));
+
+  // Try primary gateway if configured
+  if (primaryUrl) {
+    const result = await tryFetchMcp(primaryUrl, server.toLowerCase(), tool.toLowerCase(), args ?? {});
+    if (result) return result;
+  }
+
+  // Try localhost fallback
+  const localResult = await tryFetchMcp(localhostUrl, server.toLowerCase(), tool.toLowerCase(), args ?? {});
+  if (localResult) return localResult;
+
+  // If SIMULATION_MODE is on, return mock
+  if (CONFIG.SIMULATION_MODE) {
+    const mock = createMockResponse(server, tool, args ?? {});
+    if (mock) {
+      console.log("[MCP] returning mock (simulation mode) for " + server + "/" + tool);
+      return mock;
     }
-    throw new Error("Network error calling MCP at " + url + ": " + details);
   }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    const fallback = simulationFallback(server, tool, args ?? {});
-    if (fallback) return fallback;
-    throw new Error("MCP " + server + "/" + tool + " HTTP " + response.status + ": " + body.slice(0, 200));
-  }
-
-  return await response.json();
+  // All attempts failed
+  const triedUrls = [primaryUrl, localhostUrl].filter(Boolean).join(", ");
+  const msg = "MCP " + server + "/" + tool + " unreachable. Tried: " + triedUrls + ". Enable SIMULATION_MODE or fix gateway.";
+  console.error("[MCP] all fallbacks exhausted: " + msg);
+  throw new Error(msg);
 }
 `;
 
@@ -193,6 +237,12 @@ import { callMcpTool } from "./mcp_bridge.js";
 function log(level: "INFO" | "WARN" | "ERROR", message: string): void {
   const ts = new Date().toISOString();
   console.log("[" + ts + "] [" + level + "] " + message);
+}
+
+function requireConfiguredAddress(name: string, value: string): string {
+  const resolved = String(value ?? "").trim();
+  if (!resolved) throw new Error(name + " is not set");
+  return resolved;
 }
 
 async function moveView(address: string, moduleName: string, fn: string, args: unknown[]): Promise<unknown> {
@@ -205,13 +255,10 @@ async function moveView(address: string, moduleName: string, fn: string, args: u
   });
 }
 
-async function moveExecuteAtomic(calls: Array<Record<string, unknown>>): Promise<unknown> {
+async function moveExecuteAtomic(transaction: Record<string, unknown>): Promise<unknown> {
   return callMcpTool("initia", "move_execute", {
     network: CONFIG.NETWORK,
-    address: "0xhot_potato_executor",
-    module: "hot_potato",
-    function: "execute_batch",
-    args: [calls],
+    transaction,
   });
 }
 
@@ -234,9 +281,14 @@ function extractPrice(payload: unknown): number | null {
 }
 
 async function runCycle(): Promise<void> {
+  const poolAAddress = requireConfiguredAddress("INITIA_POOL_A_ADDRESS", CONFIG.INITIA_POOL_A_ADDRESS);
+  const poolBAddress = requireConfiguredAddress("INITIA_POOL_B_ADDRESS", CONFIG.INITIA_POOL_B_ADDRESS);
+  const flashPoolAddress = requireConfiguredAddress("INITIA_FLASH_POOL_ADDRESS", CONFIG.INITIA_FLASH_POOL_ADDRESS);
+  const swapRouterAddress = requireConfiguredAddress("INITIA_SWAP_ROUTER_ADDRESS", CONFIG.INITIA_SWAP_ROUTER_ADDRESS);
+
   const [left, right] = await Promise.all([
-    moveView("0xminitia_pool_a", "amm_oracle", "spot_price", ["uinit", "uusdc"]),
-    moveView("0xminitia_pool_b", "amm_oracle", "spot_price", ["uinit", "uusdc"]),
+    moveView(poolAAddress, "amm_oracle", "spot_price", ["uinit", "uusdc"]),
+    moveView(poolBAddress, "amm_oracle", "spot_price", ["uinit", "uusdc"]),
   ]);
 
   const p1 = extractPrice(left);
@@ -254,18 +306,33 @@ async function runCycle(): Promise<void> {
     return;
   }
 
-  const calls = [
-    { address: "0xflash_pool", module: "flash_pool", function: "borrow", args: ["uinit", "1000000"] },
-    { address: "0xamm_router", module: "router", function: "swap", args: ["uinit", "uusdc", "1000000", "995000"] },
-    { address: "0xflash_pool", module: "flash_pool", function: "repay", args: ["uinit", "1000900"] },
-  ];
+  const transaction = {
+    calls: [
+      {
+        address: flashPoolAddress,
+        module: "flash_loan",
+        function: "borrow",
+        type_args: ["uinit", "uusdc"],
+        args: ["1000000"],
+      },
+      {
+        address: swapRouterAddress,
+        module: "router",
+        function: "swap_exact_in",
+        type_args: ["uinit", "uusdc"],
+        args: ["1000000", "995000"],
+      },
+      {
+        address: flashPoolAddress,
+        module: "flash_loan",
+        function: "repay",
+        type_args: ["uinit", "uusdc"],
+        args: ["1000900"],
+      },
+    ],
+  };
 
-  if (CONFIG.SIMULATION_MODE) {
-    log("INFO", "Simulation mode active; atomic move_execute skipped");
-    return;
-  }
-
-  const tx = await moveExecuteAtomic(calls);
+  const tx = await moveExecuteAtomic(transaction);
   log("INFO", "Executed move batch: " + JSON.stringify(tx).slice(0, 240));
 }
 
@@ -701,11 +768,15 @@ async function tryMcpQuote(src: string, dst: string, amount: bigint, chainId: nu
         amount: amount.toString(),
       });
       const parsedAmount = pickBigIntByKeys(mcpResponse, ["dstAmount", "toAmount", "amountOut", "outAmount"]);
+        function isProxyGateway(value: string): boolean {
+          return /\/api\/mcp-proxy\/?$/i.test(String(value || ""));
+        }
       if (parsedAmount !== null) return parsedAmount;
     } catch {
       // Try next candidate, then fallback to REST.
     }
   }
+          if (isProxyGateway(base)) return base;
   return null;
 }
 

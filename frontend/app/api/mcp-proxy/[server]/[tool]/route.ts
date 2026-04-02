@@ -13,7 +13,10 @@ export async function POST(
 ) {
   const { server, tool } = await ctx.params;
   const gateway = normalizeGatewayBase(
-    process.env.MCP_GATEWAY_URL || process.env.NEXT_PUBLIC_MCP_GATEWAY_URL || "",
+    req.headers.get("x-mcp-upstream-url") ||
+    process.env.MCP_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_MCP_GATEWAY_URL ||
+    "",
   );
 
   if (!gateway) {

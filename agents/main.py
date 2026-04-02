@@ -112,8 +112,11 @@ async def mcp_tool(server: str, tool: str, body: dict):
 
     # Initia compatibility
     if server_l == "initia" and tool_l == "move_execute":
-        module = str(body.get("module") or "hot_potato")
-        function = str(body.get("function") or "execute")
+        transaction = body.get("transaction") if isinstance(body.get("transaction"), dict) else {}
+        calls = transaction.get("calls") if isinstance(transaction, dict) and isinstance(transaction.get("calls"), list) else []
+        first_call = calls[0] if calls and isinstance(calls[0], dict) else {}
+        module = str(body.get("module") or first_call.get("module") or "flash_loan")
+        function = str(body.get("function") or first_call.get("function") or "borrow")
         args = body.get("args") if isinstance(body.get("args"), list) else []
         type_args = body.get("type_args") if isinstance(body.get("type_args"), list) else []
         mock_tx = {
@@ -123,15 +126,18 @@ async def mcp_tool(server: str, tool: str, body: dict):
             "tool": "move_execute",
             "request": {
                 "network": str(body.get("network") or "initia-mainnet"),
-                "address": str(body.get("address") or "0xhot_potato_executor"),
+                "address": str(body.get("address") or first_call.get("address") or "0xinitia_atomic_executor"),
                 "module": module,
                 "function": function,
                 "type_args": type_args,
                 "args": args,
+                "transaction": transaction,
             },
             "module": module,
             "function": function,
             "network": str(body.get("network") or "initia-mainnet"),
+            "calls": calls,
+            "call_count": len(calls),
             "simulated": True,
             "source": "mcp-http-compat",
             "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -417,84 +417,74 @@ class MetaAgent:
             return {"thoughts": "parse error", "files": [{"filepath": "error.ts", "content": raw}]}
 
     def build_bot(self, prompt: str, trace_id: str | None = None) -> dict:
-        _log("INFO", f"build_bot: received prompt_chars={len(prompt)}", trace_id)
-        intent  = self.classify_intent(prompt, trace_id=trace_id)
-        chain   = intent.get("chain", "evm")
-        network = intent.get("network", "base-sepolia")
-        mcps    = intent.get("mcps", [])
-        strategy = intent.get("strategy", "unknown")
-        bot_name = intent.get("bot_name", "DeFi Bot")
+      _log("INFO", f"build_bot: received prompt_chars={len(prompt)}", trace_id)
+      intent = self.classify_intent(prompt, trace_id=trace_id)
+      chain = str(intent.get("chain", "evm")).strip().lower()
+      network = str(intent.get("network", "base-sepolia")).strip().lower()
+      mcps = [str(m).strip().lower() for m in intent.get("mcps", []) if str(m).strip()]
+      strategy = str(intent.get("strategy", "unknown"))
+      bot_name = str(intent.get("bot_name", "DeFi Bot"))
 
-        if chain == "initia":
-          if network not in {"initia-mainnet", "initia-testnet"}:
-            network = "initia-mainnet"
-            intent["network"] = network
-          disallowed = {
-            "one_inch", "webacy", "goplus", "goat_evm", "alchemy", "rugcheck",
-            "jupiter", "nansen", "hyperliquid", "debridge", "lifi", "uniswap", "chainlink",
-          }
-          allowed = {"initia", "lunarcrush", "pyth"}
-          mcps = [m for m in mcps if m not in disallowed and m in allowed]
-          if "initia" not in mcps:
-            mcps.insert(0, "initia")
-          mcps = list(dict.fromkeys(mcps))
-          intent["mcps"] = mcps
-
-        chain_ctx = self._chain_context(chain, network, mcps, strategy)
-        _log(
-          "INFO",
-          f"build_bot: bot_name={bot_name} chain={chain} network={network} strategy={strategy} mcps={','.join(mcps)} chain_ctx_chars={len(chain_ctx)}",
-          trace_id,
-        )
-
-        user_msg = f"""
-Bot request: {prompt}
-
-Bot name: {bot_name}
-Chain: {chain} | Network: {network}
-Strategy: {strategy}
-MCP servers to use: {', '.join(mcps)}
-Requires OpenAI sub-agent: {intent.get('requires_openai', False)}
-
-{chain_ctx}
-
-Generate the 3 files now.
-""".strip()
-
-        _log("INFO", f"build_bot: generator_prompt_chars={len(user_msg)} system_chars={len(GENERATOR_SYSTEM)}", trace_id)
-        raw = self._llm(
-          GENERATOR_SYSTEM,
-          user_msg,
-          temperature=0.1,
-          max_tokens=self.max_tokens,
-          operation="build_bot",
-          trace_id=trace_id,
-        )
-        _log("INFO", f"build_bot: raw_response_chars={len(raw)}", trace_id)
-        parsed = self._parse_response(raw)
-
-        if "files" not in parsed:
-          _log("WARN", f"build_bot: parsed response missing files key. keys={list(parsed.keys())}", trace_id)
-
-        files = parsed.get("files", [])
-        # Always inject the fixed mcp_bridge.ts
-        files.insert(1, {"filepath": "src/mcp_bridge.ts", "content": MCP_BRIDGE_CONTENT})
-
-        # Enforce exactly 3 output files: package.json, src/config.ts, src/index.ts
-        # (mcp_bridge is injected separately and not counted as a "generated" file)
-        wanted = {"package.json", "src/config.ts", "src/index.ts"}
-        final_files = [f for f in files if f.get("filepath") in wanted or f.get("filepath") == "src/mcp_bridge.ts"]
-
-        _log("INFO", f"build_bot: final_files={[f.get('filepath') for f in final_files]}", trace_id)
-
-        return {
-            "status":  "ready",
-            "intent":  intent,
-            "output":  {
-                "thoughts": parsed.get("thoughts", ""),
-                "files":    final_files,
-            },
+      if chain == "initia":
+        if network not in {"initia-mainnet", "initia-testnet"}:
+          network = "initia-testnet"
+          intent["network"] = network
+        disallowed = {
+          "one_inch", "webacy", "goplus", "goat_evm", "alchemy", "rugcheck",
+          "jupiter", "nansen", "hyperliquid", "debridge", "lifi", "uniswap", "chainlink",
         }
+        allowed = {"initia", "lunarcrush", "pyth"}
+        mcps = [m for m in mcps if m not in disallowed and m in allowed]
+        if "initia" not in mcps:
+          mcps.insert(0, "initia")
+        intent["mcps"] = list(dict.fromkeys(mcps))
+        intent["chain"] = "initia"
+      else:
+        if "pyth" not in mcps:
+          mcps.append("pyth")
+        intent["mcps"] = list(dict.fromkeys(mcps))
+
+      chain_ctx = self._chain_context(chain, network, mcps, strategy)
+      user_msg = f"""
+  Bot name: {bot_name}
+  Chain: {chain} | Network: {network}
+  Strategy: {strategy}
+  MCP servers to use: {', '.join(mcps)}
+  Requires OpenAI sub-agent: {intent.get('requires_openai', False)}
+
+  {chain_ctx}
+
+  Generate the 3 files now.
+  """.strip()
+
+      _log("INFO", f"build_bot: generator_prompt_chars={len(user_msg)} system_chars={len(GENERATOR_SYSTEM)}", trace_id)
+      raw = self._llm(
+        GENERATOR_SYSTEM,
+        user_msg,
+        temperature=0.1,
+        max_tokens=self.max_tokens,
+      )
+      parsed = self._parse_response(raw)
+      if "files" not in parsed:
+        _log("WARN", f"build_bot: parsed response missing files key. keys={list(parsed.keys())}", trace_id)
+        parsed["files"] = []
+
+      files = parsed.get("files", [])
+      files.insert(1, {"filepath": "src/mcp_bridge.ts", "content": MCP_BRIDGE_CONTENT})
+
+      wanted = {"package.json", "src/config.ts", "src/index.ts"}
+      final_files = [f for f in files if f.get("filepath") in wanted or f.get("filepath") == "src/mcp_bridge.ts"]
+
+      _log("INFO", f"build_bot: final_files={[f.get('filepath') for f in final_files]}", trace_id)
+
+      return {
+        "status": "ready",
+        "intent": intent,
+        "output": {
+          "thoughts": parsed.get("thoughts", ""),
+          "files": final_files,
+        },
+      }
 
     def _chain_context(self, chain: str, network: str, mcps: list, strategy: str) -> str:
         if chain == "solana":
@@ -512,18 +502,15 @@ Required deps: @solana/web3.js, bs58
 """
         if chain == "initia":
             minitia_prices = "\n".join([
-                "  - callMcpTool('initia', 'move_view', {address:'0xminitia_pool_a', module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
-                "  - callMcpTool('initia', 'move_view', {address:'0xminitia_pool_b', module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
+                "  - callMcpTool('initia', 'move_view', {address:INITIA_POOL_A_ADDRESS, module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
+                "  - callMcpTool('initia', 'move_view', {address:INITIA_POOL_B_ADDRESS, module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
             ])
             initia_mcp_hints = ""
             if "initia" in mcps:
-                initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {address, module, function, type_args, args})"
+                initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {transaction: {calls: [{address, module, function, type_args, args}, ...]}})"
                 initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, args})"
             if "lunarcrush" in mcps:
                 initia_mcp_hints += "\nLunarCrush: callMcpTool('lunarcrush', 'get_coin_details', {coin:'INIT'})"
-            if "pyth" in mcps:
-                initia_mcp_hints += "\nPyth: callMcpTool('pyth', 'get_latest_price_updates', {ids:['<init-feed-id>']})"
-
             return f"""
 CHAIN CONTEXT — INITIA ({network})
 Network IDs:
@@ -534,6 +521,12 @@ Canonical denoms (denom/module-driven, not universal ERC-20 addresses):
   INIT: uinit
   USDC: uusdc (deployment-specific; verify per Minitia)
 
+Required config values:
+  INITIA_POOL_A_ADDRESS
+  INITIA_POOL_B_ADDRESS
+  INITIA_FLASH_POOL_ADDRESS
+  INITIA_SWAP_ROUTER_ADDRESS
+
 MCP tool signatures:
 {initia_mcp_hints}
 
@@ -541,7 +534,7 @@ Cross-rollup price query pattern (read-only move_view):
 {minitia_prices}
 
 Hot Potato flash-loan pattern:
-  - Build one atomic move_execute payload with sequential calls:
+  - Build one atomic move_execute payload with sequential calls inside transaction.calls:
     1) borrow from flash pool module
     2) swap on target pool/module
     3) repay principal + fee in same atomic execution

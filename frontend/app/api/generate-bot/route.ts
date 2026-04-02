@@ -57,6 +57,18 @@ function loadAgentEnvDefaults(): Record<string, string> {
   }
 }
 
+function isLocalGateway(value: string): boolean {
+  return /(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(String(value || ""));
+}
+
+function pickPublicGateway(candidate: string, fallback: string): string {
+  const value = String(candidate || "").trim();
+  if (!value) return fallback;
+  if (/^\/api\/mcp-proxy\/?/i.test(value)) return fallback;
+  if (isLocalGateway(value)) return fallback || value;
+  return value;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -138,12 +150,22 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '  return fallback;',
     '}',
     '',
+    'function requireConfiguredAddress(name: string, value: string): string {',
+    '  const resolved = String(value ?? "").trim();',
+    '  if (!resolved) throw new Error(name + " is not set");',
+    '  return resolved;',
+    '}',
+    '',
     'async function runCycle(): Promise<void> {',
     '  log("INFO", "Initia sentiment cycle start");',
+    '  const poolAAddress = requireConfiguredAddress("INITIA_POOL_A_ADDRESS", process.env.INITIA_POOL_A_ADDRESS ?? "");',
+    '  const poolBAddress = requireConfiguredAddress("INITIA_POOL_B_ADDRESS", process.env.INITIA_POOL_B_ADDRESS ?? "");',
+    '  const flashPoolAddress = requireConfiguredAddress("INITIA_FLASH_POOL_ADDRESS", process.env.INITIA_FLASH_POOL_ADDRESS ?? "");',
+    '  const swapRouterAddress = requireConfiguredAddress("INITIA_SWAP_ROUTER_ADDRESS", process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "");',
     '  const [sentiment, left, right] = await Promise.all([',
     '    safeMcp("lunarcrush", "get_coin_details", { coin: "INIT", symbol: "INIT" }),',
-    '    safeMcp("initia", "move_view", { address: "0xminitia_pool_a", module: "amm_oracle", function: "spot_price", args: ["uinit", "uusdc"] }),',
-    '    safeMcp("initia", "move_view", { address: "0xminitia_pool_b", module: "amm_oracle", function: "spot_price", args: ["uinit", "uusdc"] }),',
+    '    safeMcp("initia", "move_view", { address: poolAAddress, module: "amm_oracle", function: "spot_price", args: ["uinit", "uusdc"] }),',
+    '    safeMcp("initia", "move_view", { address: poolBAddress, module: "amm_oracle", function: "spot_price", args: ["uinit", "uusdc"] }),',
     '  ]);',
     '',
     '  const score = extractScore(sentiment);',
@@ -154,11 +176,13 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '    log("INFO", "Bullish threshold reached");',
     '    if (!SIMULATION_MODE) {',
     '      await safeMcp("initia", "move_execute", {',
-    '        address: "0xhot_potato_executor",',
-    '        module: "hot_potato",',
-    '        function: "borrow_swap_repay",',
-    '        type_args: ["uinit", "uusdc"],',
-    '        args: ["1000000", "995000"],',
+    '        transaction: {',
+    '          calls: [',
+    '            { address: flashPoolAddress, module: "flash_loan", function: "borrow", type_args: ["uinit", "uusdc"], args: ["1000000"] },',
+    '            { address: swapRouterAddress, module: "router", function: "swap_exact_in", type_args: ["uinit", "uusdc"], args: ["1000000", "995000"] },',
+    '            { address: flashPoolAddress, module: "flash_loan", function: "repay", type_args: ["uinit", "uusdc"], args: ["1000900"] },',
+    '          ],',
+    '        },',
     '      });',
     '    }',
     '  } else if (score < SENTIMENT_SELL_THRESHOLD) {',
@@ -510,27 +534,44 @@ function buildSafeSolanaSentimentIndexTs(): string {
 function buildMcpBridgeTs(): string {
   return [
     'const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp";',
+    'const MCP_GATEWAY_UPSTREAM_URL = process.env.MCP_GATEWAY_UPSTREAM_URL ?? "";',
+    '',
+    'function isProxyGateway(value: string): boolean {',
+    '  return /\/api\/mcp-proxy\/?$/i.test(String(value || ""));',
+    '}',
     '',
     'function normalizeGatewayBase(raw: string): string {',
     '  const value = String(raw ?? "").trim() || "http://localhost:8000/mcp";',
-    '  return value.replace(/\\/+$/, "");',
+    '  const base = value.replace(/\\/+$/, "");',
+    '  if (isProxyGateway(base)) return base;',
+    '  return /\\/mcp$/i.test(base) ? base : `${base}/mcp`;',
     '}',
     '',
     'export async function callMcpTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {',
     '  const base = normalizeGatewayBase(MCP_GATEWAY_URL);',
     '  const url = `${base}/${server}/${tool}`;',
-    '  const response = await fetch(url, {',
-    '    method: "POST",',
-    '    headers: {',
-    '      "Content-Type": "application/json",',
-    '      "ngrok-skip-browser-warning": "true",',
-    '      "Bypass-Tunnel-Reminder": "true",',
-    '    },',
-    '    body: JSON.stringify(args ?? {}),',
-    '  });',
+    '  console.log(`[MCP] request start server=${server} tool=${tool} base=${base} url=${url} upstream=${MCP_GATEWAY_UPSTREAM_URL || "<empty>"}`);',
+    '  let response: Response;',
+    '  try {',
+    '    response = await fetch(url, {',
+    '      method: "POST",',
+    '      headers: {',
+    '        "Content-Type": "application/json",',
+    '        "x-mcp-upstream-url": MCP_GATEWAY_UPSTREAM_URL,',
+    '        "ngrok-skip-browser-warning": "true",',
+    '        "Bypass-Tunnel-Reminder": "true",',
+    '      },',
+    '      body: JSON.stringify(args ?? {}),',
+    '    });',
+    '  } catch (error) {',
+    '    const details = error instanceof Error ? error.message : String(error);',
+    '    console.error(`[MCP] fetch failed server=${server} tool=${tool} url=${url} name=${error instanceof Error ? error.name : "Error"} message=${details}`);',
+    '    throw error;',
+    '  }',
     '',
     '  if (!response.ok) {',
     '    const body = await response.text().catch(() => "");',
+    '    console.error(`[MCP] http error server=${server} tool=${tool} status=${response.status} statusText=${response.statusText} body=${body.slice(0, 300)}`);',
     '    throw new Error(`MCP ${server}/${tool} HTTP ${response.status}: ${body.slice(0, 200)}`);',
     '  }',
     '',
@@ -931,9 +972,14 @@ export async function POST(req: NextRequest) {
     console.log(`[generate-bot] [${requestId}] Generated files:`, files.map((f: { filepath: string }) => f.filepath).join(", "));
 
     // ── Build .env content ─────────────────────────────────────────────────
+    const publicGatewayFallback = pickPublicGateway(
+      envDefaults.MCP_GATEWAY_URL || process.env.MCP_GATEWAY_URL || "",
+      "http://localhost:8000/mcp",
+    );
+
     const finalEnv: Record<string, string> = {
-      MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp",
-      ...envConfig, // User-provided keys (e.g. Localtunnel URL) overwrite defaults
+      ...envConfig,
+      MCP_GATEWAY_URL: pickPublicGateway(envConfig.MCP_GATEWAY_URL || "", publicGatewayFallback),
       SIMULATION_MODE: "false",
     };
 

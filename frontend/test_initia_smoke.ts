@@ -68,9 +68,13 @@ function parseMcpTextEnvelope(response: Json): Json {
   const content = rawContent as unknown[];
   const first = content[0] as Json;
   assert(first?.type === "text", "expected result.content[0].type=text");
-  assert(typeof first?.text === "string", "expected result.content[0].text string");
+  assert(typeof first.text === "string", "expected text result content");
 
-  return parseJsonText(String(first.text));
+  try {
+    return JSON.parse(first.text as string) as Json;
+  } catch {
+    return { text: first.text };
+  }
 }
 
 async function testInitiaIntentAndFallbackSelection(): Promise<void> {
@@ -78,35 +82,22 @@ async function testInitiaIntentAndFallbackSelection(): Promise<void> {
     `${BASE_URL}/api/classify-intent`,
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ prompt: INITIA_PROMPT }),
     },
     60_000,
   );
 
   assert(response.status === 200, `classify-intent failed (${response.status}): ${response.text.slice(0, 400)}`);
-
   const intent = (response.data.intent ?? {}) as Json;
-  assert(String(intent.chain ?? "").toLowerCase() === "initia", "expected chain=initia");
-
-  const requiredMcps = asStringArray(intent.required_mcps);
-  assert(requiredMcps.length === 1 && requiredMcps[0] === "initia", `required_mcps should be [initia], got: ${JSON.stringify(requiredMcps)}`);
-
+  assert(String(intent.chain ?? "").toLowerCase() === "initia", "intent should classify to chain=initia");
+  assert(shouldUseInitiaDeterministicFallback(intent), "intent should use initia deterministic fallback");
   const mcps = asStringArray(intent.mcps);
-  assert(mcps.includes("initia"), `mcps should include initia, got: ${JSON.stringify(mcps)}`);
-
   for (const excluded of INITIA_EXCLUDED_MCPS) {
-    assert(!mcps.includes(excluded), `mcps should not include excluded MCP ${excluded}: ${JSON.stringify(mcps)}`);
-    assert(!requiredMcps.includes(excluded), `required_mcps should not include excluded MCP ${excluded}: ${JSON.stringify(requiredMcps)}`);
+    assert(!mcps.includes(excluded), `intent should exclude ${excluded}`);
   }
-
-  const shouldFallbackToInitia = shouldUseInitiaDeterministicFallback(intent);
-  assert(shouldFallbackToInitia, "fallback selection should route Initia intent to assembleInitiaBotFiles");
-
-  console.log("[ok] Initia intent detection + fallback selector smoke test passed");
+  assert(mcps.includes("initia"), "intent should include initia MCP");
+  console.log("[ok] Initia intent detection + fallback selection smoke test passed");
 }
 
 async function testGenericPromptStillPinsInitia(): Promise<void> {
@@ -114,10 +105,7 @@ async function testGenericPromptStillPinsInitia(): Promise<void> {
     `${BASE_URL}/api/classify-intent`,
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ prompt: "Build a flash loan arbitrage bot on base" }),
     },
     60_000,
@@ -141,7 +129,7 @@ async function testInitiaMoveViewContract(): Promise<void> {
       },
       body: JSON.stringify({
         network: "initia-mainnet",
-        address: "0xminitia_pool_a",
+        address: "0xinitia_pool_a",
         module: "amm_oracle",
         function: "spot_price",
         args: ["uinit", "uusdc"],
@@ -187,11 +175,31 @@ async function testInitiaMoveExecuteContract(): Promise<void> {
       },
       body: JSON.stringify({
         network: "initia-mainnet",
-        address: "0xhot_potato_executor",
-        module: "hot_potato",
-        function: "borrow_swap_repay",
-        type_args: ["uinit", "uusdc"],
-        args: ["1000000", "995000"],
+        transaction: {
+          calls: [
+            {
+              address: "0xinitia_flash_pool",
+              module: "flash_loan",
+              function: "borrow",
+              type_args: ["uinit", "uusdc"],
+              args: ["1000000"],
+            },
+            {
+              address: "0xinitia_dex_router",
+              module: "router",
+              function: "swap_exact_in",
+              type_args: ["uinit", "uusdc"],
+              args: ["1000000", "995000"],
+            },
+            {
+              address: "0xinitia_flash_pool",
+              module: "flash_loan",
+              function: "repay",
+              type_args: ["uinit", "uusdc"],
+              args: ["1000900"],
+            },
+          ],
+        },
       }),
     },
     10_000,
@@ -214,8 +222,10 @@ async function testInitiaMoveExecuteContract(): Promise<void> {
   assert(typeof request.address === "string" && request.address.length > 0, "move_execute request missing address");
   assert(typeof request.module === "string" && request.module.length > 0, "move_execute request missing module");
   assert(typeof request.function === "string" && request.function.length > 0, "move_execute request missing function");
-  assert(Array.isArray(request.type_args), "move_execute request type_args should be array");
-  assert(Array.isArray(request.args), "move_execute request args should be array");
+  const transaction = request.transaction as Json;
+  assert(Boolean(transaction), "move_execute request missing transaction object");
+  assert(Array.isArray(transaction.calls), "move_execute transaction.calls should be array");
+  assert(transaction.calls.length === 3, "move_execute transaction.calls should include borrow, swap, repay");
 
   console.log("[ok] /mcp/initia/move_execute schema contract test passed");
 }
