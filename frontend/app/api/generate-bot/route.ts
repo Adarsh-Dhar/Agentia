@@ -56,6 +56,152 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isSolanaSentimentIntent(intent: Record<string, unknown>): boolean {
+  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
+  const chain = String(intent.chain ?? "").toLowerCase();
+  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
+
+  return chain === "solana" && strategy.includes("sentiment") && botType.includes("sentiment");
+}
+
+function buildSafeSolanaSentimentIndexTs(): string {
+  return `import { Connection, Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
+import { config } from "./config.js";
+import { callMcpTool } from "./mcp_bridge.js";
+
+const POLL_MS = 5000;
+let inFlight = false;
+
+function log(level: string, message: string): void {
+  console.log(`[${new Date().toISOString()}] [${level}] ${message}`);
+}
+
+function loadKeypair(): Keypair {
+  const rawKey = String(config.SOLANA_PRIVATE_KEY ?? config.PRIVATE_KEY ?? "").trim();
+  if (!rawKey || String(config.SIMULATION_MODE ?? "true") !== "false") {
+    log("INFO", "Simulation mode active or private key missing. Using ephemeral keypair.");
+    return Keypair.generate();
+  }
+
+  try {
+    const secret = rawKey.startsWith("[")
+      ? Uint8Array.from(JSON.parse(rawKey))
+      : bs58.decode(rawKey.replace(/^0x/, ""));
+    return Keypair.fromSecretKey(secret);
+  } catch {
+    throw new Error("Invalid SOLANA_PRIVATE_KEY format");
+  }
+}
+
+async function safeFetchJson(url: string, label: string): Promise<unknown | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    return await response.json();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log("WARN", label + " unavailable: " + msg);
+    return null;
+  }
+}
+
+async function safeMcp(server: string, tool: string, args: Record<string, unknown>): Promise<unknown | null> {
+  try {
+    return await callMcpTool(server, tool, args);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log("WARN", "MCP " + server + "/" + tool + " unavailable: " + msg);
+    return null;
+  }
+}
+
+const keypair = loadKeypair();
+const connection = new Connection(String(config.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com"), "confirmed");
+
+async function runCycle(): Promise<void> {
+  log("INFO", "Starting cycle");
+
+  const [sentiment, price, risk] = await Promise.all([
+    safeMcp("lunarcrush", "get_coin_details", {
+      coin: "SOL",
+      symbol: "SOL",
+      apiKey: String(config.LUNARCRUSH_API_KEY ?? ""),
+    }),
+    safeFetchJson("https://price.jup.ag/v6/price?ids=SOL", "priceData"),
+    safeMcp("webacy", "get_token_risk", {
+      address: keypair.publicKey.toBase58(),
+      chain: "solana",
+      metrics_date: new Date().toISOString(),
+    }),
+  ]);
+
+  if (!sentiment || !price) {
+    log("ERROR", "Failed to fetch data");
+    return;
+  }
+
+  if (!risk) {
+    log("WARN", "Risk source unavailable; continuing in degraded mode.");
+  }
+
+  log("INFO", "cycle_ok wallet=" + keypair.publicKey.toBase58() + " rpc=" + connection.rpcEndpoint);
+}
+
+const tick = async (): Promise<void> => {
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    await runCycle();
+  } finally {
+    inFlight = false;
+  }
+};
+
+void tick();
+const timer = setInterval(() => { void tick(); }, POLL_MS);
+
+process.on("SIGINT", () => {
+  clearInterval(timer);
+  log("INFO", "Shutting down bot");
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  clearInterval(timer);
+  log("INFO", "Shutting down bot");
+  process.exit(0);
+});
+`;
+}
+
+function patchSentimentBotFiles(files: Array<{ filepath: string; content: unknown; language?: string }>, intent: Record<string, unknown>) {
+  if (!isSolanaSentimentIntent(intent)) {
+    return files;
+  }
+
+  const hasIndex = files.some((file) => file.filepath.replace(/^[./]+/, "") === "src/index.ts");
+  if (!hasIndex) {
+    return files;
+  }
+
+  return files.map((file) => {
+    const cleanPath = file.filepath.replace(/^[./]+/, "");
+    if (cleanPath === "src/index.ts") {
+      return { ...file, content: buildSafeSolanaSentimentIndexTs() };
+    }
+
+    if (cleanPath === "src/config.ts" && typeof file.content === "string" && file.content.includes("export const config =")) {
+      if (file.content.includes("export const CONFIG =") || file.content.includes("export { config as CONFIG }")) {
+        return file;
+      }
+      return { ...file, content: `${file.content}\nexport { config as CONFIG };\n` };
+    }
+
+    return file;
+  });
+}
+
 export async function POST(req: NextRequest) {
   console.log("[generate-bot] Received request");
   try {
@@ -211,7 +357,7 @@ export async function POST(req: NextRequest) {
     // Fallback to metaData itself if the agent returned a flat structure
     const output = metaData.output || metaData;
     const intent = metaData.intent || {};
-    const botName: string = (intent.bot_type as string) || "Universal DeFi Bot";
+    const botName: string = (intent.bot_name as string) || (intent.bot_type as string) || "Universal DeFi Bot";
 
     // Extract files safely from varying model response shapes
     const filesList = output.files || (metaData as any).files || [];
@@ -230,7 +376,8 @@ export async function POST(req: NextRequest) {
       })
       .filter((f: { filepath: string }) => ![".env", ".env.example"].includes(f.filepath));
 
-    const files = normalizedFiles;
+    let files = normalizedFiles;
+    files = patchSentimentBotFiles(files, intent);
 
     console.log("[generate-bot] Generated files:", files.map((f: { filepath: string }) => f.filepath).join(", "));
 
@@ -267,7 +414,7 @@ export async function POST(req: NextRequest) {
         name:          botName,
         userId,
         status:        "STOPPED",
-        // configuration: configRecord as Record<string, unknown>,
+        configuration: configRecord as Record<string, unknown>,
         envConfig:     encryptedEnv,
         files: {
           create: files.map((f: { filepath: string; content: unknown; language?: string }) => ({

@@ -46,8 +46,11 @@ export function useBotConfigChat() {
   const [chips, setChips] = useState<string[]>(defaultChips)
 
   const normalizeIntent = useCallback((intent: Record<string, unknown>) => {
-    const requiredRaw = Array.isArray(intent.required_mcps) ? intent.required_mcps : []
-    const required = requiredRaw
+    const mcpsRaw = [
+      ...(Array.isArray(intent.mcps) ? intent.mcps : []),
+      ...(Array.isArray(intent.required_mcps) ? intent.required_mcps : []),
+    ]
+    const required = mcpsRaw
       .map((m) => String(m || "").trim())
       .filter(Boolean)
 
@@ -57,7 +60,10 @@ export function useBotConfigChat() {
 
     return {
       ...intent,
+      bot_name: String(intent.bot_name ?? intent.bot_type ?? "Trading Bot"),
+      requires_openai: Boolean(intent.requires_openai ?? intent.requires_openai_key),
       required_mcps: required,
+      mcps: required,
     }
   }, [])
 
@@ -148,7 +154,7 @@ export function useBotConfigChat() {
       console.log("[chat] Expanded prompt length:", expandedPrompt.length, "chars")
 
       // Show the user what was classified
-      const botType    = (intent.bot_type as string) ?? "Trading Bot"
+      const botType    = (intent.bot_name as string) ?? "Trading Bot"
       const strategy   = (intent.strategy as string) ?? "unknown"
       const chain      = (intent.chain as string) ?? "evm"
       const network    = (intent.network as string) ?? "base-sepolia"
@@ -163,7 +169,7 @@ export function useBotConfigChat() {
         `• Chain: ${chain === 'solana' ? '◎ Solana' : `⬡ ${network}`}\n` +
         `• Strategy: ${strategy.replace(/_/g, ' ')}\n` +
         `• Execution model: ${execModel}\n` +
-        `• Required MCPs: ${((intent.required_mcps as string[]) ?? []).join(', ') || 'standard'}\n\n` +
+        `• Required MCPs: ${((intent.mcps as string[]) ?? []).join(', ') || 'standard'}\n\n` +
         `I've expanded your idea into a detailed technical specification (${expandedPrompt.length} chars). Checking what credentials are needed...`
       )
 
@@ -201,9 +207,7 @@ export function useBotConfigChat() {
       setIsTyping(false)
       pushA(
         `❌ **Classification failed:** ${msg}\n\n` +
-        `This usually means the Python Meta-Agent isn't running. ` +
-        `Don't worry — I'll use a built-in fallback classifier to continue.\n\n` +
-        `Try sending your prompt again.`
+        `Please try again. If this keeps happening, verify GITHUB_TOKEN is set so the classifier can run.`
       )
       setChips(defaultChips)
     }

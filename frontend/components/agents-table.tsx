@@ -28,25 +28,28 @@ interface BotIntent {
   network?:        string;
   strategy?:       string;
   execution_model?: string;
+  bot_name?:       string;
   bot_type?:       string;
 }
 
 function strategyIcon(strategy?: string): string {
-  if (!strategy) return "🤖";
-  if (strategy.includes("arbitrage"))    return "⚡";
-  if (strategy.includes("snip"))        return "🎯";
-  if (strategy.includes("sentiment"))   return "📰";
-  if (strategy.includes("whale"))       return "🐋";
-  if (strategy.includes("perp") || strategy.includes("funding")) return "📈";
-  if (strategy.includes("dca") || strategy.includes("grid"))     return "📊";
-  if (strategy.includes("yield") || strategy.includes("bridge")) return "🌉";
-  if (strategy.includes("news"))        return "📰";
-  if (strategy.includes("mev"))         return "🛡️";
+  const s = (strategy ?? "").toLowerCase();
+  if (!s) return "🤖";
+  if (s.includes("arbitrage"))    return "⚡";
+  if (s.includes("snip"))        return "🎯";
+  if (s.includes("sentiment"))   return "📰";
+  if (s.includes("whale"))       return "🐋";
+  if (s.includes("perp") || s.includes("funding")) return "📈";
+  if (s.includes("dca") || s.includes("grid"))     return "📊";
+  if (s.includes("yield") || s.includes("bridge")) return "🌉";
+  if (s.includes("news"))        return "📰";
+  if (s.includes("mev"))         return "🛡️";
   return "🤖";
 }
 
 function strategyLabel(strategy?: string): string {
-  if (!strategy) return "Custom Bot";
+  const s = (strategy ?? "").toLowerCase();
+  if (!s) return "Custom Bot";
   const labels: Record<string, string> = {
     arbitrage:    "Arbitrage",
     sniping:      "Sniper",
@@ -62,7 +65,7 @@ function strategyLabel(strategy?: string): string {
     rebalancing:  "Rebalancer",
     ta_scripter:  "TA Trader",
   };
-  return labels[strategy] ?? strategy.replace(/_/g, " ");
+  return labels[s] ?? s.replace(/_/g, " ");
 }
 
 function chainLabel(intent?: BotIntent | null): { label: string; color: string } {
@@ -144,7 +147,7 @@ export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
             const cfg    = agent.configuration as Record<string, unknown> | null
             const intent = (cfg?.intent ?? null) as BotIntent | null
             const chain  = chainLabel(intent)
-            const model  = execModelBadge(intent?.execution_model)
+            const model  = execModelBadge(intent?.execution_model ?? 'polling')
 
             return (
               <tr key={agent.id} className="border-b border-border hover:bg-muted/20 transition-colors">

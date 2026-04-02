@@ -41,7 +41,27 @@ function extractIntent(config: Record<string, unknown> | null | undefined): BotI
 
   // The orchestrator stores it under `intent`
   if (config.intent && typeof config.intent === "object") {
-    return config.intent as BotIntent;
+    const raw = config.intent as Record<string, unknown>;
+    const mcps = [
+      ...(Array.isArray(raw.mcps) ? raw.mcps : []),
+      ...(Array.isArray(raw.required_mcps) ? raw.required_mcps : []),
+    ].map((m) => String(m || "").trim()).filter(Boolean);
+
+    return {
+      chain: raw.chain === "solana" ? "solana" : "evm",
+      network: typeof raw.network === "string" ? raw.network : undefined,
+      strategy: typeof raw.strategy === "string" ? raw.strategy : undefined,
+      execution_model: typeof raw.execution_model === "string"
+        ? raw.execution_model as BotIntent["execution_model"]
+        : "polling",
+      mcps,
+      required_mcps: mcps,
+      bot_name: typeof raw.bot_name === "string" ? raw.bot_name : undefined,
+      bot_type: typeof raw.bot_type === "string" ? raw.bot_type : undefined,
+      requires_openai: Boolean(raw.requires_openai ?? raw.requires_openai_key),
+      requires_openai_key: Boolean(raw.requires_openai ?? raw.requires_openai_key),
+      requires_solana_wallet: Boolean(raw.requires_solana_wallet ?? raw.chain === "solana"),
+    };
   }
 
   // Fallback: reconstruct a minimal intent from flat config fields
@@ -56,7 +76,10 @@ function extractIntent(config: Record<string, unknown> | null | undefined): BotI
       strategy:        typeof config.strategy === "string" ? config.strategy : undefined,
       execution_model: typeof config.execution_model === "string" ? config.execution_model as BotIntent["execution_model"] : "polling",
       required_mcps:   Array.isArray(config.required_mcps) ? config.required_mcps as string[] : [],
+      mcps:            Array.isArray(config.mcps) ? config.mcps as string[] : [],
+      bot_name:        typeof config.bot_name === "string" ? config.bot_name : undefined,
       bot_type:        typeof config.bot_type === "string" ? config.bot_type : undefined,
+      requires_openai: Boolean(config.requires_openai ?? config.requires_openai_key),
       requires_openai_key:    Boolean(config.requires_openai_key),
       requires_solana_wallet: chain === "solana",
     };

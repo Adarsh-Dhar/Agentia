@@ -13,6 +13,11 @@ export interface BotIntent {
   network?:                string;
   execution_model?:        "polling" | "websocket" | "agentic";
   strategy?:               string;
+  mcps?:                   string[];
+  bot_name?:               string;
+  requires_openai?:        boolean;
+
+  // Legacy keys kept for backward compatibility with existing records/routes.
   required_mcps?:          string[];
   bot_type?:               string;
   requires_openai_key?:    boolean;
@@ -97,11 +102,15 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
  * (or may) supply.  The "always" group is always included first.
  */
 export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
-  const mcps  = intent?.required_mcps ?? [];
+  const mcps = Array.from(new Set([
+    ...((intent?.mcps ?? []).map((m) => String(m || "").trim()).filter(Boolean)),
+    ...((intent?.required_mcps ?? []).map((m) => String(m || "").trim()).filter(Boolean)),
+  ]));
   const chain = intent?.chain ?? "evm";
   const model = intent?.execution_model ?? "polling";
   const strategy = (intent?.strategy ?? "").toString().toLowerCase();
-  const botType = (intent?.bot_type ?? "").toString().toLowerCase();
+  const botType = (intent?.bot_name ?? intent?.bot_type ?? "").toString().toLowerCase();
+  const requiresOpenAI = Boolean(intent?.requires_openai ?? intent?.requires_openai_key);
 
   const fields: EnvFieldDef[] = [
     // ── Always ────────────────────────────────────────────────────────────────
@@ -261,7 +270,7 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
   }
 
   // ── OpenAI (agentic bots) ─────────────────────────────────────────────────
-  if (intent?.requires_openai_key || model === "agentic") {
+  if (requiresOpenAI || model === "agentic") {
     fields.push({
       key:          "OPENAI_API_KEY",
       label:        "OpenAI API Key",

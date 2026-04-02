@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const USE_PYTHON_CLASSIFIER = process.env.USE_PYTHON_CLASSIFIER === "true";
 
 // ─── Rich Expander System Prompt ─────────────────────────────────────────────
 // This prompt produces a deeply detailed technical spec so the downstream
@@ -128,35 +126,6 @@ async function callGitHubModels(
   }
 }
 
-// ─── Helper: call Python Meta-Agent with timeout ──────────────────────────────
-
-async function callPythonClassifier(
-  expandedPrompt: string,
-  timeoutMs: number
-): Promise<Record<string, unknown>> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(`${META_AGENT_URL}/classify-intent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: expandedPrompt }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`Python Meta-Agent ${res.status}: ${errText.slice(0, 200)}`);
-    }
-
-    const data = await res.json();
-    return (data.intent ?? data) as Record<string, unknown>;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -209,26 +178,12 @@ export async function POST(req: NextRequest) {
       expandedPrompt = expandedPrompt.slice(0, MAX_EXPANDED_PROMPT_CHARS);
     }
 
-    // ── Step 2: Classify intent — default to local LLM classifier ───────────
-    // Rationale: The Python classifier can keep the single-worker Meta-Agent
-    // busy even after client timeout/abort, which then makes /generate-bot
-    // health checks fail with false "unreachable" errors.
+    // ── Step 2: Classify intent locally via LLM fallback classifier ──────────
+    // The updated Python Meta-Agent now exposes /create-bot (not /classify-intent),
+    // so this route classifies intent in-process to keep generation flow fast.
     let intent: Record<string, unknown> | null = null;
 
-    if (USE_PYTHON_CLASSIFIER) {
-      try {
-        console.log("[classify-intent] Calling Python Meta-Agent for classification...");
-        intent = await callPythonClassifier(expandedPrompt, 20_000); // 20 second timeout
-        console.log("[classify-intent] Python classification succeeded:", JSON.stringify(intent));
-      } catch (pyErr: unknown) {
-        const msg = pyErr instanceof Error ? pyErr.message : String(pyErr);
-        console.warn("[classify-intent] Python Meta-Agent unavailable, falling back to LLM classifier:", msg);
-      }
-    } else {
-      console.log("[classify-intent] Skipping Python classifier (USE_PYTHON_CLASSIFIER=false).");
-    }
-
-    // ── Step 3: Fallback — classify directly via GitHub Models if Python failed
+    // ── Step 3: Classify directly via GitHub Models
     if (!intent || typeof intent !== "object") {
       if (GITHUB_TOKEN) {
         try {
@@ -304,7 +259,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: isSentim ? "agentic" : "polling",
       strategy: isSentim ? "sentiment" : "dca",
       required_mcps: ["jupiter", ...(isSentim ? ["lunarcrush"] : [])],
+      mcps: ["jupiter", ...(isSentim ? ["lunarcrush"] : []), "pyth"],
       bot_type: isSentim ? "Solana Sentiment Bot" : "Solana Jupiter Bot",
+      bot_name: isSentim ? "Solana Sentiment Bot" : "Solana Jupiter Bot",
+      requires_openai: isSentim,
       requires_openai_key: isSentim,
       requires_solana_wallet: true,
     };
@@ -315,7 +273,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "websocket",
       strategy: isScalper ? "scalper" : "sniping",
       required_mcps: ["one_inch", "webacy", "alchemy"],
+      mcps: ["one_inch", "webacy", "alchemy", "pyth"],
       bot_type: isScalper ? "HF Scalper Bot" : "Memecoin Sniper Bot",
+      bot_name: isScalper ? "HF Scalper Bot" : "Memecoin Sniper Bot",
+      requires_openai: false,
       requires_openai_key: false,
       requires_solana_wallet: false,
     };
@@ -326,7 +287,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "agentic",
       strategy: isNews ? "news_reactive" : "sentiment",
       required_mcps: ["lunarcrush", "one_inch", ...(isNews ? ["twitter"] : [])],
+      mcps: ["lunarcrush", "one_inch", ...(isNews ? ["twitter"] : []), "pyth"],
       bot_type: isNews ? "News-Reactive Trader" : "Sentiment Trading Bot",
+      bot_name: isNews ? "News-Reactive Trader" : "Sentiment Trading Bot",
+      requires_openai: true,
       requires_openai_key: true,
       requires_solana_wallet: false,
     };
@@ -337,7 +301,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "polling",
       strategy: "whale_mirror",
       required_mcps: ["nansen", "one_inch", "webacy"],
+      mcps: ["nansen", "one_inch", "webacy", "pyth"],
       bot_type: "Whale Mirror Bot",
+      bot_name: "Whale Mirror Bot",
+      requires_openai: false,
       requires_openai_key: false,
       requires_solana_wallet: false,
     };
@@ -348,7 +315,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "polling",
       strategy: "perp",
       required_mcps: ["hyperliquid"],
+      mcps: ["hyperliquid", "pyth"],
       bot_type: "Perpetuals Funding Rate Bot",
+      bot_name: "Perpetuals Funding Rate Bot",
+      requires_openai: false,
       requires_openai_key: false,
       requires_solana_wallet: false,
     };
@@ -359,7 +329,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "polling",
       strategy: "yield",
       required_mcps: ["debridge", "one_inch"],
+      mcps: ["debridge", "one_inch", "pyth"],
       bot_type: "Cross-Chain Yield Arbitrage Bot",
+      bot_name: "Cross-Chain Yield Arbitrage Bot",
+      requires_openai: false,
       requires_openai_key: false,
       requires_solana_wallet: false,
     };
@@ -370,7 +343,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "polling",
       strategy: "mev_intent",
       required_mcps: ["one_inch", "webacy"],
+      mcps: ["one_inch", "webacy", "pyth"],
       bot_type: "MEV-Protected Swap Bot",
+      bot_name: "MEV-Protected Swap Bot",
+      requires_openai: false,
       requires_openai_key: false,
       requires_solana_wallet: false,
     };
@@ -381,7 +357,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "polling",
       strategy: "grid",
       required_mcps: ["one_inch"],
+      mcps: ["one_inch", "pyth"],
       bot_type: "Grid Trading Bot",
+      bot_name: "Grid Trading Bot",
+      requires_openai: false,
       requires_openai_key: false,
       requires_solana_wallet: false,
     };
@@ -392,7 +371,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
       execution_model: "polling",
       strategy: "dca",
       required_mcps: ["one_inch"],
+      mcps: ["one_inch", "pyth"],
       bot_type: "DCA Bot",
+      bot_name: "DCA Bot",
+      requires_openai: false,
       requires_openai_key: false,
       requires_solana_wallet: false,
     };
@@ -404,7 +386,10 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
     execution_model: "polling",
     strategy: "arbitrage",
     required_mcps: ["one_inch", "webacy", "goat_evm"],
+    mcps: ["one_inch", "webacy", "goat_evm", "pyth"],
     bot_type: "EVM Flash Loan Arbitrage Bot",
+    bot_name: "EVM Flash Loan Arbitrage Bot",
+    requires_openai: false,
     requires_openai_key: false,
     requires_solana_wallet: false,
   };
