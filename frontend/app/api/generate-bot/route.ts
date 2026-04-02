@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { encryptEnvConfig } from "@/lib/crypto-env";
-import { assembleBotFiles } from "../get-bot-code/bot-files";
+import { assembleBotFiles, assembleInitiaBotFiles } from "../get-bot-code/bot-files";
+import { sanitizeIntentMcpLists, shouldUseInitiaDeterministicFallback } from "@/lib/intent/mcp-sanitizer";
 import type { Prisma } from "@/lib/generated/prisma/client.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -70,46 +71,129 @@ function isSolanaSentimentIntent(intent: Record<string, unknown>): boolean {
 
 function deriveFallbackIntent(prompt: string): Record<string, unknown> {
   const normalized = prompt.toLowerCase();
-
-  if (normalized.includes("sentiment")) {
-    return {
-      chain: "solana",
-      network: "solana-mainnet",
-      execution_model: "polling",
-      strategy: "sentiment",
-      required_mcps: ["lunarcrush", "webacy", "jupiter", "pyth"],
-      bot_type: "Solana Sentiment Bot",
-      bot_name: "Solana Sentiment Bot",
-      requires_openai_key: false,
-      requires_solana_wallet: true,
-    };
-  }
-
-  if (normalized.includes("arbitrage") || normalized.includes("flash loan")) {
-    return {
-      chain: "evm",
-      network: normalized.includes("base-mainnet") || normalized.includes("base mainnet") ? "base-mainnet" : "base-sepolia",
-      execution_model: "polling",
-      strategy: "arbitrage",
-      required_mcps: ["one_inch", "webacy", "goat_evm", "pyth"],
-      bot_type: "Flash Loan Arbitrage Bot",
-      bot_name: "Flash Loan Arbitrage Bot",
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-
-  return {
-    chain: "evm",
-    network: "base-sepolia",
-    execution_model: "polling",
-    strategy: "unknown",
-    required_mcps: ["goat_evm", "pyth"],
-    bot_type: "Universal Bot",
-    bot_name: "Universal Bot",
-    requires_openai_key: false,
+  const isSentiment = normalized.includes("sentiment") || normalized.includes("lunarcrush") || normalized.includes("social");
+  return sanitizeIntentMcpLists({
+    chain: "initia",
+    network: normalized.includes("mainnet") ? "initia-mainnet" : "initia-testnet",
+    execution_model: isSentiment ? "agentic" : "polling",
+    strategy: isSentiment ? "sentiment" : (normalized.includes("arbitrage") || normalized.includes("flash loan") ? "arbitrage" : "unknown"),
+    required_mcps: ["initia"],
+    mcps: ["initia", ...(isSentiment ? ["lunarcrush"] : []), "pyth"],
+    bot_type: isSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
+    bot_name: isSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
+    requires_openai_key: isSentiment,
     requires_solana_wallet: false,
-  };
+  });
+}
+
+function isInitiaSentimentIntent(intent: Record<string, unknown>): boolean {
+  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
+  const chain = String(intent.chain ?? "").toLowerCase();
+  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
+
+  return chain.includes("initia") && strategy.includes("sentiment") && botType.includes("sentiment");
+}
+
+function buildSafeInitiaSentimentIndexTs(): string {
+  return [
+    'import * as configModule from "./config.js";',
+    'import { callMcpTool } from "./mcp_bridge.js";',
+    '',
+    'const config = ((configModule as Record<string, unknown>).config ?? (configModule as Record<string, unknown>).CONFIG ?? {}) as Record<string, unknown>;',
+    'const POLL_MS = 5000;',
+    'const SENTIMENT_BUY_THRESHOLD = 70;',
+    'const SENTIMENT_SELL_THRESHOLD = 30;',
+    'const SIMULATION_MODE = String(process.env.SIMULATION_MODE ?? config.SIMULATION_MODE ?? "true").toLowerCase() !== "false";',
+    '',
+    'function log(level: string, message: string): void {',
+    '  const ts = new Date().toISOString();',
+    '  console.log("[" + ts + "] [" + level + "] " + message);',
+    '}',
+    '',
+    'async function safeMcp(server: string, tool: string, args: Record<string, unknown>): Promise<unknown | null> {',
+    '  try {',
+    '    return await callMcpTool(server, tool, args);',
+    '  } catch (error) {',
+    '    const msg = error instanceof Error ? error.message : String(error);',
+    '    log("WARN", "MCP " + server + "/" + tool + " unavailable: " + msg);',
+    '    return null;',
+    '  }',
+    '}',
+    '',
+    'function extractScore(payload: unknown, fallback = 50): number {',
+    '  if (!payload || typeof payload !== "object") return fallback;',
+    '  const root = payload as Record<string, unknown>;',
+    '  const result = (root.result && typeof root.result === "object") ? (root.result as Record<string, unknown>) : root;',
+    '  const content = result.content;',
+    '  if (Array.isArray(content) && content.length > 0) {',
+    '    const text = (content[0] as Record<string, unknown>).text;',
+    '    if (typeof text === "string") {',
+    '      try {',
+    '        const parsed = JSON.parse(text) as Record<string, unknown>;',
+    '        const value = Number(parsed.sentiment ?? parsed.score ?? parsed.market_sentiment ?? fallback);',
+    '        return Number.isFinite(value) ? value : fallback;',
+    '      } catch {}',
+    '    }',
+    '  }',
+    '  return fallback;',
+    '}',
+    '',
+    'async function runCycle(): Promise<void> {',
+    '  log("INFO", "Initia sentiment cycle start");',
+    '  const [sentiment, left, right] = await Promise.all([',
+    '    safeMcp("lunarcrush", "get_coin_details", { coin: "INIT", symbol: "INIT" }),',
+    '    safeMcp("initia", "move_view", { address: "0xminitia_pool_a", module: "amm_oracle", function: "spot_price", args: ["uinit", "uusdc"] }),',
+    '    safeMcp("initia", "move_view", { address: "0xminitia_pool_b", module: "amm_oracle", function: "spot_price", args: ["uinit", "uusdc"] }),',
+    '  ]);',
+    '',
+    '  const score = extractScore(sentiment);',
+    '  log("INFO", "Sentiment score=" + score);',
+    '  log("INFO", "Cross-rollup price snapshots fetched=" + Number(Boolean(left) && Boolean(right)));',
+    '',
+    '  if (score > SENTIMENT_BUY_THRESHOLD) {',
+    '    log("INFO", "Bullish threshold reached");',
+    '    if (!SIMULATION_MODE) {',
+    '      await safeMcp("initia", "move_execute", {',
+    '        address: "0xhot_potato_executor",',
+    '        module: "hot_potato",',
+    '        function: "borrow_swap_repay",',
+    '        type_args: ["uinit", "uusdc"],',
+    '        args: ["1000000", "995000"],',
+    '      });',
+    '    }',
+    '  } else if (score < SENTIMENT_SELL_THRESHOLD) {',
+    '    log("INFO", "Bearish threshold reached; skipping long execution");',
+    '  } else {',
+    '    log("INFO", "Neutral sentiment; no execution");',
+    '  }',
+    '}',
+    '',
+    'let inFlight = false;',
+    'const tick = async (): Promise<void> => {',
+    '  if (inFlight) return;',
+    '  inFlight = true;',
+    '  try {',
+    '    await runCycle();',
+    '  } finally {',
+    '    inFlight = false;',
+    '  }',
+    '};',
+    '',
+    'void tick();',
+    'const timer = setInterval(() => { void tick(); }, POLL_MS);',
+    '',
+    'process.on("SIGINT", () => {',
+    '  clearInterval(timer);',
+    '  log("INFO", "Shutting down bot");',
+    '  process.exit(0);',
+    '});',
+    '',
+    'process.on("SIGTERM", () => {',
+    '  clearInterval(timer);',
+    '  log("INFO", "Shutting down bot");',
+    '  process.exit(0);',
+    '});',
+  ].join("\n");
 }
 
 function buildSafeSolanaSentimentIndexTs(): string {
@@ -456,9 +540,22 @@ function buildMcpBridgeTs(): string {
   ].join("\n");
 }
 
-function normalizeEVMRpcVarNames(files: GeneratedFile[]): GeneratedFile[] {
+function normalizeRuntimeVarNames(files: GeneratedFile[], intent: Record<string, unknown>): GeneratedFile[] {
+  const chain = String(intent.chain ?? "").toLowerCase();
+
   return files.map((file) => {
     if (typeof file.content !== "string") return file;
+
+    if (chain.includes("initia")) {
+      const patchedInitia = file.content
+        .replace(/\bEVM_RPC_URL\b/g, "INITIA_RPC_URL")
+        .replace(/\bRPC_PROVIDER_URL\b/g, "INITIA_RPC_URL")
+        .replace(/\bSOLANA_RPC_URL\b/g, "INITIA_RPC_URL")
+        .replace(/\bEVM_PRIVATE_KEY\b/g, "INITIA_KEY")
+        .replace(/\bWALLET_PRIVATE_KEY\b/g, "INITIA_KEY")
+        .replace(/\bSOLANA_PRIVATE_KEY\b/g, "INITIA_KEY");
+      return { ...file, content: patchedInitia };
+    }
 
     // Normalize only whole-variable names to avoid rewriting inside EVM_RPC_URL.
     let patched = file.content
@@ -479,7 +576,10 @@ function normalizeEVMRpcVarNames(files: GeneratedFile[]): GeneratedFile[] {
 }
 
 function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, unknown>) {
-  if (!isSolanaSentimentIntent(intent)) {
+  const solanaSentiment = isSolanaSentimentIntent(intent);
+  const initiaSentiment = isInitiaSentimentIntent(intent);
+
+  if (!solanaSentiment && !initiaSentiment) {
     return files;
   }
 
@@ -494,6 +594,9 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
   const patched = files.map((file) => {
     const cleanPath = file.filepath.replace(/^[./]+/, "");
     if (cleanPath === "src/index.ts") {
+      if (initiaSentiment) {
+        return { ...file, content: buildSafeInitiaSentimentIndexTs() };
+      }
       return { ...file, content: buildSafeSolanaSentimentIndexTs() };
     }
 
@@ -514,11 +617,16 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
           scripts?: Record<string, string>;
         };
 
-        const dependencies = {
-          ...(parsed.dependencies ?? {}),
-          "@solana/web3.js": "^1.98.0",
-          bs58: "^6.0.0",
-        };
+        const dependencies = initiaSentiment
+          ? {
+              ...(parsed.dependencies ?? {}),
+              dotenv: "^16.4.0",
+            }
+          : {
+              ...(parsed.dependencies ?? {}),
+              "@solana/web3.js": "^1.98.0",
+              bs58: "^6.0.0",
+            };
 
         const scripts = {
           ...(parsed.scripts ?? {}),
@@ -528,8 +636,10 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
 
         const nextPkg = {
           ...parsed,
-          name: "solana-sentiment-bot",
-          description: "Solana sentiment trading bot using LunarCrush + Webacy + Jupiter",
+          name: initiaSentiment ? "initia-sentiment-bot" : "solana-sentiment-bot",
+          description: initiaSentiment
+            ? "Initia sentiment bot using lunarcrush + initia MCP"
+            : "Solana sentiment trading bot using LunarCrush + Webacy + Jupiter",
           dependencies,
           scripts,
         };
@@ -560,26 +670,45 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
   }
 
   const fallbackSentimentPackage = JSON.stringify(
-    {
-      name: "solana-sentiment-bot",
-      version: "1.0.0",
-      type: "module",
-      description: "Solana sentiment trading bot using LunarCrush + Webacy + Jupiter",
-      scripts: {
-        start: "tsx src/index.ts",
-        dev: "tsx src/index.ts",
-      },
-      dependencies: {
-        "@solana/web3.js": "^1.98.0",
-        bs58: "^6.0.0",
-        dotenv: "^16.4.0",
-      },
-      devDependencies: {
-        typescript: "^5.4.0",
-        "@types/node": "^20.0.0",
-        tsx: "^4.7.0",
-      },
-    },
+    initiaSentiment
+      ? {
+          name: "initia-sentiment-bot",
+          version: "1.0.0",
+          type: "module",
+          description: "Initia sentiment bot using lunarcrush + initia MCP",
+          scripts: {
+            start: "tsx src/index.ts",
+            dev: "tsx src/index.ts",
+          },
+          dependencies: {
+            dotenv: "^16.4.0",
+          },
+          devDependencies: {
+            typescript: "^5.4.0",
+            "@types/node": "^20.0.0",
+            tsx: "^4.7.0",
+          },
+        }
+      : {
+          name: "solana-sentiment-bot",
+          version: "1.0.0",
+          type: "module",
+          description: "Solana sentiment trading bot using LunarCrush + Webacy + Jupiter",
+          scripts: {
+            start: "tsx src/index.ts",
+            dev: "tsx src/index.ts",
+          },
+          dependencies: {
+            "@solana/web3.js": "^1.98.0",
+            bs58: "^6.0.0",
+            dotenv: "^16.4.0",
+          },
+          devDependencies: {
+            typescript: "^5.4.0",
+            "@types/node": "^20.0.0",
+            tsx: "^4.7.0",
+          },
+        },
     null,
     2,
   );
@@ -734,12 +863,13 @@ export async function POST(req: NextRequest) {
       if (lastMetaStatus === 504) {
         console.warn(`[generate-bot] [${requestId}] Falling back to deterministic bot files after Meta-Agent timeout`);
         const fallbackIntent = deriveFallbackIntent(boundedPrompt || originalPrompt || "");
+        const useInitiaFallback = shouldUseInitiaDeterministicFallback(fallbackIntent);
         metaData = {
           output: {
             thoughts:
               "Meta-Agent timed out, so the deterministic fallback generator was used. " +
               "This preserves the bot build flow while keeping the timeout reason visible in logs.",
-            files: assembleBotFiles(),
+            files: useInitiaFallback ? assembleInitiaBotFiles() : assembleBotFiles(),
           },
           intent: fallbackIntent,
           tools_used: ["deterministic-fallback"],
@@ -774,7 +904,7 @@ export async function POST(req: NextRequest) {
     console.log(`[generate-bot] [${requestId}] Received meta-agent response in ${Date.now() - requestStartedAt}ms`);
     // Fallback to metaData itself if the agent returned a flat structure
     const output = resolvedMetaData.output || resolvedMetaData;
-    const intent = resolvedMetaData.intent || {};
+    const intent = sanitizeIntentMcpLists((resolvedMetaData.intent || {}) as Record<string, unknown>);
     const botName: string = (intent.bot_name as string) || (intent.bot_type as string) || "Universal DeFi Bot";
 
     // Extract files safely from varying model response shapes
@@ -796,7 +926,7 @@ export async function POST(req: NextRequest) {
 
     let files = normalizedFiles;
     files = patchSentimentBotFiles(files, intent);
-    files = normalizeEVMRpcVarNames(files);
+    files = normalizeRuntimeVarNames(files, intent);
 
     console.log(`[generate-bot] [${requestId}] Generated files:`, files.map((f: { filepath: string }) => f.filepath).join(", "));
 

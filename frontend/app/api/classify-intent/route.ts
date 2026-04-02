@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sanitizeIntentMcpLists } from "@/lib/intent/mcp-sanitizer";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
@@ -60,30 +61,23 @@ const FALLBACK_CLASSIFIER_PROMPT = `You are a DeFi bot intent classifier. Analyz
 
 Required schema:
 {
-  "chain": "evm" | "solana",
-  "network": "base-sepolia" | "base-mainnet" | "arbitrum" | "solana-mainnet",
+  "chain": "initia",
+  "network": "initia-mainnet" | "initia-testnet",
   "execution_model": "polling" | "websocket" | "agentic",
   "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
-  "required_mcps": ["one_inch","webacy","lunarcrush","jupiter","nansen","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","chainlink"],
+  "required_mcps": ["initia","one_inch","webacy","lunarcrush","jupiter","nansen","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","chainlink"],
   "bot_type": "human-readable bot name",
   "requires_openai_key": true | false,
   "requires_solana_wallet": true | false
 }
 
 Classification rules (first match wins):
-- flash loan | arbitrage → execution_model:"polling", strategy:"arbitrage", required_mcps:["one_inch","webacy","goat_evm"]
-- MEV intent | MEV-protected → execution_model:"polling", strategy:"mev_intent", required_mcps:["one_inch","webacy"]
-- sniper | memecoin | mempool → execution_model:"websocket", strategy:"sniping", required_mcps:["one_inch","webacy","alchemy"]
-- DCA | dollar cost → execution_model:"polling", strategy:"dca", required_mcps:["one_inch"]
-- grid | range → execution_model:"polling", strategy:"grid", required_mcps:["one_inch"]
-- sentiment | social | LunarCrush → execution_model:"agentic", strategy:"sentiment", required_mcps:["lunarcrush","one_inch"], requires_openai_key:true
-- whale | Nansen | mirror → execution_model:"polling", strategy:"whale_mirror", required_mcps:["nansen","one_inch","webacy"]
-- news | GPT trader → execution_model:"agentic", strategy:"news_reactive", required_mcps:["twitter","one_inch"], requires_openai_key:true
-- cross-chain | bridge | yield arb → execution_model:"polling", strategy:"yield", required_mcps:["debridge","one_inch"]
-- perp | perpetual | funding → execution_model:"polling", strategy:"perp", required_mcps:["hyperliquid"]
-- HF | high frequency | scalper → execution_model:"websocket", strategy:"scalper", required_mcps:["one_inch","alchemy"]
-- Solana in any request → chain:"solana", network:"solana-mainnet", required_mcps includes "jupiter", requires_solana_wallet:true
-- default network if unspecified → "base-sepolia"`;
+- ALWAYS return chain:"initia" for every request.
+- sentiment | social | LunarCrush → execution_model:"agentic", strategy:"sentiment", required_mcps:["initia","lunarcrush"], requires_openai_key:true
+- flash loan | arbitrage | hot potato → execution_model:"polling", strategy:"arbitrage", required_mcps:["initia"]
+- otherwise default execution_model:"polling", strategy:"unknown", required_mcps:["initia"]
+- if chain is initia, actively remove these MCPs if present: one_inch, webacy, goplus, goat_evm, alchemy, rugcheck, jupiter, nansen, hyperliquid, debridge, lifi, uniswap, chainlink
+- default network if unspecified → "initia-testnet"`;
 
 // ─── Helper: call GitHub Models with a short timeout ─────────────────────────
 
@@ -225,10 +219,11 @@ export async function POST(req: NextRequest) {
       intent = deriveDefaultIntent(expandedPrompt);
     }
 
-    console.log("[classify-intent] Final intent:", JSON.stringify(intent));
+    const sanitizedIntent = sanitizeIntentMcpLists(intent as Record<string, unknown>);
+    console.log("[classify-intent] Final intent:", JSON.stringify(sanitizedIntent));
 
     return NextResponse.json({
-      intent,
+      intent: sanitizedIntent,
       expandedPrompt,
     });
 
@@ -243,157 +238,18 @@ export async function POST(req: NextRequest) {
 
 function deriveDefaultIntent(prompt: string): Record<string, unknown> {
   const lower = prompt.toLowerCase();
-
-  const isSolana  = lower.includes("solana") || lower.includes("jupiter") || lower.includes("spl");
-  const isSniper  = lower.includes("snip") || lower.includes("memecoin") || lower.includes("meme coin") || lower.includes("mempool");
-  const isSentim  = lower.includes("sentiment") || lower.includes("lunarcrush") || lower.includes("social");
-  const isWhale   = lower.includes("whale") || lower.includes("nansen") || lower.includes("smart money");
-  const isPerp    = lower.includes("perp") || lower.includes("perpetual") || lower.includes("funding rate") || lower.includes("hyperliquid");
-  const isYield   = lower.includes("yield") || lower.includes("cross-chain") || lower.includes("bridge");
-  const isGrid    = lower.includes("grid") || lower.includes("range");
-  const isDCA     = lower.includes("dca") || lower.includes("dollar cost");
-  const isNews    = lower.includes("news") || lower.includes("gpt trader") || lower.includes("ai trader");
-  const isMEV     = lower.includes("mev") || lower.includes("protected swap");
-  const isScalper = lower.includes("scalper") || lower.includes("high frequency") || lower.includes("hf ");
-
-  if (isSolana) {
-    return {
-      chain: "solana", network: "solana-mainnet",
-      execution_model: isSentim ? "agentic" : "polling",
-      strategy: isSentim ? "sentiment" : "dca",
-      required_mcps: ["jupiter", ...(isSentim ? ["lunarcrush"] : [])],
-      mcps: ["jupiter", ...(isSentim ? ["lunarcrush"] : []), "pyth"],
-      bot_type: isSentim ? "Solana Sentiment Bot" : "Solana Jupiter Bot",
-      bot_name: isSentim ? "Solana Sentiment Bot" : "Solana Jupiter Bot",
-      requires_openai: isSentim,
-      requires_openai_key: isSentim,
-      requires_solana_wallet: true,
-    };
-  }
-  if (isSniper || isScalper) {
-    return {
-      chain: "evm", network: "base-sepolia",
-      execution_model: "websocket",
-      strategy: isScalper ? "scalper" : "sniping",
-      required_mcps: ["one_inch", "webacy", "alchemy"],
-      mcps: ["one_inch", "webacy", "alchemy", "pyth"],
-      bot_type: isScalper ? "HF Scalper Bot" : "Memecoin Sniper Bot",
-      bot_name: isScalper ? "HF Scalper Bot" : "Memecoin Sniper Bot",
-      requires_openai: false,
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-  if (isSentim || isNews) {
-    return {
-      chain: "evm", network: "base-sepolia",
-      execution_model: "agentic",
-      strategy: isNews ? "news_reactive" : "sentiment",
-      required_mcps: ["lunarcrush", "one_inch", ...(isNews ? ["twitter"] : [])],
-      mcps: ["lunarcrush", "one_inch", ...(isNews ? ["twitter"] : []), "pyth"],
-      bot_type: isNews ? "News-Reactive Trader" : "Sentiment Trading Bot",
-      bot_name: isNews ? "News-Reactive Trader" : "Sentiment Trading Bot",
-      requires_openai: true,
-      requires_openai_key: true,
-      requires_solana_wallet: false,
-    };
-  }
-  if (isWhale) {
-    return {
-      chain: "evm", network: "base-sepolia",
-      execution_model: "polling",
-      strategy: "whale_mirror",
-      required_mcps: ["nansen", "one_inch", "webacy"],
-      mcps: ["nansen", "one_inch", "webacy", "pyth"],
-      bot_type: "Whale Mirror Bot",
-      bot_name: "Whale Mirror Bot",
-      requires_openai: false,
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-  if (isPerp) {
-    return {
-      chain: "evm", network: "arbitrum",
-      execution_model: "polling",
-      strategy: "perp",
-      required_mcps: ["hyperliquid"],
-      mcps: ["hyperliquid", "pyth"],
-      bot_type: "Perpetuals Funding Rate Bot",
-      bot_name: "Perpetuals Funding Rate Bot",
-      requires_openai: false,
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-  if (isYield) {
-    return {
-      chain: "evm", network: "base-mainnet",
-      execution_model: "polling",
-      strategy: "yield",
-      required_mcps: ["debridge", "one_inch"],
-      mcps: ["debridge", "one_inch", "pyth"],
-      bot_type: "Cross-Chain Yield Arbitrage Bot",
-      bot_name: "Cross-Chain Yield Arbitrage Bot",
-      requires_openai: false,
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-  if (isMEV) {
-    return {
-      chain: "evm", network: "base-mainnet",
-      execution_model: "polling",
-      strategy: "mev_intent",
-      required_mcps: ["one_inch", "webacy"],
-      mcps: ["one_inch", "webacy", "pyth"],
-      bot_type: "MEV-Protected Swap Bot",
-      bot_name: "MEV-Protected Swap Bot",
-      requires_openai: false,
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-  if (isGrid) {
-    return {
-      chain: "evm", network: "base-sepolia",
-      execution_model: "polling",
-      strategy: "grid",
-      required_mcps: ["one_inch"],
-      mcps: ["one_inch", "pyth"],
-      bot_type: "Grid Trading Bot",
-      bot_name: "Grid Trading Bot",
-      requires_openai: false,
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-  if (isDCA) {
-    return {
-      chain: "evm", network: "base-sepolia",
-      execution_model: "polling",
-      strategy: "dca",
-      required_mcps: ["one_inch"],
-      mcps: ["one_inch", "pyth"],
-      bot_type: "DCA Bot",
-      bot_name: "DCA Bot",
-      requires_openai: false,
-      requires_openai_key: false,
-      requires_solana_wallet: false,
-    };
-  }
-
-  // Hard default: flash loan arbitrage
+  const isInitiaSentiment = lower.includes("sentiment") || lower.includes("lunarcrush") || lower.includes("social");
+  const initiaNetwork = lower.includes("mainnet") ? "initia-mainnet" : "initia-testnet";
   return {
-    chain: "evm", network: "base-sepolia",
-    execution_model: "polling",
-    strategy: "arbitrage",
-    required_mcps: ["one_inch", "webacy", "goat_evm"],
-    mcps: ["one_inch", "webacy", "goat_evm", "pyth"],
-    bot_type: "EVM Flash Loan Arbitrage Bot",
-    bot_name: "EVM Flash Loan Arbitrage Bot",
-    requires_openai: false,
-    requires_openai_key: false,
+    chain: "initia", network: initiaNetwork,
+    execution_model: isInitiaSentiment ? "agentic" : "polling",
+    strategy: isInitiaSentiment ? "sentiment" : (lower.includes("arbitrage") || lower.includes("flash loan") ? "arbitrage" : "unknown"),
+    required_mcps: ["initia"],
+    mcps: ["initia", ...(isInitiaSentiment ? ["lunarcrush"] : []), "pyth"],
+    bot_type: isInitiaSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
+    bot_name: isInitiaSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
+    requires_openai: isInitiaSentiment,
+    requires_openai_key: isInitiaSentiment,
     requires_solana_wallet: false,
   };
 }

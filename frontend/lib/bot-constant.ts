@@ -9,7 +9,7 @@
 // ─── Intent shape returned by the orchestrator ────────────────────────────────
 
 export interface BotIntent {
-  chain?:                  "evm" | "solana";
+  chain?:                  "evm" | "solana" | "initia";
   network?:                string;
   execution_model?:        "polling" | "websocket" | "agentic";
   strategy?:               string;
@@ -38,6 +38,10 @@ export interface BotEnvConfig {
   // ── Solana wallet ───────────────────────────────────────────────────────────
   SOLANA_RPC_URL:      string;   // e.g. https://mainnet.helius-rpc.com/?api-key=...
   SOLANA_PRIVATE_KEY:  string;   // bs58-encoded keypair secret
+
+  // ── Initia wallet ───────────────────────────────────────────────────────────
+  INITIA_KEY:          string;
+  INITIA_RPC_URL:      string;
 
   // ── DEX / aggregator API keys ───────────────────────────────────────────────
   ONEINCH_API_KEY:     string;   // https://portal.1inch.dev
@@ -76,6 +80,9 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
 
   SOLANA_RPC_URL:      "",
   SOLANA_PRIVATE_KEY:  "",
+
+  INITIA_KEY:          "",
+  INITIA_RPC_URL:      "",
 
   ONEINCH_API_KEY:     "",
   ALCHEMY_API_KEY:     "",
@@ -131,6 +138,27 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
       helpText: "Simulation logs opportunities without sending real transactions.",
     },
   ];
+
+  if (chain === "initia") {
+    fields.push(
+      {
+        key:         "INITIA_KEY",
+        label:       "Initia Private Key",
+        type:        "password",
+        required:    true,
+        placeholder: "0x...",
+        helpText:    "Required for move_execute signing via Initia MCP.",
+      },
+      {
+        key:         "INITIA_RPC_URL",
+        label:       "Initia RPC URL (Optional)",
+        type:        "text",
+        required:    false,
+        placeholder: "https://rpc.testnet.initia.xyz/",
+        helpText:    "Optional override for Initia RPC endpoint.",
+      },
+    );
+  }
 
   // ── EVM wallet ───────────────────────────────────────────────────────────
   if (chain === "evm") {
@@ -223,14 +251,17 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
 
   // ── Webacy ────────────────────────────────────────────────────────────────
   const needsWebacyByStrategy =
+    chain !== "initia" && (
     strategy.includes("arbitrage") ||
     strategy.includes("flash") ||
     strategy.includes("mev") ||
     botType.includes("arbitrage") ||
     botType.includes("flash") ||
     botType.includes("mev")
+    )
 
   const needsGoPlusByStrategy =
+    chain !== "initia" && (
     strategy.includes("sentiment") ||
     strategy.includes("arbitrage") ||
     strategy.includes("flash") ||
@@ -241,6 +272,7 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
     botType.includes("flash") ||
     botType.includes("mev") ||
     botType.includes("sniper")
+    )
 
   if (mcps.includes("webacy") || needsWebacyByStrategy) {
     fields.push({

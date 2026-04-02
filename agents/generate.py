@@ -41,10 +41,16 @@ DEFAULT_CONFIG = {
 # ─── Token address registry ───────────────────────────────────────────────────
 
 TOKEN_ADDRESSES = {
+    "INIT": {
+        "initia-mainnet": "uinit",
+        "initia-testnet": "uinit",
+    },
     "USDC": {
         "base-sepolia": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         "base-mainnet": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         "arbitrum":     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "initia-mainnet": "uusdc",
+        "initia-testnet": "uusdc",
     },
     "USDT": {
         "base-sepolia": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
@@ -72,6 +78,8 @@ CHAIN_IDS = {
     "base-sepolia": 84532,
     "base-mainnet": 8453,
     "arbitrum":     42161,
+    "initia-mainnet": "interwoven-1",
+    "initia-testnet": "initiation-2",
 }
 
 # ─── Prompt builder ───────────────────────────────────────────────────────────
@@ -113,6 +121,46 @@ def build_prompt(config: dict) -> str:
             "If profitable, verify BOTH tokens with GoPlus Security. "
             "Only proceed if both tokens are safe."
         )
+
+    if chain.startswith("initia"):
+        return f"""
+You are an expert TypeScript and Move-oriented bot engineer.
+
+CRITICAL ENVIRONMENT CONSTRAINT:
+The bot runs in Node.js (WebContainer-compatible). Generate TypeScript only.
+
+CONFIGURATION:
+- Bot Name: {bot_name}
+- Chain: {chain} (Network ID: {chain_id})
+- Base denom: {base_token} ({base_addr})
+- Quote denom: {target_token} ({target_addr})
+- Borrow Amount: {borrow} {base_token}
+- Loop Interval: Every {poll_sec} seconds
+- Simulation Mode default: {"true (no real tx)" if sim_mode else "false (real tx)"}
+
+INITIA EXECUTION RULES:
+1. Do NOT use ethers, @solana/web3.js, or bs58.
+2. Do NOT use Aave fee assumptions or 1inch calldata instructions.
+3. Read prices with callMcpTool('initia', 'move_view', {{address, module, function, args}}).
+4. Execute atomically with callMcpTool('initia', 'move_execute', {{address, module, function, type_args, args}}).
+5. Flash-loan style flow must be sequential Move calls inside one atomic payload: borrow -> swap -> repay.
+6. No callback contracts, no manual RPC signing, no private key parsing in code.
+
+REQUIRED FILES:
+- package.json, tsconfig.json, src/config.ts, src/index.ts.
+
+ENV VARS:
+- INITIA_KEY (required)
+- INITIA_RPC_URL (optional)
+- MCP_GATEWAY_URL (required)
+- SIMULATION_MODE
+
+ARCHITECTURE:
+- Use Listen -> Quantify -> Corroborate -> Protect -> Act cycle.
+- Corroborate by querying at least two Minitia pools via move_view.
+- Only execute when spread exceeds threshold and post-fee estimate is positive.
+- Use structured logs and graceful SIGINT/SIGTERM shutdown.
+""".strip()
 
     return f"""
 You are an expert Web3 developer. Your job is to write an autonomous EVM arbitrage bot.

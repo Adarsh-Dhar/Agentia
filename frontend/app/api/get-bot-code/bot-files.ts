@@ -36,6 +36,269 @@ export function assembleBotFiles(): BotFile[] {
   ];
 }
 
+export function assembleInitiaBotFiles(): BotFile[] {
+  return [
+    { filepath: "package.json", content: INITIA_PACKAGE_JSON },
+    { filepath: "tsconfig.json", content: INITIA_TSCONFIG },
+    { filepath: ".env.example", content: INITIA_ENV_EXAMPLE },
+    { filepath: "src/config.ts", content: INITIA_CONFIG_TS },
+    { filepath: "src/mcp_bridge.ts", content: INITIA_MCP_BRIDGE_TS },
+    { filepath: "src/index.ts", content: INITIA_INDEX_TS },
+  ];
+}
+
+const INITIA_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "initia-hot-potato-bot",
+    version: "1.0.0",
+    type: "module",
+    description: "Initia flash-loan style arbitrage bot using move_view + move_execute MCP calls",
+    scripts: {
+      start: "tsx src/index.ts",
+      dev: "tsx src/index.ts",
+    },
+    dependencies: {
+      dotenv: "^16.4.0",
+    },
+    devDependencies: {
+      typescript: "^5.4.0",
+      "@types/node": "^20.0.0",
+      tsx: "^4.7.0",
+    },
+  },
+  null,
+  2,
+);
+
+const INITIA_TSCONFIG = JSON.stringify(
+  {
+    compilerOptions: {
+      target: "ES2022",
+      module: "ESNext",
+      moduleResolution: "bundler",
+      strict: true,
+      esModuleInterop: true,
+      skipLibCheck: true,
+    },
+    include: ["src/**/*"],
+  },
+  null,
+  2,
+);
+
+const INITIA_ENV_EXAMPLE = `MCP_GATEWAY_URL=http://localhost:8000/mcp
+INITIA_KEY=replace_me
+INITIA_RPC_URL=
+SIMULATION_MODE=true
+POLL_INTERVAL=5
+`;
+
+const INITIA_CONFIG_TS = `import "dotenv/config";
+
+export const CONFIG = {
+  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),
+  INITIA_KEY: process.env.INITIA_KEY ?? (() => { throw new Error("INITIA_KEY not set"); })(),
+  INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",
+  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",
+  POLL_MS: Math.max(1000, (parseInt(process.env.POLL_INTERVAL ?? "5", 10) || 5) * 1000),
+  NETWORK: process.env.INITIA_NETWORK ?? "initia-mainnet",
+};
+`;
+
+const INITIA_MCP_BRIDGE_TS = `import { CONFIG } from "./config.js";
+
+function isLocalGateway(value: string): boolean {
+  return /(^|\\/\\/)(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|192\\.168\\.)/i.test(String(value || ""));
+}
+
+function normalizeGatewayBase(raw: string): string {
+  const value = String(raw || "").trim();
+  if (!value) throw new Error("MCP_GATEWAY_URL is empty.");
+  let base = value.replace(/\\/+$/, "");
+  if (!/\\/mcp$/i.test(base)) base += "/mcp";
+  return base;
+}
+
+function simulationFallback(server: string, tool: string, args: Record<string, unknown>): unknown | null {
+  if (!CONFIG.SIMULATION_MODE) return null;
+  if (server.toLowerCase() !== "initia") return null;
+
+  if (tool.toLowerCase() === "move_view") {
+    return {
+      ok: true,
+      mock: true,
+      server: "initia",
+      tool: "move_view",
+      result: { content: [{ type: "text", text: JSON.stringify({ price_num: 1.005 }) }] },
+      echoed: args,
+    };
+  }
+
+  if (tool.toLowerCase() === "move_execute") {
+    return {
+      ok: true,
+      mock: true,
+      server: "initia",
+      tool: "move_execute",
+      tx_hash: "0xsim_" + Date.now().toString(16),
+      echoed: args,
+    };
+  }
+
+  return null;
+}
+
+export async function callMcpTool(
+  server: string,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const base = normalizeGatewayBase(CONFIG.MCP_GATEWAY_URL);
+  const url = base + "/" + server + "/" + tool;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+        "Bypass-Tunnel-Reminder": "true",
+      },
+      body: JSON.stringify(args ?? {}),
+    });
+  } catch (err) {
+    const fallback = simulationFallback(server, tool, args ?? {});
+    if (fallback) return fallback;
+    const details = err instanceof Error ? err.message : String(err);
+    if (isLocalGateway(url)) {
+      throw new Error("Cannot reach local MCP gateway from WebContainer URL " + url + ". Use a public HTTPS tunnel or proxy endpoint. Details: " + details);
+    }
+    throw new Error("Network error calling MCP at " + url + ": " + details);
+  }
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    const fallback = simulationFallback(server, tool, args ?? {});
+    if (fallback) return fallback;
+    throw new Error("MCP " + server + "/" + tool + " HTTP " + response.status + ": " + body.slice(0, 200));
+  }
+
+  return await response.json();
+}
+`;
+
+const INITIA_INDEX_TS = `import { CONFIG } from "./config.js";
+import { callMcpTool } from "./mcp_bridge.js";
+
+function log(level: "INFO" | "WARN" | "ERROR", message: string): void {
+  const ts = new Date().toISOString();
+  console.log("[" + ts + "] [" + level + "] " + message);
+}
+
+async function moveView(address: string, moduleName: string, fn: string, args: unknown[]): Promise<unknown> {
+  return callMcpTool("initia", "move_view", {
+    network: CONFIG.NETWORK,
+    address,
+    module: moduleName,
+    function: fn,
+    args,
+  });
+}
+
+async function moveExecuteAtomic(calls: Array<Record<string, unknown>>): Promise<unknown> {
+  return callMcpTool("initia", "move_execute", {
+    network: CONFIG.NETWORK,
+    address: "0xhot_potato_executor",
+    module: "hot_potato",
+    function: "execute_batch",
+    args: [calls],
+  });
+}
+
+function extractPrice(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  const result = (root.result && typeof root.result === "object") ? (root.result as Record<string, unknown>) : root;
+  const content = result.content;
+  if (!Array.isArray(content) || content.length === 0) return null;
+  const first = content[0] as Record<string, unknown>;
+  const text = first.text;
+  if (typeof text !== "string") return null;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const n = Number(parsed.price_num ?? parsed.price);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runCycle(): Promise<void> {
+  const [left, right] = await Promise.all([
+    moveView("0xminitia_pool_a", "amm_oracle", "spot_price", ["uinit", "uusdc"]),
+    moveView("0xminitia_pool_b", "amm_oracle", "spot_price", ["uinit", "uusdc"]),
+  ]);
+
+  const p1 = extractPrice(left);
+  const p2 = extractPrice(right);
+  if (p1 === null || p2 === null) {
+    log("WARN", "Price view unavailable; skipping execution");
+    return;
+  }
+
+  const spread = Math.abs(p1 - p2);
+  log("INFO", "Spread=" + spread.toFixed(6) + " p1=" + p1.toFixed(6) + " p2=" + p2.toFixed(6));
+
+  if (spread < 0.002) {
+    log("INFO", "Spread below threshold; hold");
+    return;
+  }
+
+  const calls = [
+    { address: "0xflash_pool", module: "flash_pool", function: "borrow", args: ["uinit", "1000000"] },
+    { address: "0xamm_router", module: "router", function: "swap", args: ["uinit", "uusdc", "1000000", "995000"] },
+    { address: "0xflash_pool", module: "flash_pool", function: "repay", args: ["uinit", "1000900"] },
+  ];
+
+  if (CONFIG.SIMULATION_MODE) {
+    log("INFO", "Simulation mode active; atomic move_execute skipped");
+    return;
+  }
+
+  const tx = await moveExecuteAtomic(calls);
+  log("INFO", "Executed move batch: " + JSON.stringify(tx).slice(0, 240));
+}
+
+let cycleInFlight = false;
+const runCycleSafely = async () => {
+  if (cycleInFlight) return;
+  cycleInFlight = true;
+  try {
+    await runCycle();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log("ERROR", msg);
+  } finally {
+    cycleInFlight = false;
+  }
+};
+
+void runCycleSafely();
+const timer = setInterval(() => { void runCycleSafely(); }, CONFIG.POLL_MS);
+
+process.on("SIGINT", () => {
+  clearInterval(timer);
+  log("INFO", "Shutdown complete");
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  clearInterval(timer);
+  log("INFO", "Shutdown complete");
+  process.exit(0);
+});
+`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // package.json
 // ─────────────────────────────────────────────────────────────────────────────

@@ -924,28 +924,80 @@ function buildFallbackSentimentIndexTs(): string {
 
 function buildCompatMcpBridgeTs(): string {
   return [
-    "const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL || 'http://localhost:8000/mcp';",
+    "const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL || '';",
+    "",
+    "function isLocalGateway(value) {",
+    "  return /(^|\\/\\/)(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|192\\.168\\.)/i.test(String(value || ''));",
+    "}",
     "",
     "function normalizeGatewayBase(raw) {",
-    "  const value = String(raw || '').trim() || 'http://localhost:8000/mcp';",
-    "  return value.replace(/\\\/+$/, '');",
+    "  const value = String(raw || '').trim();",
+    "  if (!value) {",
+    "    throw new Error('MCP_GATEWAY_URL is empty. Set it to your HTTPS gateway (for example an ngrok URL ending with /mcp).');",
+    "  }",
+    "  let base = value.replace(/\\\/+$/, '');",
+    "  if (!/\\/mcp$/i.test(base)) base += '/mcp';",
+    "  return base;",
+    "}",
+    "",
+    "function buildFetchFailedMessage(url, err) {",
+    "  const details = err && err.message ? String(err.message) : String(err || 'unknown network error');",
+    "  if (isLocalGateway(url)) {",
+    "    return 'Cannot reach local MCP gateway from WebContainer URL ' + url + '. Use a public HTTPS tunnel (ngrok) or the app proxy endpoint. Details: ' + details;",
+    "  }",
+    "  return 'Network error calling MCP at ' + url + ': ' + details;",
+    "}",
+    "",
+    "function simulationFallback(server, tool, args) {",
+    "  if (String(process.env.SIMULATION_MODE || 'true').toLowerCase() === 'false') return null;",
+    "  if (String(server).toLowerCase() !== 'initia') return null;",
+    "  if (String(tool).toLowerCase() === 'move_view') {",
+    "    return {",
+    "      ok: true,",
+    "      mock: true,",
+    "      server: 'initia',",
+    "      tool: 'move_view',",
+    "      result: { content: [{ type: 'text', text: JSON.stringify({ price_num: 1.005 }) }] },",
+    "      echoed: args || {},",
+    "    };",
+    "  }",
+    "  if (String(tool).toLowerCase() === 'move_execute') {",
+    "    return {",
+    "      ok: true,",
+    "      mock: true,",
+    "      server: 'initia',",
+    "      tool: 'move_execute',",
+    "      tx_hash: '0xsim_' + Date.now().toString(16),",
+    "      echoed: args || {},",
+    "    };",
+    "  }",
+    "  return null;",
     "}",
     "",
     "export async function callMcpTool(server, tool, args = {}) {",
     "  const base = normalizeGatewayBase(MCP_GATEWAY_URL);",
     "  const url = base + '/' + server + '/' + tool;",
-    "  const response = await fetch(url, {",
-    "    method: 'POST',",
-    "    headers: {",
-    "      'Content-Type': 'application/json',",
-    "      'ngrok-skip-browser-warning': 'true',",
-    "      'Bypass-Tunnel-Reminder': 'true',",
-    "    },",
-    "    body: JSON.stringify(args),",
-    "  });",
+    "  let response;",
+    "  try {",
+    "    response = await fetch(url, {",
+    "      method: 'POST',",
+    "      headers: {",
+    "        'Content-Type': 'application/json',",
+    "        'ngrok-skip-browser-warning': 'true',",
+    "        'Bypass-Tunnel-Reminder': 'true',",
+    "      },",
+    "      body: JSON.stringify(args),",
+    "    });",
+    "  } catch (err) {",
+    "    const fallback = simulationFallback(server, tool, args);",
+    "    if (fallback) return fallback;",
+    "    throw new Error(buildFetchFailedMessage(url, err));",
+    "  }",
     "",
     "  if (!response.ok) {",
     "    const body = await response.text().catch(() => '');",
+    "    const fallback = simulationFallback(server, tool, args);",
+    "    if (fallback) return fallback;",
     "    throw new Error('MCP ' + server + '/' + tool + ' HTTP ' + response.status + ': ' + body.slice(0, 200));",
     "  }",
     "",
@@ -968,6 +1020,14 @@ function applyCompatibilityPatches(files: BotFile[]): { files: BotFile[]; patche
 
   const patchedFiles = files.map((file) => {
     const cleanPath = file.filepath.replace(/^[./]+/, "");
+
+    if (cleanPath === "src/mcp_bridge.ts" || cleanPath === "src/mcp_bridge.js") {
+      const compatBridge = buildCompatMcpBridgeTs();
+      if (file.content !== compatBridge) {
+        patchesApplied += 1;
+      }
+      return { ...file, content: compatBridge };
+    }
 
     if (cleanPath.endsWith("package.json")) {
       const patchedContent = patchPackageJsonForSolana(
@@ -1216,7 +1276,20 @@ function buildProcessEnv(cfg: BotEnvConfig, botFamily: "evm" | "solana"): Record
   }
   // Ensure MCP_GATEWAY_URL always present
   if (!env.MCP_GATEWAY_URL) {
-    env.MCP_GATEWAY_URL = "http://192.168.1.50:8000/mcp";
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (origin) {
+      env.MCP_GATEWAY_URL = `${origin}/api/mcp-proxy`;
+    } else {
+      env.MCP_GATEWAY_URL = "http://localhost:8000/mcp";
+    }
+  }
+
+  // Localhost URLs fail from browser-hosted WebContainer sandboxes. Route via same-origin proxy.
+  if (/(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(env.MCP_GATEWAY_URL)) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (origin) {
+      env.MCP_GATEWAY_URL = `${origin}/api/mcp-proxy`;
+    }
   }
   // Ensure SIMULATION_MODE always present
   if (!env.SIMULATION_MODE) {

@@ -114,8 +114,8 @@ Analyze the prompt and return ONLY valid JSON — no markdown, no preamble.
 
 Schema:
 {
-  "chain": "evm" | "solana",
-  "network": "base-sepolia" | "base-mainnet" | "arbitrum" | "solana-mainnet",
+  "chain": "initia",
+  "network": "initia-mainnet" | "initia-testnet",
   "strategy": "arbitrage" | "sentiment" | "sniping" | "dca" | "grid" | "whale_mirror" | "yield" | "perp" | "unknown",
   "mcps": ["list of MCP server names to use"],
   "bot_name": "human-readable name",
@@ -123,14 +123,13 @@ Schema:
 }
 
 Rules:
-- solana / jupiter / SPL / SOL -> chain:"solana", mcps must include "jupiter"
+- ALWAYS set chain:"initia"
 - sentiment / social / lunarcrush -> mcps include "lunarcrush", requires_openai:true
-- rug / safety / risk check -> mcps include "rugcheck" or "webacy"
-- arbitrage / flash loan -> mcps include "one_inch", "webacy"
-- perp / perpetual / funding -> mcps include "hyperliquid"
-- whale / nansen / smart money -> mcps include "nansen"
-- always include "pyth" in mcps for price validation
-- default network: base-sepolia for EVM, solana-mainnet for Solana
+- arbitrage / flash loan / hot potato -> strategy:"arbitrage", mcps include "initia"
+- always include "pyth" in mcps for price corroboration unless omitted by user request
+- when chain is initia, actively exclude: one_inch, webacy, goplus, goat_evm, alchemy, rugcheck, jupiter, nansen, hyperliquid, debridge, lifi, uniswap, chainlink
+- for initia bots, allowed MCPs are: initia (required), lunarcrush (optional), pyth (optional)
+- default network: initia-testnet
 """
 
 
@@ -199,6 +198,35 @@ HARD RULES:
     In simulation mode, allow missing key and use ephemeral keypair.
 16. Every file must be COMPLETE — no stubs, no TODOs, no placeholder comments.
 17. Include a .env.example as a comment block at the top of src/config.ts showing every required env var.
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                      CRITICAL FOR INITIA BOTS                                ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+When the chain is Initia, these rules override EVM/Solana boilerplate:
+
+A. REMOVE EVM/SOLANA IMPLEMENTATION BOILERPLATE:
+  - Do NOT use ethers.js, @solana/web3.js, or bs58.
+  - Do NOT include Aave flash loan fee math (0.09%) or 1inch MCP calls.
+  - Do NOT instantiate RPC providers, wallets, or manual signing flows.
+  - Do NOT encode calldata/callback contracts.
+
+B. INITIA EXECUTION MODEL:
+  - All writes MUST use: callMcpTool('initia', 'move_execute', {...}).
+  - All reads MUST use: callMcpTool('initia', 'move_view', {...}).
+  - For flash-loan style arbitrage, construct a sequential Move call payload in one move_execute atomic call:
+    borrow -> swap -> repay.
+  - The MCP handles wallet signing and chain execution.
+
+C. INITIA ENV + DEPENDENCIES:
+  - Required credential: INITIA_KEY.
+  - INITIA_RPC_URL may be optional; include if referenced by user intent.
+  - Keep package deps minimal: dotenv, tsx, typescript, @types/node.
+
+D. INITIA MCP ALLOWLIST:
+  - Always include initia.
+  - Optional only: lunarcrush (sentiment), pyth (price corroboration).
+  - Never call one_inch/webacy/goplus/goat_evm/alchemy/jupiter/rugcheck for Initia bots.
 
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                    CRITICAL FOR ARBITRAGE BOTS                               ║
@@ -332,17 +360,35 @@ class MetaAgent:
             _log("WARN", f"classify_intent: JSON parse failed, using fallback intent ({exc.__class__.__name__}: {exc})", trace_id)
             # fallback
             intent = {
-                "chain": "evm", "network": "base-sepolia",
-                "strategy": "arbitrage",
-                "mcps": ["one_inch", "webacy", "pyth"],
-                "bot_name": "EVM Arbitrage Bot",
+            "chain": "initia", "network": "initia-testnet",
+            "strategy": "arbitrage",
+            "mcps": ["initia", "pyth"],
+            "bot_name": "Initia Move Bot",
                 "requires_openai": False,
             }
-        # ensure pyth is always present
-        mcps = intent.get("mcps", [])
-        if "pyth" not in mcps:
+        mcps = [str(m).strip().lower() for m in intent.get("mcps", []) if str(m).strip()]
+        chain = "initia"
+        intent["chain"] = chain
+        requested_network = str(intent.get("network", "")).strip().lower()
+        intent["network"] = requested_network if requested_network in {"initia-mainnet", "initia-testnet"} else os.environ.get("INITIA_NETWORK", "initia-testnet")
+
+        if chain == "initia":
+          disallowed = {
+            "one_inch", "webacy", "goplus", "goat_evm", "alchemy", "rugcheck",
+            "jupiter", "nansen", "hyperliquid", "debridge", "lifi", "uniswap", "chainlink",
+          }
+          allowed = {"initia", "lunarcrush", "pyth"}
+          cleaned = [m for m in mcps if m not in disallowed and m in allowed]
+          if "initia" not in cleaned:
+            cleaned.insert(0, "initia")
+          intent["mcps"] = list(dict.fromkeys(cleaned))
+          if not intent.get("network"):
+            intent["network"] = os.environ.get("INITIA_NETWORK", "initia-testnet")
+        else:
+          # ensure pyth is always present for EVM/Solana
+          if "pyth" not in mcps:
             mcps.append("pyth")
-            intent["mcps"] = mcps
+          intent["mcps"] = list(dict.fromkeys(mcps))
         _log("INFO", f"classify_intent: intent={json.dumps(intent, ensure_ascii=False)}", trace_id)
         return intent
 
@@ -378,6 +424,21 @@ class MetaAgent:
         mcps    = intent.get("mcps", [])
         strategy = intent.get("strategy", "unknown")
         bot_name = intent.get("bot_name", "DeFi Bot")
+
+        if chain == "initia":
+          if network not in {"initia-mainnet", "initia-testnet"}:
+            network = "initia-mainnet"
+            intent["network"] = network
+          disallowed = {
+            "one_inch", "webacy", "goplus", "goat_evm", "alchemy", "rugcheck",
+            "jupiter", "nansen", "hyperliquid", "debridge", "lifi", "uniswap", "chainlink",
+          }
+          allowed = {"initia", "lunarcrush", "pyth"}
+          mcps = [m for m in mcps if m not in disallowed and m in allowed]
+          if "initia" not in mcps:
+            mcps.insert(0, "initia")
+          mcps = list(dict.fromkeys(mcps))
+          intent["mcps"] = mcps
 
         chain_ctx = self._chain_context(chain, network, mcps, strategy)
         _log(
@@ -448,6 +509,44 @@ Jupiter MCP: callMcpTool('jupiter', 'getQuote', {{inputMint, outputMint, amount,
 Pyth SOL/USD feed: ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d
 Solana key: support bs58 AND JSON-array export formats. Parse in runtime, NOT in config.ts.
 Required deps: @solana/web3.js, bs58
+"""
+        if chain == "initia":
+            minitia_prices = "\n".join([
+                "  - callMcpTool('initia', 'move_view', {address:'0xminitia_pool_a', module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
+                "  - callMcpTool('initia', 'move_view', {address:'0xminitia_pool_b', module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
+            ])
+            initia_mcp_hints = ""
+            if "initia" in mcps:
+                initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {address, module, function, type_args, args})"
+                initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, args})"
+            if "lunarcrush" in mcps:
+                initia_mcp_hints += "\nLunarCrush: callMcpTool('lunarcrush', 'get_coin_details', {coin:'INIT'})"
+            if "pyth" in mcps:
+                initia_mcp_hints += "\nPyth: callMcpTool('pyth', 'get_latest_price_updates', {ids:['<init-feed-id>']})"
+
+            return f"""
+CHAIN CONTEXT — INITIA ({network})
+Network IDs:
+  initia-mainnet: interwoven-1
+  initia-testnet: initiation-2
+
+Canonical denoms (denom/module-driven, not universal ERC-20 addresses):
+  INIT: uinit
+  USDC: uusdc (deployment-specific; verify per Minitia)
+
+MCP tool signatures:
+{initia_mcp_hints}
+
+Cross-rollup price query pattern (read-only move_view):
+{minitia_prices}
+
+Hot Potato flash-loan pattern:
+  - Build one atomic move_execute payload with sequential calls:
+    1) borrow from flash pool module
+    2) swap on target pool/module
+    3) repay principal + fee in same atomic execution
+  - No callback contracts, no calldata encoding, no manual signing.
+  - MCP signs and submits using INITIA_KEY.
 """
         chain_ids = {"base-sepolia": 84532, "base-mainnet": 8453, "arbitrum": 42161}
         cid = chain_ids.get(network, 84532)

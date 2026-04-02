@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:meta-agent": "node --loader ts-node/esm test_meta_agent_flow.ts",
+    "test:initia-smoke": "node --loader ts-node/esm test_initia_smoke.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

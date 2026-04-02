@@ -110,6 +110,56 @@ async def mcp_tool(server: str, tool: str, body: dict):
         }
         return _mcp_ok(risk)
 
+    # Initia compatibility
+    if server_l == "initia" and tool_l == "move_execute":
+        module = str(body.get("module") or "hot_potato")
+        function = str(body.get("function") or "execute")
+        args = body.get("args") if isinstance(body.get("args"), list) else []
+        type_args = body.get("type_args") if isinstance(body.get("type_args"), list) else []
+        mock_tx = {
+            "ok": True,
+            "status": "executed",
+            "tx_hash": f"0xinitia{uuid4().hex[:24]}",
+            "tool": "move_execute",
+            "request": {
+                "network": str(body.get("network") or "initia-mainnet"),
+                "address": str(body.get("address") or "0xhot_potato_executor"),
+                "module": module,
+                "function": function,
+                "type_args": type_args,
+                "args": args,
+            },
+            "module": module,
+            "function": function,
+            "network": str(body.get("network") or "initia-mainnet"),
+            "simulated": True,
+            "source": "mcp-http-compat",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        return _mcp_ok(mock_tx)
+
+    if server_l == "initia" and tool_l == "move_view":
+        raw_args = body.get("args")
+        args = raw_args if isinstance(raw_args, list) else []
+        base_denom = str((args[0] if len(args) > 0 else None) or body.get("base_denom") or "uinit")
+        quote_denom = str((args[1] if len(args) > 1 else None) or body.get("quote_denom") or "uusdc")
+        mock_price = {
+            "ok": True,
+            "tool": "move_view",
+            "network": str(body.get("network") or "initia-mainnet"),
+            "address": str(body.get("address") or "0xminitia_pool"),
+            "module": str(body.get("module") or "amm_oracle"),
+            "function": str(body.get("function") or "spot_price"),
+            "args": args,
+            "pair": [base_denom, quote_denom],
+            "price": "1.234500",
+            "price_num": 1.2345,
+            "decimals": 6,
+            "source": "mcp-http-compat",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        return _mcp_ok(mock_price)
+
     # Default non-fatal compatibility response for unknown routes.
     return _mcp_ok(
         {
