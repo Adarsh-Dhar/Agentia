@@ -38,6 +38,9 @@ Cover ALL of the following in your expansion:
    - Max daily loss circuit breaker
    - Slippage tolerance and minimum liquidity checks
    - Flash loan fee accounting (Aave 0.09% fee + gas buffer)
+  - Explicit profit/loss reporting every cycle: log gross spread, fee estimate, gas estimate, and net profit or loss in the same token units before any trade decision
+
+For EVM arbitrage, swap, scalper, grid, DCA, yield, perp, and MEV strategies, prefer Pyth Network price/oracle data for market pricing and avoid Chainlink-based stale-feed checks unless the user explicitly requests Chainlink.
 
 6. **Key Environment Variables Required**:
    - List every API key, private key, RPC URL, and config variable the bot needs

@@ -70,9 +70,9 @@ function DynamicCredentialsCard({ fields, onSubmit, disabled, defaultValues }: {
 function SuccessCard({ agentId, botName }: { agentId: string; botName: string }) {
   const router = useRouter()
   return (
-    <div className="mt-3 bg-green-500/10 border border-green-500/30 rounded-xl p-4 w-full max-w-sm">
+    <div className="mt-3 bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-xl p-4 w-full max-w-sm shadow-lg shadow-green-500/5">
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-10 h-10 bg-green-500/20 rounded-full flex items-center justify-center">
+        <div className="w-10 h-10 bg-green-500/20 rounded-full flex items-center justify-center animate-pulse">
           <Check size={20} className="text-green-400" />
         </div>
         <div>
@@ -82,7 +82,7 @@ function SuccessCard({ agentId, botName }: { agentId: string; botName: string })
       </div>
       <button
         onClick={() => router.push('/dashboard/webcontainer')}
-        className="w-full flex items-center justify-center gap-2 border border-green-500/30 text-green-300 hover:bg-green-500/10 text-sm font-medium py-2 rounded-lg transition-colors"
+        className="w-full flex items-center justify-center gap-2 border border-green-500/50 text-green-300 hover:bg-green-500/15 hover:border-green-400 text-sm font-medium py-2.5 rounded-lg transition-all hover:shadow-lg hover:shadow-green-500/10"
       >
         <Terminal size={14} />
         Open in Bot IDE
@@ -115,15 +115,27 @@ export default function BotConfiguratorPage() {
             <p className="text-xs text-slate-500">Describe your strategy in plain English</p>
           </div>
         </div>
-        {generatedAgentId && (
-          <button
-            onClick={() => router.push('/dashboard/webcontainer')}
-            className="flex items-center gap-2 text-xs border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 px-3 py-1.5 rounded-lg transition-colors"
-          >
-            <Terminal size={12} />
-            Open Bot IDE
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {generatedAgentId && (
+            <>
+              <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded border border-green-500/30">
+                ✓ Bot Ready
+              </span>
+              <button
+                onClick={() => router.push('/dashboard/webcontainer')}
+                className="flex items-center gap-2 text-xs border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Terminal size={12} />
+                Open Bot IDE
+              </button>
+            </>
+          )}
+          {isGenerating && (
+            <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30 animate-pulse">
+              ⏳ Generating...
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Messages */}
@@ -177,6 +189,19 @@ export default function BotConfiguratorPage() {
         ))}
 
         {isTyping && <TypingIndicator />}
+        {step === 'generating' && (
+          <div className="flex items-end gap-2.5 px-4 py-2">
+            <div className="w-7 h-7 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center flex-shrink-0">
+              <Bot size={13} className="text-cyan-400" />
+            </div>
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl rounded-bl-sm px-4 py-3">
+              <p className="text-sm text-amber-300 flex items-center gap-2">
+                <span className="inline-block w-5 h-5 rounded-full border-2 border-amber-400/30 border-t-amber-400 animate-spin" />
+                <span>Meta-Agent is architecting your bot... (this may take 30-60 seconds)</span>
+              </p>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 

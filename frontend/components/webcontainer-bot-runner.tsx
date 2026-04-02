@@ -72,7 +72,7 @@ export function WebContainerBotRunner() {
 
   const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
 
-  const isDryRun = envConfig.SIMULATION_MODE !== "false";
+  const isDryRun = envConfig.SIMULATION_MODE === "true";
 
   // Merge file edits on top of generated files
   const currentFiles = generatedFiles.map(f => ({

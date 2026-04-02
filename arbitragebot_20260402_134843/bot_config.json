@@ -1,0 +1,14 @@
+{
+  "botName": "ArbitrageBot",
+  "chain": "base-sepolia",
+  "baseToken": "USDC",
+  "targetToken": "WETH",
+  "dex": "1inch",
+  "securityProvider": "webacy",
+  "borrowAmountHuman": 1,
+  "minProfitUsd": 0.5,
+  "gasBufferUsdc": 2,
+  "pollingIntervalSec": 5,
+  "simulationMode": true,
+  "maxRiskScore": 20
+}

@@ -36,6 +36,15 @@ export async function GET() {
     const envPath = path.resolve(process.cwd(), "../agents/.env");
     const envText = fs.readFileSync(envPath, "utf8");
     const values = parseEnvText(envText);
+    
+    // Ensure common RPC URLs are always present for discovery
+    if (!values["RPC_PROVIDER_URL"] && values["EVM_RPC_URL"]) {
+      values["RPC_PROVIDER_URL"] = values["EVM_RPC_URL"];
+    }
+    if (!values["EVM_RPC_URL"] && values["RPC_PROVIDER_URL"]) {
+      values["EVM_RPC_URL"] = values["RPC_PROVIDER_URL"];
+    }
+    
     return NextResponse.json({ values });
   } catch {
     return NextResponse.json({ values: {} });

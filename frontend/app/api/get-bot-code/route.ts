@@ -110,7 +110,7 @@ export async function POST(req: Request) {
         "Base Sepolia MCP arbitrage bot: borrows USDC via Aave flash loan, " +
         "swaps USDC→WETH→USDC via 1inch, repays loan + 0.09 % fee. " +
         "Token risk checked with Webacy before every execution. " +
-        "Set SIMULATION_MODE=true to run without sending transactions.",
+        "Set SIMULATION_MODE=true to disable sending transactions.",
       files,
       verified: true,
       agentId: agent.id,

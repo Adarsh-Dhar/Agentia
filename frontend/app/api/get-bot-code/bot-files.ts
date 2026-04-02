@@ -3,14 +3,15 @@
  *
  * Base Sepolia flash-loan arbitrage bot — WebContainer edition.
  *
- * Architecture: direct REST APIs + ethers.js (NO MCP subprocess spawning).
- *   • 1inch Swap API v6  → price quotes + swap calldata
+ * Architecture: MCP-first + REST fallback + ethers.js.
+ *   • 1inch MCP (preferred) / Swap API v6 fallback → quotes + swap calldata
  *   • Webacy REST API    → token risk checks
  *   • ethers.js v6       → on-chain flash loan execution
  *
  *   package.json / tsconfig.json / .env.example
  *   src/config.ts   — constants + env validation + ABI
- *   src/oneinch.ts  — 1inch REST API wrapper
+ *   src/mcp.ts      — MCP gateway helper
+ *   src/oneinch.ts  — 1inch MCP-first wrapper with REST fallback
  *   src/webacy.ts   — Webacy REST API wrapper
  *   src/execute.ts  — ethers.js flash loan executor
  *   src/index.ts    — main polling loop
@@ -27,6 +28,7 @@ export function assembleBotFiles(): BotFile[] {
     { filepath: "tsconfig.json",     content: TSCONFIG      },
     { filepath: ".env.example",      content: ENV_EXAMPLE   },
     { filepath: "src/config.ts",     content: CONFIG_TS     },
+    { filepath: "src/mcp.ts",        content: MCP_TS        },
     { filepath: "src/oneinch.ts",    content: ONEINCH_TS    },
     { filepath: "src/webacy.ts",     content: WEBACY_TS     },
     { filepath: "src/execute.ts",    content: EXECUTE_TS    },
@@ -82,7 +84,7 @@ ONEINCH_API_KEY=your_1inch_api_key_here
 # Webacy: https://webacy.com
 WEBACY_API_KEY=your_webacy_api_key_here
 
-# ── Required for LIVE mode (not needed for SIMULATION_MODE=true) ───────────────
+# ── Required for LIVE mode (not needed for SIMULATION_MODE=false) ──────────────
 # Base Sepolia RPC — get from Alchemy, Infura, QuickNode, etc.
 RPC_PROVIDER_URL=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
 
@@ -90,8 +92,17 @@ RPC_PROVIDER_URL=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
 WALLET_PRIVATE_KEY=0000000000000000000000000000000000000000000000000000000000000001
 
 # ── Safety ────────────────────────────────────────────────────────────────────
-# Set to "false" to broadcast real transactions (ONLY after thorough testing!)
-SIMULATION_MODE=true
+# Set to "true" to disable real transactions during testing
+SIMULATION_MODE=false
+
+# MCP gateway used for one_inch tool calls (preferred path)
+MCP_GATEWAY_URL=http://localhost:8000/mcp
+
+# Optional 1inch request chain override (default: 8453 in live Base Sepolia, else CHAIN_ID)
+# ONEINCH_CHAIN_ID=8453
+
+# Optional estimate flag for /swap (default false)
+# ONEINCH_DISABLE_ESTIMATE=false
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
 BORROW_AMOUNT_HUMAN=1
@@ -113,26 +124,43 @@ export const ONE_INCH_ROUTER = "0x111111125421cA6dc452d289314280a0f8842A65";
 // IMPORTANT: 84532 is Base Sepolia. Base Mainnet is 8453.
 export const CHAIN_ID        = 84532;
 
+/**
+ * 1inch public v6 endpoint supports Base mainnet (8453), not Base Sepolia (84532).
+ * In live mode on Base Sepolia, route quote/swap requests to 8453 by default.
+ */
+const ONEINCH_CHAIN_OVERRIDE = process.env.ONEINCH_CHAIN_ID?.trim();
+const parsedOneInchChain = ONEINCH_CHAIN_OVERRIDE ? parseInt(ONEINCH_CHAIN_OVERRIDE, 10) : NaN;
+export const ONEINCH_REQUEST_CHAIN_ID = Number.isFinite(parsedOneInchChain)
+  ? parsedOneInchChain
+  : (!((process.env.SIMULATION_MODE ?? "false") === "true") && CHAIN_ID === 84532 ? 8453 : CHAIN_ID);
+
 // ── Fee constants — all BigInt, no floats ─────────────────────────────────────
 export const AAVE_FEE_BPS    = 9n;         // 0.09 %
 export const GAS_BUFFER_USDC = 2_000_000n; // 2 USDC safety buffer (6-decimal units)
 
 // ── Runtime config ────────────────────────────────────────────────────────────
-export const SIMULATION_MODE       = (process.env.SIMULATION_MODE ?? "true") !== "false";
-export const BORROW_AMOUNT_HUMAN   = process.env.BORROW_AMOUNT_HUMAN ?? "1";
-export const POLL_INTERVAL_MS      = parseInt(process.env.POLL_INTERVAL ?? "5", 10) * 1000;
+export const SIMULATION_MODE       = (process.env.SIMULATION_MODE ?? "false") === "true";
+export const BORROW_AMOUNT_HUMAN   = String(process.env.BORROW_AMOUNT_HUMAN ?? "1").trim() || "1";
+export const POLL_INTERVAL_MS      = Math.max(1000, (parseInt(process.env.POLL_INTERVAL ?? "5", 10) || 5) * 1000);
 
 // ── Credentials ───────────────────────────────────────────────────────────────
 export const WALLET_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY ?? "";
 export const RPC_PROVIDER_URL   = process.env.RPC_PROVIDER_URL   ?? "";
 export const WEBACY_API_KEY     = process.env.WEBACY_API_KEY      ?? "";
 export const ONEINCH_API_KEY    = process.env.ONEINCH_API_KEY     ?? "";
+export const MCP_GATEWAY_URL    = process.env.MCP_GATEWAY_URL     ?? "http://localhost:8000/mcp";
+
+export const ONEINCH_DISABLE_ESTIMATE =
+  (process.env.ONEINCH_DISABLE_ESTIMATE ?? "false").trim().toLowerCase() === "true";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Convert human-readable USDC string to 6-decimal BigInt base units. */
-export function parseUsdc(human: string): bigint {
-  return BigInt(Math.round(parseFloat(human) * 1_000_000));
+export function parseUsdc(human: unknown): bigint {
+  const str = String(human ?? "0").trim();
+  const num = parseFloat(str);
+  if (isNaN(num) || num < 0) return 1_000_000n;
+  return BigInt(Math.round(num * 1_000_000));
 }
 
 export function createProvider(): ethers.JsonRpcProvider {
@@ -185,31 +213,194 @@ export const FLASHLOAN_ABI = [
     name: "withdrawProfit",
     outputs: [],
     stateMutability: "nonpayable",
-const INDEX_TS = `/**
     type: "function",
   },
 ] as const;
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// src/oneinch.ts — 1inch Swap API v6.0 (direct REST, no MCP)
+// src/mcp.ts — tiny MCP gateway client for WebContainer bots
+// ─────────────────────────────────────────────────────────────────────────────
+const MCP_TS = `import { MCP_GATEWAY_URL } from "./config.js";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeGatewayBase(raw: string): string {
+  const trimmed = raw.trim() || "http://localhost:8000/mcp";
+  return trimmed.replace(/\\/+$/, "");
+}
+
+export async function callMcpTool(
+  server: string,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const base = normalizeGatewayBase(MCP_GATEWAY_URL);
+  const url = \`\${base}/\${server}/\${tool}\`;
+  const attempts = 2;
+  let lastError = "unknown error";
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          "Bypass-Tunnel-Reminder": "true",
+        },
+        body: JSON.stringify(args),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        lastError = \`MCP \${server}/\${tool} HTTP \${res.status}: \${text.slice(0, 200)}\`;
+      } else {
+        return await res.json();
+      }
+    } catch (err) {
+      clearTimeout(timeout);
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+
+    if (attempt < attempts) {
+      await sleep(300 * attempt);
+    }
+  }
+
+  throw new Error(\`MCP \${server}/\${tool} unavailable: \${lastError}\`);
+}
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// src/oneinch.ts — 1inch MCP-first, REST fallback + testnet-safe mocks
 // ─────────────────────────────────────────────────────────────────────────────
 const ONEINCH_TS = `/**
  * src/oneinch.ts
  *
- * 1inch Swap API v6.0 — Base Sepolia (CHAIN_ID = 84532)
+ * Routing order:
+ *   1) one_inch MCP tool (preferred)
+ *   2) 1inch REST v6 fallback
+ *   3) deterministic mock data when unsupported testnet chain returns 404
+ *
+ * Base Sepolia (84532) is not available on 1inch public v6 endpoint.
  * Docs: https://portal.1inch.dev/documentation/apis/swap/swagger
  *
  * All amounts are BigInt in token base units.
  * Auth: Authorization: Bearer <ONEINCH_API_KEY>
  */
-import { CHAIN_ID } from "./config.js";
+import {
+  CHAIN_ID,
+  ONEINCH_REQUEST_CHAIN_ID,
+  ONEINCH_DISABLE_ESTIMATE,
+} from "./config.js";
+import { callMcpTool } from "./mcp.js";
 
-// API base URL uses CHAIN_ID constant — never a hardcoded integer
-const API_BASE = \`https://api.1inch.dev/swap/v6.0/\${CHAIN_ID}\`;
+const MCP_SERVER_CANDIDATES = ["one_inch", "one_inch_mcp"];
 
-async function oneInchFetch(path: string, apiKey: string): Promise<unknown> {
-  const url = \`\${API_BASE}\${path}\`;
+type OneInchHttpError = Error & { status?: number; chainId?: number; body?: string };
+
+function isUnsupportedTestnetChain(chainId: number): boolean {
+  return chainId === 84532;
+}
+
+function normalizeToBigInt(value: unknown): bigint | null {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.trunc(value));
+  if (typeof value === "string" && value.trim().length > 0) {
+    try {
+      return BigInt(value.trim());
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function parseMaybeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function pickBigIntByKeys(payload: unknown, keys: string[]): bigint | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const queue: unknown[] = [payload];
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (!cur || typeof cur !== "object") continue;
+
+    const rec = cur as Record<string, unknown>;
+    for (const key of keys) {
+      const parsed = normalizeToBigInt(rec[key]);
+      if (parsed !== null) return parsed;
+    }
+
+    for (const value of Object.values(rec)) {
+      if (value && typeof value === "object") queue.push(value);
+      if (typeof value === "string" && value.trim().startsWith("{")) {
+        queue.push(parseMaybeJson(value));
+      }
+    }
+  }
+
+  return null;
+}
+
+function pickStringByKeys(payload: unknown, keys: string[]): string | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const queue: unknown[] = [payload];
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (!cur || typeof cur !== "object") continue;
+
+    const rec = cur as Record<string, unknown>;
+    for (const key of keys) {
+      const val = rec[key];
+      if (typeof val === "string" && val.trim().length > 0) {
+        return val;
+      }
+    }
+
+    for (const value of Object.values(rec)) {
+      if (value && typeof value === "object") queue.push(value);
+      if (typeof value === "string" && value.trim().startsWith("{")) {
+        queue.push(parseMaybeJson(value));
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildMockQuote(amount: bigint): { dstAmount: string } {
+  // Keep deterministic and conservative so simulation never overstates profitability.
+  return { dstAmount: amount.toString() };
+}
+
+function buildMockSwapData(): { tx: { data: string; to: string; value: string } } {
+  return {
+    tx: {
+      data: "0x",
+      to: "0x111111125421cA6dc452d289314280a0f8842A65",
+      value: "0",
+    },
+  };
+}
+
+async function oneInchFetch(path: string, apiKey: string, chainId: number): Promise<unknown> {
+  const apiBase = \`https://api.1inch.dev/swap/v6.0/\${chainId}\`;
+  const url = \`\${apiBase}\${path}\`;
   const res  = await fetch(url, {
     headers: {
       Authorization: \`Bearer \${apiKey}\`,
@@ -219,16 +410,68 @@ async function oneInchFetch(path: string, apiKey: string): Promise<unknown> {
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    const err = new Error("1inch request failed") as OneInchHttpError;
+    err.status = res.status;
+    err.chainId = chainId;
+    err.body = body;
     try {
       const parsed = JSON.parse(body) as { description?: string; error?: string };
       const msg    = parsed.description ?? parsed.error ?? body.slice(0, 200);
-      throw new Error(\`1inch API \${res.status}: \${msg}\`);
+      err.message = \`1inch API \${res.status} (chain \${chainId}): \${msg}\`;
+      throw err;
     } catch {
-      throw new Error(\`1inch API \${res.status}: \${body.slice(0, 200)}\`);
+      err.message = \`1inch API \${res.status} (chain \${chainId}): \${body.slice(0, 200)}\`;
+      throw err;
     }
   }
 
   return res.json();
+}
+
+async function tryMcpQuote(src: string, dst: string, amount: bigint, chainId: number): Promise<bigint | null> {
+  for (const server of MCP_SERVER_CANDIDATES) {
+    try {
+      const mcpResponse = await callMcpTool(server, "get_quote", {
+        chainId,
+        src,
+        dst,
+        amount: amount.toString(),
+      });
+      const parsedAmount = pickBigIntByKeys(mcpResponse, ["dstAmount", "toAmount", "amountOut", "outAmount"]);
+      if (parsedAmount !== null) return parsedAmount;
+    } catch {
+      // Try next candidate, then fallback to REST.
+    }
+  }
+  return null;
+}
+
+async function tryMcpSwapData(
+  src: string,
+  dst: string,
+  amount: bigint,
+  from: string,
+  chainId: number,
+): Promise<string | null> {
+  for (const server of MCP_SERVER_CANDIDATES) {
+    try {
+      const mcpResponse = await callMcpTool(server, "get_swap_data", {
+        chainId,
+        src,
+        dst,
+        amount: amount.toString(),
+        from,
+        slippage: "1",
+        disableEstimate: ONEINCH_DISABLE_ESTIMATE,
+        allowPartialFill: false,
+      });
+      const calldata = pickStringByKeys(mcpResponse, ["data", "swapData", "txData", "calldata"]);
+      if (calldata) return calldata;
+    } catch {
+      // Try next candidate, then fallback to REST.
+    }
+  }
+  return null;
 }
 
 /**
@@ -240,21 +483,31 @@ export async function getQuote(
   amount: bigint,
   apiKey: string,
 ): Promise<bigint> {
+  const mcpAmount = await tryMcpQuote(src, dst, amount, ONEINCH_REQUEST_CHAIN_ID);
+  if (mcpAmount !== null) return mcpAmount;
+
   const qs = new URLSearchParams({
     src,
     dst,
     amount: amount.toString(),
   });
-  const data = await oneInchFetch(\`/quote?\${qs}\`, apiKey) as { dstAmount: string };
-  if (!data.dstAmount) throw new Error("1inch quote: missing dstAmount in response");
-  return BigInt(data.dstAmount);
+  try {
+    const data = await oneInchFetch(\`/quote?\${qs}\`, apiKey, ONEINCH_REQUEST_CHAIN_ID) as { dstAmount: string };
+    if (!data.dstAmount) throw new Error("1inch quote: missing dstAmount in response");
+    return BigInt(data.dstAmount);
+  } catch (err) {
+    const httpErr = err as OneInchHttpError;
+    if (httpErr?.status === 404 && isUnsupportedTestnetChain(CHAIN_ID)) {
+      return BigInt(buildMockQuote(amount).dstAmount);
+    }
+    throw err;
+  }
 }
 
 /**
  * getSwapData — build calldata for on-chain swap execution.
  *
- * Uses disableEstimate=true because 'from' (the flash loan contract)
- * doesn't hold the tokens at quote time — only during the flash loan callback.
+ * disableEstimate is configurable via ONEINCH_DISABLE_ESTIMATE (default false).
  */
 export async function getSwapData(
   src:    string,
@@ -263,20 +516,31 @@ export async function getSwapData(
   from:   string,
   apiKey: string,
 ): Promise<string> {
+  const mcpCalldata = await tryMcpSwapData(src, dst, amount, from, ONEINCH_REQUEST_CHAIN_ID);
+  if (mcpCalldata) return mcpCalldata;
+
   const qs = new URLSearchParams({
     src,
     dst,
     amount:           amount.toString(),
     from,
     slippage:         "1",
-    disableEstimate:  "true",
+    disableEstimate:  ONEINCH_DISABLE_ESTIMATE ? "true" : "false",
     allowPartialFill: "false",
   });
-  const data = await oneInchFetch(\`/swap?\${qs}\`, apiKey) as {
-    tx: { data: string; to: string; value: string };
-  };
-  if (!data?.tx?.data) throw new Error("1inch swap: missing tx.data in response");
-  return data.tx.data;
+  try {
+    const data = await oneInchFetch(\`/swap?\${qs}\`, apiKey, ONEINCH_REQUEST_CHAIN_ID) as {
+      tx: { data: string; to: string; value: string };
+    };
+    if (!data?.tx?.data) throw new Error("1inch swap: missing tx.data in response");
+    return data.tx.data;
+  } catch (err) {
+    const httpErr = err as OneInchHttpError;
+    if (httpErr?.status === 404 && isUnsupportedTestnetChain(CHAIN_ID)) {
+      return buildMockSwapData().tx.data;
+    }
+    throw err;
+  }
 }
 `;
 
@@ -443,6 +707,7 @@ import {
   AAVE_FEE_BPS,
   GAS_BUFFER_USDC,
   CHAIN_ID,
+  ONEINCH_REQUEST_CHAIN_ID,
   createProvider,
   createSigner,
   parseUsdc,
@@ -487,6 +752,9 @@ function validate(): void {
     if (!RPC_PROVIDER_URL)   errors.push("RPC_PROVIDER_URL is required for live mode");
     if (!WALLET_PRIVATE_KEY) errors.push("WALLET_PRIVATE_KEY is required for live mode");
   }
+    if (ONEINCH_REQUEST_CHAIN_ID !== CHAIN_ID) {
+      log("WARN", \`1inch request chain (\${ONEINCH_REQUEST_CHAIN_ID}) differs from execution chain (\${CHAIN_ID}); execution will be skipped for safety.\`);
+    }
 
   if (errors.length > 0) {
     errors.forEach(e => log("ERROR", e));
@@ -520,11 +788,32 @@ if (SIMULATION_MODE) {
 log("INFO", \`Borrow amount : \${BORROW_BASE.toLocaleString()} base units (\${BORROW_AMOUNT_HUMAN} USDC)\`);
 log("INFO", \`Poll interval : \${POLL_INTERVAL_MS / 1000}s\`);
 log("INFO", \`Bot address   : \${ARB_BOT_ADDRESS}\`);
-log("INFO", \`1inch chain   : \${CHAIN_ID}\`);
+log("INFO", \`1inch chain   : \${ONEINCH_REQUEST_CHAIN_ID} (execution chain \${CHAIN_ID})\`);
 console.log();
 
 // ── Main cycle ────────────────────────────────────────────────────────────────
 let cycle = 0;
+let lastErrorKey = "";
+let lastErrorCount = 0;
+
+function logCycleError(message: string): void {
+  const key = message.slice(0, 160);
+  if (key === lastErrorKey) {
+    lastErrorCount += 1;
+    if (lastErrorCount === 5 || lastErrorCount % 20 === 0) {
+      log("WARN", \`Repeated error (\${lastErrorCount + 1}x): \${message}\`);
+    }
+    return;
+  }
+
+  if (lastErrorCount > 0) {
+    log("INFO", \`Previous repeated error count: \${lastErrorCount + 1}\`);
+  }
+
+  lastErrorKey = key;
+  lastErrorCount = 0;
+  log("ERROR", \`Cycle #\${cycle} — \${message}\`);
+}
 
 async function runCycle(): Promise<void> {
   cycle++;
@@ -561,6 +850,11 @@ async function runCycle(): Promise<void> {
       if (SIMULATION_MODE) {
         log("EXEC", \`[SIM] Cycle #\${cycle} — Would execute flash loan. Net profit: +\${netUsd} USDC\`);
       } else {
+        if (ONEINCH_REQUEST_CHAIN_ID !== CHAIN_ID) {
+          log("WARN", \`Cycle #\${cycle} — Skipping live execution: 1inch chain (\${ONEINCH_REQUEST_CHAIN_ID}) != execution chain (\${CHAIN_ID})\`);
+          return;
+        }
+
         if (!signer) { log("ERROR", "No signer — cannot execute"); return; }
 
         log("EXEC", \`Cycle #\${cycle} — Fetching swap calldata from 1inch...\`);
@@ -576,7 +870,7 @@ async function runCycle(): Promise<void> {
       log("INFO", \`Cycle #\${cycle} — No opportunity. Net: \${netUsd} USDC (after fees+buffer)\`);
     }
   } catch (err: unknown) {
-    log("ERROR", \`Cycle #\${cycle} — \${(err as Error).message}\`);
+    logCycleError((err as Error).message);
   }
 }
 

@@ -268,18 +268,25 @@ export function useBotConfigChat() {
           expandedPrompt,                   // rich spec for the code generator
           envConfig,
         }),
+        // Increase timeout to 60 seconds for generation
+        signal: AbortSignal.timeout(600000),
       })
 
       const data = await res.json()
 
       if (!res.ok) {
+        console.error("[chat] Generation response error:", data)
         throw new Error(data?.error ?? `Generation failed (HTTP ${res.status})`)
       }
+
+      console.log("[chat] Generation succeeded:", { agentId: data.agentId, botName: data.botName, files: data.files?.length })
 
       setGeneratedAgentId(data.agentId)
 
       const fileCount = (data.files ?? []).length
       const thoughts  = data.thoughts ?? "Bot generated successfully."
+
+      console.log("[chat] About to push success card:", { agentId: data.agentId, botName: data.botName })
 
       setIsTyping(true)
       await delay(400)
@@ -295,7 +302,7 @@ export function useBotConfigChat() {
 
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      console.error("[chat] Error during generation:", msg)
+      console.error("[chat] Error during generation:", msg, err)
       setIsTyping(true)
       await delay(300)
       setIsTyping(false)

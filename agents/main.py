@@ -5,10 +5,14 @@ Start: uvicorn main:app --reload
 
 import os
 import json
+import asyncio
+import time
+import traceback
+from uuid import uuid4
 from datetime import datetime, timezone
 from urllib import request as urllib_request
 from urllib.error import URLError, HTTPError
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from orchestrator import MetaAgent
@@ -17,6 +21,7 @@ app = FastAPI(title="DeFi Bot Meta-Agent", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 agent = MetaAgent()
+CREATE_BOT_TIMEOUT_SECONDS = float(os.environ.get("META_AGENT_CREATE_BOT_TIMEOUT_SECONDS", "240"))
 
 
 class PromptRequest(BaseModel):
@@ -118,8 +123,50 @@ async def mcp_tool(server: str, tool: str, body: dict):
 
 
 @app.post("/create-bot")
-async def create_bot(req: PromptRequest):
+async def create_bot(req: PromptRequest, request: Request):
+    """Build bot with request-scoped logging and a configurable timeout."""
+    request_id = (request.headers.get("x-request-id") or uuid4().hex[:8]).strip()[:12]
+    started_at = time.monotonic()
+    prompt_length = len(req.prompt or "")
+    print(f"[create-bot] [{request_id}] Received request prompt_chars={prompt_length} timeout={CREATE_BOT_TIMEOUT_SECONDS}s")
+
     try:
-        return agent.build_bot(req.prompt)
+        stage_started = time.monotonic()
+        print(f"[create-bot] [{request_id}] Stage=build_bot starting")
+        # Wrap blocking call with timeout
+        result = await asyncio.wait_for(
+            asyncio.to_thread(agent.build_bot, req.prompt, request_id),
+            timeout=CREATE_BOT_TIMEOUT_SECONDS,
+        )
+        build_elapsed = round(time.monotonic() - stage_started, 2)
+        total_elapsed = round(time.monotonic() - started_at, 2)
+        print(f"[create-bot] [{request_id}] Stage=build_bot completed in {build_elapsed}s total_elapsed={total_elapsed}s")
+        if isinstance(result, dict):
+            print(f"[create-bot] [{request_id}] Success keys={list(result.keys())}")
+        else:
+            print(f"[create-bot] [{request_id}] Success result_type={type(result).__name__}")
+        return result
+    except asyncio.TimeoutError:
+        total_elapsed = round(time.monotonic() - started_at, 2)
+        print(f"[create-bot] [{request_id}] ❌ Timeout after {total_elapsed}s (limit={CREATE_BOT_TIMEOUT_SECONDS}s) prompt_chars={prompt_length}")
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Bot generation timed out after {CREATE_BOT_TIMEOUT_SECONDS:.0f} seconds "
+                f"(request_id={request_id}, prompt_chars={prompt_length}). "
+                "Check API keys, MCP connectivity, and Meta-Agent model latency."
+            ),
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        elapsed = round(time.monotonic() - started_at, 2)
+        print(f"[create-bot] [{request_id}] ❌ Error after {elapsed}s: {error_msg}")
+        print(f"[create-bot] [{request_id}] Traceback follows for debugging")
+        traceback.print_exc()
+        status_code = 504 if "LLM timeout" in error_msg or "timeout" in error_msg.lower() else 500
+        raise HTTPException(
+            status_code=status_code,
+            detail=(
+                f"{error_msg} (request_id={request_id}, prompt_chars={prompt_length}, elapsed={elapsed}s)"
+            ),
+        )

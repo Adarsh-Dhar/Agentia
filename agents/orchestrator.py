@@ -16,6 +16,8 @@ Pipeline:
 import os
 import re
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from dotenv import load_dotenv
 from azure.ai.inference import ChatCompletionsClient
@@ -25,6 +27,15 @@ from azure.core.credentials import AzureKeyCredential
 _BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(_BASE_DIR / ".env")
 load_dotenv(_BASE_DIR / ".env.local", override=True)
+
+LLM_TIMEOUT_SECONDS = int(os.environ.get("META_AGENT_LLM_TIMEOUT_SECONDS", "240"))
+
+
+def _log(level: str, message: str, trace_id: str | None = None) -> None:
+  prefix = f"[meta-agent] [{level}]"
+  if trace_id:
+    prefix += f" [{trace_id}]"
+  print(f"{prefix} {message}")
 
 
 # ─── MCP Bridge Template (always the same — hardcoded, not generated) ────────
@@ -46,10 +57,14 @@ export async function callMcpTool(
   const attempts = 3;
   let lastError = "unknown error";
 
+  console.log(`[MCP] → Calling ${server}/${tool}`);
+  console.log(`[MCP] Request args: ${JSON.stringify(args)}`);
+
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
+      console.log(`[MCP] URL: ${url} (attempt ${attempt}/${attempts})`);
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -65,8 +80,10 @@ export async function callMcpTool(
       if (!response.ok) {
         const errText = await response.text();
         lastError = `MCP ${server}/${tool} failed: ${response.status} — ${errText}`;
+        console.error(`[MCP] ✗ Response status: ${response.status}`);
       } else {
         const data = await response.json();
+        console.log(`[MCP] ✓ Response received:`, JSON.stringify(data).substring(0, 200));
         const result = (data as { result?: { isError?: boolean; content?: unknown } })?.result;
         if (result?.isError) {
           const content = result.content;
@@ -80,6 +97,7 @@ export async function callMcpTool(
     } catch (err) {
       clearTimeout(timeout);
       lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[MCP] ✗ Error: ${lastError}`);
     }
     if (attempt < attempts) await sleep(400 * attempt);
   }
@@ -181,6 +199,52 @@ HARD RULES:
     In simulation mode, allow missing key and use ephemeral keypair.
 16. Every file must be COMPLETE — no stubs, no TODOs, no placeholder comments.
 17. Include a .env.example as a comment block at the top of src/config.ts showing every required env var.
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    CRITICAL FOR ARBITRAGE BOTS                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+When generating an arbitrage bot, THESE RULES OVERRIDE THE ABOVE:
+
+A. 1INCH MCP RESPONSE PARSING (CRITICAL BUG FIX):
+   - 1inch get_quote returns a complex JSON object, NOT a simple number.
+   - DO NOT do: Math.abs(pythPrice - quoteObject) — this returns NaN and breaks safety checks.
+   - DO extract: const price = quoteObject?.result?.toTokenAmount || quoteObject?.toTokenAmount;
+   - Then compare: if (Number(price) > 0.01 * initialPrice) { /* safe */ }
+   - Log the extracted value: console.log(`[1inch] Extracted toTokenAmount: ${price}`);
+
+B. PROFIT CALCULATION WITH FEES (REQUIRED FOR ALL ARBITRAGE):
+   - Aave V3 flash loan fee: 0.09% of borrowed amount (9 basis points).
+   - Formula: netProfit (in base units) = tokenOutAmount - tokenInAmount - (loanAmount × 0.0009) - estimatedGasCost
+   - ONLY execute if: netProfit > 0 (in other words, after all fees and gas, you still make money)
+   - Use BigInt for all calculations. Convert to human-readable format ONLY for logging.
+   - Example: const fee = (BigInt(loanAmount) * BigInt(9)) / BigInt(10000);
+
+C. ATOMIC EXECUTION FLOW FOR ARBITRAGE:
+   - Arbitrage requires 3 consecutive on-chain calls within a single transaction:
+     1. Borrow `loanAmount` from Aave V3 flashLoan receiver function
+     2. Swap tokenIn→tokenOut on 1inch (or any DEX) using the loan proceeds
+     3. Swap tokenOut→tokenIn to close the loop and repay the loan + fee
+   - You MUST call the Aave V3 flashLoan function with a `loan_amount` parameter.
+   - The swap logic must be inside the flashLoan callback/receiver.
+   - Get swap calldata from 1inch get_swap_data, then execute via contract write call.
+   - ONLY invoke flashLoan if profit > 0 (Step PROTECT checks this BEFORE Step ACT).
+
+D. ARBITRAGE-SPECIFIC LOGGING:
+   - Log every price fetch from both 1inch and Pyth SEPARATELY:
+     console.log(`[LISTEN] 1inch price: ${extractedPrice}`);
+     console.log(`[LISTEN] Pyth oracle price: ${pythPrice}`);
+   - Log profit calculation details:
+     console.log(`[QUANTIFY] Loan fee: ${fee.toString()}`);
+     console.log(`[QUANTIFY] Net profit: ${netProfit.toString()} (threshold: 0)`);
+   - Log PROTECT decision:
+     if (netProfit <= 0n) {
+       console.log(`[PROTECT] ✗ Profit ${netProfit.toString()} <= 0, SKIP execution`);
+       return;
+     }
+     console.log(`[PROTECT] ✓ Profit ${netProfit.toString()} > 0, PROCEED to execution`);
+   - Log execution attempt:
+     console.log(`[ACT] → Invoking flashLoan for ${loanAmount.toString()}...`);
 """
 
 
@@ -197,24 +261,75 @@ class MetaAgent:
             credential=AzureKeyCredential(token),
         )
         self.model      = os.environ.get("GITHUB_MODEL_NAME", "gpt-4o")
-        self.max_tokens = int(os.environ.get("GENERATION_MAX_TOKENS", "4096"))
+        self.max_tokens = int(os.environ.get("GENERATION_MAX_TOKENS", "2048"))
 
-    def _llm(self, system: str, user: str, temperature: float = 0.0, max_tokens: int = 512) -> str:
-        response = self.client.complete(
-            messages=[SystemMessage(content=system), UserMessage(content=user)],
-            model=self.model,
-            temperature=temperature,
-            max_tokens=max_tokens,
+    def _llm(
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+        *,
+        operation: str = "llm",
+        trace_id: str | None = None,
+    ) -> str:
+      started_at = time.monotonic()
+
+      def _complete():
+        return self.client.complete(
+          messages=[SystemMessage(content=system), UserMessage(content=user)],
+          model=self.model,
+          temperature=temperature,
+          max_tokens=max_tokens,
         )
-        return response.choices[0].message.content.strip()
 
-    def classify_intent(self, prompt: str) -> dict:
-        raw = self._llm(CLASSIFIER_SYSTEM, prompt, temperature=0.0, max_tokens=512)
+      executor = ThreadPoolExecutor(max_workers=1)
+      try:
+        _log(
+          "INFO",
+          f"{operation}: submitting request model={self.model} system_chars={len(system)} user_chars={len(user)} max_tokens={max_tokens} timeout={LLM_TIMEOUT_SECONDS}s",
+          trace_id,
+        )
+        future = executor.submit(_complete)
+        response = future.result(timeout=LLM_TIMEOUT_SECONDS)
+      except FuturesTimeoutError:
+        # IMPORTANT: avoid blocking on executor shutdown(wait=True) when the
+        # worker thread is stuck in network I/O.
+        future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        elapsed = round(time.monotonic() - started_at, 2)
+        msg = (
+          f"LLM timeout after {LLM_TIMEOUT_SECONDS}s for {operation} "
+          f"(model={self.model}, system_chars={len(system)}, user_chars={len(user)}, max_tokens={max_tokens}, elapsed={elapsed}s)"
+        )
+        _log("ERROR", msg, trace_id)
+        raise TimeoutError(msg)
+      except Exception as exc:
+        executor.shutdown(wait=False, cancel_futures=True)
+        elapsed = round(time.monotonic() - started_at, 2)
+        _log(
+          "ERROR",
+          f"{operation}: failed after {elapsed}s with {exc.__class__.__name__}: {exc}",
+          trace_id,
+        )
+        raise
+      else:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+      content = response.choices[0].message.content
+      elapsed = round(time.monotonic() - started_at, 2)
+      _log("INFO", f"{operation}: completed in {elapsed}s", trace_id)
+      return content.strip() if isinstance(content, str) else str(content)
+
+    def classify_intent(self, prompt: str, trace_id: str | None = None) -> dict:
+        _log("INFO", f"classify_intent: prompt_chars={len(prompt)}", trace_id)
+        raw = self._llm(CLASSIFIER_SYSTEM, prompt, temperature=0.0, max_tokens=512, operation="classify_intent", trace_id=trace_id)
         # Strip markdown fences if present
         raw = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
         try:
             intent = json.loads(raw)
-        except Exception:
+        except Exception as exc:
+            _log("WARN", f"classify_intent: JSON parse failed, using fallback intent ({exc.__class__.__name__}: {exc})", trace_id)
             # fallback
             intent = {
                 "chain": "evm", "network": "base-sepolia",
@@ -228,7 +343,7 @@ class MetaAgent:
         if "pyth" not in mcps:
             mcps.append("pyth")
             intent["mcps"] = mcps
-        print(f"\n🎯 Intent: {json.dumps(intent, indent=2)}\n")
+        _log("INFO", f"classify_intent: intent={json.dumps(intent, ensure_ascii=False)}", trace_id)
         return intent
 
     def _parse_response(self, raw: str) -> dict:
@@ -255,8 +370,9 @@ class MetaAgent:
         except Exception:
             return {"thoughts": "parse error", "files": [{"filepath": "error.ts", "content": raw}]}
 
-    def build_bot(self, prompt: str) -> dict:
-        intent  = self.classify_intent(prompt)
+    def build_bot(self, prompt: str, trace_id: str | None = None) -> dict:
+        _log("INFO", f"build_bot: received prompt_chars={len(prompt)}", trace_id)
+        intent  = self.classify_intent(prompt, trace_id=trace_id)
         chain   = intent.get("chain", "evm")
         network = intent.get("network", "base-sepolia")
         mcps    = intent.get("mcps", [])
@@ -264,6 +380,11 @@ class MetaAgent:
         bot_name = intent.get("bot_name", "DeFi Bot")
 
         chain_ctx = self._chain_context(chain, network, mcps, strategy)
+        _log(
+          "INFO",
+          f"build_bot: bot_name={bot_name} chain={chain} network={network} strategy={strategy} mcps={','.join(mcps)} chain_ctx_chars={len(chain_ctx)}",
+          trace_id,
+        )
 
         user_msg = f"""
 Bot request: {prompt}
@@ -279,9 +400,20 @@ Requires OpenAI sub-agent: {intent.get('requires_openai', False)}
 Generate the 3 files now.
 """.strip()
 
-        print(f"🔧 Generating {bot_name} ({strategy} on {chain}/{network})...")
-        raw = self._llm(GENERATOR_SYSTEM, user_msg, temperature=0.1, max_tokens=self.max_tokens)
+        _log("INFO", f"build_bot: generator_prompt_chars={len(user_msg)} system_chars={len(GENERATOR_SYSTEM)}", trace_id)
+        raw = self._llm(
+          GENERATOR_SYSTEM,
+          user_msg,
+          temperature=0.1,
+          max_tokens=self.max_tokens,
+          operation="build_bot",
+          trace_id=trace_id,
+        )
+        _log("INFO", f"build_bot: raw_response_chars={len(raw)}", trace_id)
         parsed = self._parse_response(raw)
+
+        if "files" not in parsed:
+          _log("WARN", f"build_bot: parsed response missing files key. keys={list(parsed.keys())}", trace_id)
 
         files = parsed.get("files", [])
         # Always inject the fixed mcp_bridge.ts
@@ -291,6 +423,8 @@ Generate the 3 files now.
         # (mcp_bridge is injected separately and not counted as a "generated" file)
         wanted = {"package.json", "src/config.ts", "src/index.ts"}
         final_files = [f for f in files if f.get("filepath") in wanted or f.get("filepath") == "src/mcp_bridge.ts"]
+
+        _log("INFO", f"build_bot: final_files={[f.get('filepath') for f in final_files]}", trace_id)
 
         return {
             "status":  "ready",
@@ -327,6 +461,7 @@ Required deps: @solana/web3.js, bs58
         mcp_hints = ""
         if "one_inch" in mcps:
             mcp_hints += f"\n1inch: callMcpTool('one_inch', 'get_quote', {{tokenIn, tokenOut, amount:'<str>', chain:{cid}}})"
+            mcp_hints += "\n  CRITICAL: Extract toTokenAmount from response, do NOT use entire object in math!"
             mcp_hints += f"\n1inch: callMcpTool('one_inch', 'get_swap_data', {{tokenIn, tokenOut, amount:'<str>', chain:{cid}, from:'<addr>', slippage:1}})"
         if "webacy" in mcps:
             mcp_hints += f"\nWebacy: callMcpTool('webacy', 'get_token_risk', {{address:'<addr>', chain:'{network}'}})"

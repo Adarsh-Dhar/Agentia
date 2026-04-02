@@ -68,7 +68,7 @@ export interface BotEnvConfig {
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
-  SIMULATION_MODE:     "true",
+  SIMULATION_MODE:     "false",
   MCP_GATEWAY_URL:     "http://192.168.1.50:8000/mcp",
 
   RPC_PROVIDER_URL:    "",

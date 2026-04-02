@@ -148,6 +148,30 @@ All math must use integers (base units) only.
 Get swap calldata from {dex} get_swap_data using tokenIn/tokenOut keys.
 Execute via goat_evm write_contract using the \"address\" key (not contractAddress).
 Use structured logging. Call convert_to_base_units at startup. Include SIMULATION_MODE.
+
+CRITICAL IMPLEMENTATION DETAILS FOR 1INCH INTEGRATION:
+1. When calling get_quote, the response is a JSON object, NOT a number. You MUST extract the price value.
+   - Response field: quoteObject?.result?.toTokenAmount || quoteObject?.toTokenAmount
+   - NEVER do Math.abs(price - quoteObject) — this will return NaN and bypass all safety checks.
+   - Always log the extracted price: console.log(`[1inch] toTokenAmount: ${{price}}`);
+
+2. Profit calculation MUST include the 0.09% Aave flash loan fee:
+   - Fee calculation: loanAmountInBaseUnits × 9 / 10000 (0.09% = 9 basis points)
+   - Net Profit = (finalAmountOut - initialAmountIn) - fee - gasCostEstimate
+   - ONLY execute the flashLoan if: Net Profit > 0
+   - Use this logic in the PROTECT step BEFORE the ACT step.
+
+3. The execution must be atomic (all on-chain in one transaction):
+   - Step 1: Call Aave V3 flashLoan with loamAmount = {borrow} {base_token}
+   - Step 2: Inside the flashLoan callback, execute the 1inch swap tokenIn→tokenOut
+   - Step 3: Execute another 1inch swap tokenOut→tokenIn to repay + fee
+   - Return the borrowed amount + 0.09% fee to Aave.
+
+4. Log clearly at each step:
+   - [LISTEN] → Both 1inch and Pyth prices separately
+   - [QUANTIFY] → Profit calculation breakdown (fee, gas, net profit)
+   - [PROTECT] → "Profit X > 0, proceeding" or "Profit X ≤ 0, SKIP"
+   - [ACT] → "Invoking flashLoan with amount Y..."
 """.strip()
 
 
@@ -248,6 +272,13 @@ def main():
     for file in output.get("files", []):
         filepath = file.get("filepath", "unknown.py")
         content  = file.get("content", "")
+        
+        # Handle edge case where content might be a dict or non-string
+        if isinstance(content, dict):
+            content = json.dumps(content, indent=2)
+        elif not isinstance(content, str):
+            content = str(content)
+        
         filename = os.path.basename(filepath)
         outpath  = os.path.join(folder, filename)
         with open(outpath, "w") as f:
