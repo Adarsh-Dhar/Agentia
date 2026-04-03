@@ -1,0 +1,41 @@
+---
+compiled_package_info:
+  package_name: MockBridge
+  address_alias_instantiation:
+    deployer: 000000000000000000000000923edc29f60bb73bec89024e17d3710ae92c0bb5
+  source_digest: 0B6F09FFD6F405806E7F3BDCEAFBAA70362805BDD88BAB97315D6981E740C1EC
+  build_flags:
+    dev_mode: false
+    test_mode: false
+    override_std: ~
+    generate_docs: false
+    generate_abis: false
+    generate_move_model: true
+    full_model_generation: false
+    install_dir: "."
+    force_recompilation: false
+    additional_named_addresses:
+      deployer: 000000000000000000000000923edc29f60bb73bec89024e17d3710ae92c0bb5
+    fetch_deps_only: false
+    skip_fetch_latest_git_deps: false
+    compiler_config:
+      bytecode_version: 7
+      known_attributes:
+        - bytecode_instruction
+        - deprecated
+        - event
+        - expected_failure
+        - "lint::skip"
+        - module_lock
+        - native_interface
+        - persistent
+        - test
+        - test_only
+        - verify_only
+        - view
+      skip_attribute_checks: false
+      compiler_version: V2_0
+      language_version: V2_1
+      experiments: []
+dependencies: []
+bytecode_deps: []

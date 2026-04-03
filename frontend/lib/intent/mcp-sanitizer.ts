@@ -49,6 +49,9 @@ export function shouldUseInitiaDeterministicFallback(intent: Record<string, unkn
 
 export function sanitizeIntentMcpLists(intent: Record<string, unknown>): Record<string, unknown> {
   const strategy = normalizeMcp(intent.strategy);
+  const botType = normalizeMcp(intent.bot_type) ?? "";
+  const botName = normalizeMcp(intent.bot_name) ?? "";
+  const botLabel = `${botType} ${botName}`;
   const requestedChain = normalizeMcp(intent.chain);
   const requestedNetwork = normalizeMcp(intent.network);
   const required = asMcpList(intent.required_mcps);
@@ -63,6 +66,15 @@ export function sanitizeIntentMcpLists(intent: Record<string, unknown>): Record<
   const nextMcps = seedMcps
     .filter((name) => !INITIA_EXCLUDED_MCPS.has(name))
     .filter((name) => INITIA_ALLOWED_MCPS.has(name));
+
+  const isYieldSweeper = strategy === "yield" || /sweep|consolidator|consolidate/.test(botLabel);
+  const isSpreadScanner = /spread/.test(botLabel) && /scanner/.test(botLabel);
+
+  if (isYieldSweeper || isSpreadScanner || strategy === "arbitrage") {
+    const initiaOnly = nextMcps.filter((name) => name === "initia");
+    nextMcps.length = 0;
+    nextMcps.push(...initiaOnly);
+  }
 
   if (!nextMcps.includes("initia")) nextMcps.unshift("initia");
   if (strategy === "sentiment" && !nextMcps.includes("lunarcrush")) {

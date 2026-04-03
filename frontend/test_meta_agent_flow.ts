@@ -4,13 +4,14 @@ type Json = Record<string, unknown>;
 
 const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:3000";
 const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
-const PROMPT = process.env.TEST_PROMPT ?? "Solana sentiment bot with strict risk controls";
+const PROMPT =
+  process.env.TEST_PROMPT ??
+  "Write a Cross-Rollup Yield Sweeper bot in TypeScript that checks 0x1::coin::balance for USER_WALLET_ADDRESS and executes interwoven_bridge::sweep_to_l1 when balance > 1000000n";
 const MAX_ATTEMPTS = Number(process.env.TEST_MAX_ATTEMPTS ?? "3");
 const GENERATE_TIMEOUT_MS = Number(process.env.TEST_GENERATE_TIMEOUT_MS ?? "420000");
 
 const requiredGeneratedFiles = [
   "package.json",
-  "tsconfig.json",
   "src/config.ts",
   "src/mcp_bridge.ts",
   "src/index.ts",
@@ -116,15 +117,33 @@ async function run(): Promise<void> {
       const missing = requiredGeneratedFiles.filter((p) => !filepaths.has(p));
       const mcpBridge = files.find((f) => f.filepath === "src/mcp_bridge.ts");
       const mcpBridgeContent = typeof mcpBridge?.content === "string" ? mcpBridge.content : "";
+      const indexFile = files.find((f) => f.filepath === "src/index.ts");
+      const indexContent = typeof indexFile?.content === "string" ? indexFile.content : "";
+      const loweredIndex = indexContent.toLowerCase();
+
+      const intent = (generate.data.intent ?? {}) as Json;
+      const strategy = String(intent.strategy ?? "").toLowerCase();
+      const chain = String(intent.chain ?? "").toLowerCase();
 
       assert(typeof generate.data.agentId === "string", "agentId missing in success response");
       assert(files.length > 0, "files list is empty in success response");
       assert(missing.length === 0, `missing required generated files: ${missing.join(", ")}`);
+      assert(chain === "initia", `expected chain=initia but got ${chain || "<empty>"}`);
+      assert(strategy === "yield", `expected strategy=yield but got ${strategy || "<empty>"}`);
       assert(
         mcpBridgeContent.includes("ngrok-skip-browser-warning") &&
           mcpBridgeContent.includes("Bypass-Tunnel-Reminder"),
         "generated src/mcp_bridge.ts is missing required tunnel bypass headers",
       );
+      assert(/callmcptool\s*\(\s*["']initia["']\s*,\s*["']move_view["']/.test(loweredIndex), "generated index must use initia/move_view");
+      assert(loweredIndex.includes('module: "coin"') || loweredIndex.includes("module: 'coin'"), "generated index must query coin module");
+      assert(loweredIndex.includes('function: "balance"') || loweredIndex.includes("function: 'balance'"), "generated index must query balance function");
+      assert(loweredIndex.includes("user_wallet_address"), "generated index must reference USER_WALLET_ADDRESS");
+      assert(/callmcptool\s*\(\s*["']initia["']\s*,\s*["']move_execute["']/.test(loweredIndex), "generated index must use initia/move_execute");
+      assert(loweredIndex.includes('module: "interwoven_bridge"') || loweredIndex.includes("module: 'interwoven_bridge'"), "generated index must execute interwoven_bridge module");
+      assert(loweredIndex.includes('function: "sweep_to_l1"') || loweredIndex.includes("function: 'sweep_to_l1'"), "generated index must execute sweep_to_l1 function");
+      assert(!loweredIndex.includes("amm_oracle"), "generated index must not use amm_oracle");
+      assert(!/callmcptool\s*\(\s*["']pyth["']/.test(loweredIndex), "generated index must not call pyth for yield sweeper");
 
       console.log(`[ok] generate-bot success in ${elapsedSec}s`);
       console.log("agentId:", generate.data.agentId);

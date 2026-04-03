@@ -8,7 +8,7 @@ const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
 
 const INITIA_PROMPT =
   process.env.TEST_INITIA_PROMPT ??
-  "Build an Initia hot potato arbitrage bot that checks minitia prices and executes via Move";
+  "Write a Cross-Rollup Yield Sweeper bot in TypeScript: every 15s read 0x1::coin::balance for USER_WALLET_ADDRESS and call interwoven_bridge::sweep_to_l1 when balance > 1000000n";
 
 const INITIA_EXCLUDED_MCPS = [
   "one_inch",
@@ -91,6 +91,7 @@ async function testInitiaIntentAndFallbackSelection(): Promise<void> {
   assert(response.status === 200, `classify-intent failed (${response.status}): ${response.text.slice(0, 400)}`);
   const intent = (response.data.intent ?? {}) as Json;
   assert(String(intent.chain ?? "").toLowerCase() === "initia", "intent should classify to chain=initia");
+  assert(String(intent.strategy ?? "").toLowerCase() === "yield", "intent should classify to strategy=yield");
   assert(shouldUseInitiaDeterministicFallback(intent), "intent should use initia deterministic fallback");
   const mcps = asStringArray(intent.mcps);
   for (const excluded of INITIA_EXCLUDED_MCPS) {
@@ -119,6 +120,7 @@ async function testGenericPromptStillPinsInitia(): Promise<void> {
 }
 
 async function testInitiaMoveViewContract(): Promise<void> {
+  const wallet = process.env.USER_WALLET_ADDRESS ?? "0xuser_wallet";
   const response = await fetchJson(
     `${META_AGENT_URL}/mcp/initia/move_view`,
     {
@@ -129,10 +131,10 @@ async function testInitiaMoveViewContract(): Promise<void> {
       },
       body: JSON.stringify({
         network: "initia-mainnet",
-        address: "0xinitia_pool_a",
-        module: "amm_oracle",
-        function: "spot_price",
-        args: ["uinit", "uusdc"],
+        address: "0x1",
+        module: "coin",
+        function: "balance",
+        args: [wallet, "uusdc"],
       }),
     },
     10_000,
@@ -144,20 +146,12 @@ async function testInitiaMoveViewContract(): Promise<void> {
   assert(payload.ok === true, "move_view payload ok should be true");
   assert(payload.tool === "move_view", "move_view payload tool mismatch");
   assert(typeof payload.network === "string" && payload.network.length > 0, "move_view payload missing network");
-  assert(typeof payload.address === "string" && payload.address.length > 0, "move_view payload missing address");
-  assert(typeof payload.module === "string" && payload.module.length > 0, "move_view payload missing module");
-  assert(typeof payload.function === "string" && payload.function.length > 0, "move_view payload missing function");
-
-  const pair = payload.pair as unknown;
-  assert(Array.isArray(pair) && pair.length === 2, "move_view payload pair should be [base, quote]");
-  assert(
-    typeof (pair as unknown[])[0] === "string" && typeof (pair as unknown[])[1] === "string",
-    "move_view payload pair entries must be strings",
-  );
-
-  assert(typeof payload.price === "string" && /^\d+(?:\.\d+)?$/.test(payload.price), "move_view payload price should be numeric string");
-  assert(typeof payload.price_num === "number" && Number.isFinite(payload.price_num), "move_view payload price_num should be finite number");
-  assert(typeof payload.decimals === "number", "move_view payload decimals should be number");
+  assert(payload.address === "0x1", "move_view payload address should be 0x1");
+  assert(payload.module === "coin", "move_view payload module should be coin");
+  assert(payload.function === "balance", "move_view payload function should be balance");
+  const args = payload.args as unknown;
+  assert(Array.isArray(args), "move_view payload args should be an array");
+  assert(String((args as unknown[])[1] ?? "") === "uusdc", "move_view payload args should include uusdc denom");
   assert(typeof payload.source === "string" && payload.source === "mcp-http-compat", "move_view payload source mismatch");
   assert(typeof payload.timestamp === "string" && Number.isFinite(Date.parse(payload.timestamp)), "move_view payload timestamp invalid");
 
@@ -165,6 +159,7 @@ async function testInitiaMoveViewContract(): Promise<void> {
 }
 
 async function testInitiaMoveExecuteContract(): Promise<void> {
+  const bridgeAddress = process.env.INITIA_BRIDGE_ADDRESS ?? "0xinitia_bridge";
   const response = await fetchJson(
     `${META_AGENT_URL}/mcp/initia/move_execute`,
     {
@@ -175,31 +170,10 @@ async function testInitiaMoveExecuteContract(): Promise<void> {
       },
       body: JSON.stringify({
         network: "initia-mainnet",
-        transaction: {
-          calls: [
-            {
-              address: "0xinitia_flash_pool",
-              module: "flash_loan",
-              function: "borrow",
-              type_args: ["uinit", "uusdc"],
-              args: ["1000000"],
-            },
-            {
-              address: "0xinitia_dex_router",
-              module: "router",
-              function: "swap_exact_in",
-              type_args: ["uinit", "uusdc"],
-              args: ["1000000", "995000"],
-            },
-            {
-              address: "0xinitia_flash_pool",
-              module: "flash_loan",
-              function: "repay",
-              type_args: ["uinit", "uusdc"],
-              args: ["1000900"],
-            },
-          ],
-        },
+        address: bridgeAddress,
+        module: "interwoven_bridge",
+        function: "sweep_to_l1",
+        args: ["1500000"],
       }),
     },
     10_000,
@@ -220,12 +194,10 @@ async function testInitiaMoveExecuteContract(): Promise<void> {
   const request = payload.request as Json;
   assert(Boolean(request), "move_execute payload missing request object");
   assert(typeof request.address === "string" && request.address.length > 0, "move_execute request missing address");
-  assert(typeof request.module === "string" && request.module.length > 0, "move_execute request missing module");
-  assert(typeof request.function === "string" && request.function.length > 0, "move_execute request missing function");
-  const transaction = request.transaction as Json;
-  assert(Boolean(transaction), "move_execute request missing transaction object");
-  assert(Array.isArray(transaction.calls), "move_execute transaction.calls should be array");
-  assert(transaction.calls.length === 3, "move_execute transaction.calls should include borrow, swap, repay");
+  assert(request.module === "interwoven_bridge", "move_execute request module should be interwoven_bridge");
+  assert(request.function === "sweep_to_l1", "move_execute request function should be sweep_to_l1");
+  const args = request.args as unknown;
+  assert(Array.isArray(args) && String((args as unknown[])[0] ?? "") === "1500000", "move_execute args should contain sweep amount");
 
   console.log("[ok] /mcp/initia/move_execute schema contract test passed");
 }

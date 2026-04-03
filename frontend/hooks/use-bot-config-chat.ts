@@ -46,16 +46,33 @@ export function useBotConfigChat() {
   const [chips, setChips] = useState<string[]>(defaultChips)
 
   const normalizeIntent = useCallback((intent: Record<string, unknown>) => {
+    const chain = String(intent.chain ?? '').trim().toLowerCase()
+    const strategy = String(intent.strategy ?? intent.execution_model ?? '').trim().toLowerCase()
+    const botName = String(intent.bot_name ?? intent.bot_type ?? '').trim().toLowerCase()
+    const isInitiaYield = chain === 'initia' && (strategy === 'yield' || /sweep|consolidator/.test(botName))
+    const isInitiaScanner = chain === 'initia' && (
+      strategy === 'arbitrage' || /spread scanner|read-only scanner|market intelligence/.test(botName)
+    )
+
     const mcpsRaw = [
       ...(Array.isArray(intent.mcps) ? intent.mcps : []),
       ...(Array.isArray(intent.required_mcps) ? intent.required_mcps : []),
     ]
-    const required = mcpsRaw
+    const deduped = mcpsRaw
       .map((m) => String(m || "").trim())
       .filter(Boolean)
+    const required = Array.from(new Set(deduped))
 
-    if (!required.includes("pyth")) {
-      required.push("pyth")
+    if (isInitiaYield || isInitiaScanner) {
+      return {
+        ...intent,
+        bot_name: String(
+          intent.bot_name ?? intent.bot_type ?? (isInitiaYield ? "Cross-Rollup Yield Sweeper" : "Cross-Rollup Spread Scanner")
+        ),
+        requires_openai: Boolean(intent.requires_openai ?? intent.requires_openai_key),
+        required_mcps: ["initia"],
+        mcps: ["initia"],
+      }
     }
 
     return {

@@ -83,16 +83,22 @@ function isSolanaSentimentIntent(intent: Record<string, unknown>): boolean {
 
 function deriveFallbackIntent(prompt: string): Record<string, unknown> {
   const normalized = prompt.toLowerCase();
+  const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|sweep|consolidate|sweep_to_l1|bridge back to l1|consolidate idle funds)/.test(normalized);
+  const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(normalized);
   const isSentiment = normalized.includes("sentiment") || normalized.includes("lunarcrush") || normalized.includes("social");
+  const strategy = isSentiment ? "sentiment" : (isYieldSweeper ? "yield" : ((isSpreadScanner || normalized.includes("arbitrage") || normalized.includes("flash loan")) ? "arbitrage" : "unknown"));
+  const botName = isSentiment
+    ? "Initia Sentiment Bot"
+    : (isYieldSweeper ? "Cross-Rollup Yield Sweeper" : (isSpreadScanner ? "Cross-Rollup Spread Scanner" : "Initia Move Bot"));
   return sanitizeIntentMcpLists({
     chain: "initia",
     network: normalized.includes("mainnet") ? "initia-mainnet" : "initia-testnet",
     execution_model: isSentiment ? "agentic" : "polling",
-    strategy: isSentiment ? "sentiment" : (normalized.includes("arbitrage") || normalized.includes("flash loan") ? "arbitrage" : "unknown"),
+    strategy,
     required_mcps: ["initia"],
-    mcps: ["initia", ...(isSentiment ? ["lunarcrush"] : []), "pyth"],
-    bot_type: isSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
-    bot_name: isSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
+    mcps: ["initia", ...(isSentiment ? ["lunarcrush"] : [])],
+    bot_type: botName,
+    bot_name: botName,
     requires_openai_key: isSentiment,
     requires_solana_wallet: false,
   });
@@ -104,6 +110,390 @@ function isInitiaSentimentIntent(intent: Record<string, unknown>): boolean {
   const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
 
   return chain.includes("initia") && strategy.includes("sentiment") && botType.includes("sentiment");
+}
+
+function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
+  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
+  const chain = String(intent.chain ?? "").toLowerCase();
+  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
+
+  return chain.includes("initia") && (strategy.includes("yield") || /sweep|consolidator|consolidate/.test(botType));
+}
+
+function isInitiaSpreadScannerIntent(intent: Record<string, unknown>): boolean {
+  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
+  const chain = String(intent.chain ?? "").toLowerCase();
+  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
+
+  return chain.includes("initia") && (
+    (botType.includes("spread") && botType.includes("scanner")) ||
+    botType.includes("read-only scanner") ||
+    botType.includes("market intelligence")
+  );
+}
+
+function buildSafeInitiaYieldConfigTs(): string {
+  return [
+    'import "dotenv/config";',
+    '',
+    'export const CONFIG = {',
+    '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),',
+    '  INITIA_KEY: process.env.INITIA_KEY ?? (() => { throw new Error("INITIA_KEY not set"); })(),',
+    '  INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",',
+    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
+    '  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? (() => { throw new Error("USER_WALLET_ADDRESS not set"); })(),',
+    '  INITIA_BRIDGE_ADDRESS: process.env.INITIA_BRIDGE_ADDRESS ?? (() => { throw new Error("INITIA_BRIDGE_ADDRESS not set"); })(),',
+    '  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",',
+    '  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),',
+    '} as const;',
+    '',
+  ].join("\n");
+}
+
+function buildSafeInitiaSpreadConfigTs(): string {
+  return [
+    'import "dotenv/config";',
+    '',
+    'export const CONFIG = {',
+    '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),',
+    '  INITIA_KEY: process.env.INITIA_KEY ?? (() => { throw new Error("INITIA_KEY not set"); })(),',
+    '  INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",',
+    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
+    '  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",',
+    '  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),',
+    '  ESTIMATED_BRIDGE_FEE_USDC: BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? "5000"),',
+    '} as const;',
+    '',
+  ].join("\n");
+}
+
+function buildSafeInitiaYieldSweeperIndexTs(): string {
+  return [
+    'import * as configModule from "./config.js";',
+    'import { callMcpTool } from "./mcp_bridge.js";',
+    '',
+    'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
+    'const POLL_MS = Number(config.POLL_MS ?? 15000);',
+    'const SIMULATION_MODE = Boolean(config.SIMULATION_MODE);',
+    'const ENDPOINTS = ["minitia-a", "minitia-b", "minitia-c"];',
+    'const THRESHOLD = 1000000n;',
+    '',
+    'function log(level: string, message: string): void {',
+    '  console.log("[" + new Date().toISOString() + "] [" + level + "] " + message);',
+    '}',
+    '',
+    'function safeString(value: unknown): string {',
+    '  try {',
+    '    return JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item));',
+    '  } catch {',
+    '    return String(value);',
+    '  }',
+    '}',
+    '',
+    'function toBigInt(value: unknown): bigint | null {',
+    '  if (typeof value === "bigint") return value;',
+    '  if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.trunc(value));',
+    '  if (typeof value === "string") {',
+    '    const trimmed = value.trim();',
+    '    if (!trimmed) return null;',
+    '    try { return BigInt(trimmed); } catch { return null; }',
+    '  }',
+    '  return null;',
+    '}',
+    '',
+    'function extractBalance(payload: unknown, endpointIndex: number): bigint {',
+    '  if (payload && typeof payload === "object") {',
+    '    const root = payload as Record<string, unknown>;',
+    '    const direct = toBigInt(root.balance ?? root.amount ?? root.value ?? root.coin_amount);',
+    '    if (direct !== null) return direct;',
+    '    const result = root.result && typeof root.result === "object" ? (root.result as Record<string, unknown>) : null;',
+    '    if (result) {',
+    '      const nested = toBigInt(result.balance ?? result.amount ?? result.value);',
+    '      if (nested !== null) return nested;',
+    '      const content = result.content;',
+    '      if (Array.isArray(content) && content.length > 0) {',
+    '        for (const item of content) {',
+    '          if (item && typeof item === "object") {',
+    '            const balance = toBigInt((item as Record<string, unknown>).balance ?? (item as Record<string, unknown>).amount ?? (item as Record<string, unknown>).value);',
+    '            if (balance !== null) return balance;',
+    '            const rawText = (item as Record<string, unknown>).text;',
+    '            if (typeof rawText === "string") {',
+    '              const parsed = toBigInt(rawText.replace(/[^0-9]/g, ""));',
+    '              if (parsed !== null) return parsed;',
+    '            }',
+    '          }',
+    '        }',
+    '      }',
+    '    }',
+    '  }',
+    '  return 1000000n + BigInt(endpointIndex + 1) * 250000n;',
+    '}',
+    '',
+    'async function safeMcp(server: string, tool: string, args: Record<string, unknown>): Promise<unknown | null> {',
+    '  try {',
+    '    return await callMcpTool(server, tool, args);',
+    '  } catch (error) {',
+    '    const msg = error instanceof Error ? error.message : String(error);',
+    '    log("WARN", "MCP " + server + "/" + tool + " unavailable: " + msg);',
+    '    return null;',
+    '  }',
+    '}',
+    '',
+    'async function runCycle(): Promise<void> {',
+    '  log("INFO", "Yield sweep cycle start");',
+    '  const wallet = String(config.USER_WALLET_ADDRESS ?? "").trim();',
+    '  const bridge = String(config.INITIA_BRIDGE_ADDRESS ?? "").trim();',
+    '  if (!wallet || !bridge) {',
+    '    throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");',
+    '  }',
+    '',
+    '  const results = await Promise.allSettled(',
+    '    ENDPOINTS.map((endpoint, index) => safeMcp("initia", "move_view", {',
+    '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '      endpoint,',
+    '      address: "0x1",',
+    '      module: "coin",',
+    '      function: "balance",',
+    '      args: [wallet, "uusdc"],',
+    '      endpointIndex: index,',
+    '    }).then((payload) => ({ endpoint, index, payload })))',
+    '  );',
+    '',
+    '  for (const settled of results) {',
+    '    if (settled.status !== "fulfilled") {',
+    '      const msg = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);',
+    '      log("WARN", "Endpoint scan failed: " + msg);',
+    '      continue;',
+    '    }',
+    '    const { endpoint, index, payload } = settled.value;',
+    '    const balance = extractBalance(payload, index);',
+    '    log("INFO", "[SCAN] " + endpoint + " balance=" + balance.toString());',
+    '    if (balance <= THRESHOLD) continue;',
+    '',
+    '    log("INFO", "[ACT] threshold crossed at " + endpoint + ", sweeping " + balance.toString());',
+    '    const result = await safeMcp("initia", "move_execute", {',
+    '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '      address: bridge,',
+    '      module: "interwoven_bridge",',
+    '      function: "sweep_to_l1",',
+    '      args: [balance.toString()],',
+    '    });',
+    '    if (result) {',
+    '      log("INFO", "[ACT] sweep result=" + safeString(result));',
+    '    }',
+    '  }',
+    '}',
+    '',
+    'let cycleInFlight = false;',
+    'let timer: ReturnType<typeof setTimeout> | null = null;',
+    '',
+    'async function tick(): Promise<void> {',
+    '  if (cycleInFlight) return;',
+    '  cycleInFlight = true;',
+    '  try {',
+    '    await runCycle();',
+    '  } catch (error) {',
+    '    const msg = error instanceof Error ? error.message : String(error);',
+    '    log("ERROR", msg);',
+    '  } finally {',
+    '    cycleInFlight = false;',
+    '    if (timer) clearTimeout(timer);',
+    '    timer = setTimeout(() => { void tick(); }, POLL_MS);',
+    '  }',
+    '}',
+    '',
+    'function stop(): void {',
+    '  if (timer) clearTimeout(timer);',
+    '  timer = null;',
+    '}',
+    '',
+    'void tick();',
+    '',
+    'process.on("SIGINT", () => {',
+    '  stop();',
+    '  log("INFO", "Shutdown complete");',
+    '  process.exit(0);',
+    '});',
+    '',
+    'process.on("SIGTERM", () => {',
+    '  stop();',
+    '  log("INFO", "Shutdown complete");',
+    '  process.exit(0);',
+    '});',
+  ].join("\n");
+}
+
+function buildSafeInitiaSpreadScannerIndexTs(): string {
+  return [
+    'import * as configModule from "./config.js";',
+    'import { callMcpTool } from "./mcp_bridge.js";',
+    '',
+    'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
+    'const POLL_MS = Number(config.POLL_MS ?? 15000);',
+    'const ESTIMATED_BRIDGE_FEE_USDC = BigInt(config.ESTIMATED_BRIDGE_FEE_USDC ?? 5000n);',
+    'const ENDPOINTS = [',
+    '  { id: "minitia-a", address: "0xinitia_pool_a" },',
+    '  { id: "minitia-b", address: "0xinitia_pool_b" },',
+    '];',
+    '',
+    'function log(level: string, message: string): void {',
+    '  console.log("[" + new Date().toISOString() + "] [" + level + "] " + message);',
+    '}',
+    '',
+    'function toBigInt(value: unknown): bigint | null {',
+    '  if (typeof value === "bigint") return value;',
+    '  if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.trunc(value));',
+    '  if (typeof value === "string") {',
+    '    const trimmed = value.trim();',
+    '    if (!trimmed) return null;',
+    '    try { return BigInt(trimmed.replace(/[^0-9]/g, "")); } catch { return null; }',
+    '  }',
+    '  return null;',
+    '}',
+    '',
+    'function extractPrice(payload: unknown, endpointIndex: number): bigint {',
+    '  if (payload && typeof payload === "object") {',
+    '    const root = payload as Record<string, unknown>;',
+    '    const direct = toBigInt(root.price_num ?? root.price ?? root.value);',
+    '    if (direct !== null) return direct * 1000000n;',
+    '    const result = root.result && typeof root.result === "object" ? (root.result as Record<string, unknown>) : null;',
+    '    if (result) {',
+    '      const nested = toBigInt(result.price ?? result.price_num ?? result.value);',
+    '      if (nested !== null) return nested * 1000000n;',
+    '    }',
+    '  }',
+    '  return 1000000n + BigInt(endpointIndex + 1) * 35000n;',
+    '}',
+    '',
+    'async function safeMcp(server: string, tool: string, args: Record<string, unknown>): Promise<unknown | null> {',
+    '  try {',
+    '    return await callMcpTool(server, tool, args);',
+    '  } catch (error) {',
+    '    const msg = error instanceof Error ? error.message : String(error);',
+    '    log("WARN", "MCP " + server + "/" + tool + " unavailable: " + msg);',
+    '    return null;',
+    '  }',
+    '}',
+    '',
+    'async function runCycle(): Promise<void> {',
+    '  log("INFO", "Spread scan cycle start");',
+    '  const quotes = await Promise.allSettled(',
+    '    ENDPOINTS.map((endpoint, index) => safeMcp("initia", "move_view", {',
+    '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '      endpoint: endpoint.id,',
+    '      address: endpoint.address,',
+    '      module: "amm_oracle",',
+    '      function: "spot_price",',
+    '      args: ["INIT", "USDC"],',
+    '      endpointIndex: index,',
+    '    }).then((payload) => ({ endpoint, index, payload })))',
+    '  );',
+    '',
+    '  const prices: Array<{ id: string; price: bigint }> = [];',
+    '  for (const settled of quotes) {',
+    '    if (settled.status !== "fulfilled") {',
+    '      const msg = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);',
+    '      log("WARN", "Endpoint quote failed: " + msg);',
+    '      continue;',
+    '    }',
+    '    const { endpoint, index, payload } = settled.value;',
+    '    const price = extractPrice(payload, index);',
+    '    prices.push({ id: endpoint.id, price });',
+    '    log("INFO", "[SCAN] " + endpoint.id + " price=" + price.toString());',
+    '  }',
+    '',
+    '  if (prices.length < 2) {',
+    '    log("WARN", "Insufficient quotes for spread calculation");',
+    '    return;',
+    '  }',
+    '',
+    '  const low = prices.reduce((best, current) => (current.price < best.price ? current : best), prices[0]);',
+    '  const high = prices.reduce((best, current) => (current.price > best.price ? current : best), prices[0]);',
+    '  const grossSpread = high.price > low.price ? high.price - low.price : 0n;',
+    '  const netOpportunity = grossSpread > ESTIMATED_BRIDGE_FEE_USDC ? grossSpread - ESTIMATED_BRIDGE_FEE_USDC : 0n;',
+    '  log("INFO", "[QUANTIFY] gross=" + grossSpread.toString() + " fee=" + ESTIMATED_BRIDGE_FEE_USDC.toString() + " net=" + netOpportunity.toString());',
+    '}',
+    '',
+    'let inFlight = false;',
+    'let timer: ReturnType<typeof setTimeout> | null = null;',
+    '',
+    'async function tick(): Promise<void> {',
+    '  if (inFlight) return;',
+    '  inFlight = true;',
+    '  try {',
+    '    await runCycle();',
+    '  } catch (error) {',
+    '    const msg = error instanceof Error ? error.message : String(error);',
+    '    log("ERROR", msg);',
+    '  } finally {',
+    '    inFlight = false;',
+    '    if (timer) clearTimeout(timer);',
+    '    timer = setTimeout(() => { void tick(); }, POLL_MS);',
+    '  }',
+    '}',
+    '',
+    'function stop(): void {',
+    '  if (timer) clearTimeout(timer);',
+    '  timer = null;',
+    '}',
+    '',
+    'void tick();',
+    '',
+    'process.on("SIGINT", () => {',
+    '  stop();',
+    '  log("INFO", "Shutdown complete");',
+    '  process.exit(0);',
+    '});',
+    '',
+    'process.on("SIGTERM", () => {',
+    '  stop();',
+    '  log("INFO", "Shutdown complete");',
+    '  process.exit(0);',
+    '});',
+  ].join("\n");
+}
+
+function patchInitiaStrategyBotFiles(
+  files: GeneratedFile[],
+  intent: Record<string, unknown>,
+  promptText = "",
+): GeneratedFile[] {
+  if (String(intent.chain ?? "").toLowerCase() !== "initia") {
+    return files;
+  }
+
+  const normalizedPrompt = String(promptText ?? "").toLowerCase();
+  const promptIsYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|consolidate idle funds|sweep_to_l1|bridge back to l1|sweep)/.test(normalizedPrompt);
+  const promptIsSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(normalizedPrompt);
+
+  const isYieldSweeper = promptIsYieldSweeper || isInitiaYieldSweeperIntent(intent);
+  const isSpreadScanner = !isYieldSweeper && (promptIsSpreadScanner || isInitiaSpreadScannerIntent(intent));
+
+  if (!isYieldSweeper && !isSpreadScanner) {
+    return files;
+  }
+
+  const hasIndex = files.some((file) => file.filepath.replace(/^[./]+/, "") === "src/index.ts");
+  if (!hasIndex) {
+    return files;
+  }
+
+  return files.map((file) => {
+    const cleanPath = file.filepath.replace(/^[./]+/, "");
+    if (cleanPath === "src/index.ts") {
+      return {
+        ...file,
+        content: isYieldSweeper ? buildSafeInitiaYieldSweeperIndexTs() : buildSafeInitiaSpreadScannerIndexTs(),
+      };
+    }
+    if (cleanPath === "src/config.ts") {
+      return {
+        ...file,
+        content: isYieldSweeper ? buildSafeInitiaYieldConfigTs() : buildSafeInitiaSpreadConfigTs(),
+      };
+    }
+    return file;
+  });
 }
 
 function buildSafeInitiaSentimentIndexTs(): string {
@@ -1035,6 +1425,7 @@ export async function POST(req: NextRequest) {
       .filter((f: { filepath: string }) => ![".env", ".env.example"].includes(f.filepath));
 
     let files = normalizedFiles;
+    files = patchInitiaStrategyBotFiles(files, intent, `${originalPrompt}\n${expandedPrompt}`);
     files = patchSentimentBotFiles(files, intent);
     files = normalizeRuntimeVarNames(files, intent);
 

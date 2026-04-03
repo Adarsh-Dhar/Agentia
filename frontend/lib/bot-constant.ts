@@ -42,6 +42,8 @@ export interface BotEnvConfig {
   // ── Initia wallet ───────────────────────────────────────────────────────────
   INITIA_KEY:          string;
   INITIA_RPC_URL:      string;
+  USER_WALLET_ADDRESS: string;
+  INITIA_BRIDGE_ADDRESS: string;
 
   // ── DEX / aggregator API keys ───────────────────────────────────────────────
   ONEINCH_API_KEY:     string;   // https://portal.1inch.dev
@@ -83,6 +85,8 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
 
   INITIA_KEY:          "",
   INITIA_RPC_URL:      "",
+  USER_WALLET_ADDRESS: "",
+  INITIA_BRIDGE_ADDRESS: "",
 
   ONEINCH_API_KEY:     "",
   ALCHEMY_API_KEY:     "",
@@ -118,6 +122,8 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
   const strategy = (intent?.strategy ?? "").toString().toLowerCase();
   const botType = (intent?.bot_name ?? intent?.bot_type ?? "").toString().toLowerCase();
   const requiresOpenAI = Boolean(intent?.requires_openai ?? intent?.requires_openai_key);
+  const isYieldSweeper = strategy.includes("yield") || botType.includes("sweep") || botType.includes("consolidator");
+  const isSpreadScanner = botType.includes("spread") && botType.includes("scanner");
 
   const fields: EnvFieldDef[] = [
     // ── Always ────────────────────────────────────────────────────────────────
@@ -158,6 +164,38 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
         helpText:    "Optional override for Initia RPC endpoint.",
       },
     );
+
+    if (isYieldSweeper) {
+      fields.push(
+        {
+          key:         "USER_WALLET_ADDRESS",
+          label:       "User Wallet Address",
+          type:        "text",
+          required:    true,
+          placeholder: "0xYourActualInitiaWalletAddress",
+          helpText:    "Wallet whose uusdc balance is scanned across Minitia endpoints.",
+        },
+        {
+          key:         "INITIA_BRIDGE_ADDRESS",
+          label:       "Initia Bridge Address",
+          type:        "text",
+          required:    true,
+          placeholder: "0x...",
+          helpText:    "Move module address for interwoven_bridge sweep_to_l1 execution.",
+        },
+      );
+    }
+
+    if (isSpreadScanner) {
+      fields.push({
+        key:         "POLL_INTERVAL",
+        label:       "Poll Interval (seconds)",
+        type:        "text",
+        required:    false,
+        placeholder: "15",
+        helpText:    "Scanner cadence for read-only spread checks across endpoints.",
+      });
+    }
   }
 
   // ── EVM wallet ───────────────────────────────────────────────────────────

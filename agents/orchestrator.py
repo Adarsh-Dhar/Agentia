@@ -124,9 +124,12 @@ Schema:
 
 Rules:
 - ALWAYS set chain:"initia"
+- Classification precedence: if prompt includes yield sweeper semantics (yield sweeper, auto-consolidator, consolidate idle funds, sweep_to_l1, bridge back to l1), classify as strategy:"yield" first.
 - sentiment / social / lunarcrush -> mcps include "lunarcrush", requires_openai:true
-- arbitrage / flash loan / hot potato -> strategy:"arbitrage", mcps include "initia"
-- always include "pyth" in mcps for price corroboration unless omitted by user request
+- yield sweeper / auto-consolidator / sweep idle funds -> strategy:"yield", mcps:["initia"], requires_openai:false
+- spread scanner / read-only arbitrage / no execution -> strategy:"arbitrage", mcps:["initia"], requires_openai:false
+- arbitrage / flash loan / hot potato -> strategy:"arbitrage", mcps:["initia"]
+- for initia arbitrage and yield workflows, do NOT auto-add pyth
 - when chain is initia, actively exclude: one_inch, webacy, goplus, goat_evm, alchemy, rugcheck, jupiter, nansen, hyperliquid, debridge, lifi, uniswap, chainlink
 - for initia bots, allowed MCPs are: initia (required), lunarcrush (optional), pyth (optional)
 - default network: initia-testnet
@@ -227,6 +230,65 @@ D. INITIA MCP ALLOWLIST:
   - Always include initia.
   - Optional only: lunarcrush (sentiment), pyth (price corroboration).
   - Never call one_inch/webacy/goplus/goat_evm/alchemy/jupiter/rugcheck for Initia bots.
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║            CRITICAL: INITIA YIELD SWEEPER (CROSS-ROLLUP)                    ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+ONLY FOR: Initia chain + yield strategy
+
+MUST IMPLEMENT THIS EXACT FLOW:
+
+1) SCHEDULE
+  - Run one cycle every 15 seconds (testing cadence).
+
+2) SCAN (READ ONLY)
+  - Iterate through a list of simulated Minitia endpoints/IDs.
+  - For each endpoint call:
+      callMcpTool('initia', 'move_view', {
+        address: '0x1',
+        module: 'coin',
+        function: 'balance',
+        args: [CONFIG.USER_WALLET_ADDRESS, 'uusdc']
+      })
+
+3) CONDITION
+  - Parse balance as BigInt.
+  - Only continue when: balance > 1000000n.
+
+4) SWEEP (EXECUTE)
+  - Execute with:
+      callMcpTool('initia', 'move_execute', {
+        address: CONFIG.INITIA_BRIDGE_ADDRESS,
+        module: 'interwoven_bridge',
+        function: 'sweep_to_l1',
+        args: [balance.toString()]
+      })
+
+5) RESILIENCE
+  - Catch per-endpoint network errors and continue the loop.
+  - Never crash the bot because one endpoint fails.
+
+STRICT FORBIDDEN ITEMS:
+  - Do NOT use Pyth or any oracle MCPs.
+  - Do NOT hallucinate module names.
+  - Do NOT call move_execute unless threshold condition is satisfied.
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║      CRITICAL: INITIA CROSS-ROLLUP SPREAD SCANNER (READ-ONLY)               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+ONLY FOR: Initia chain + arbitrage strategy when user intent is scanner/read-only
+
+MUST IMPLEMENT:
+  - Poll multiple endpoints with move_view to fetch comparable market values.
+  - Compute spread and subtract estimated bridge fee before logging opportunity.
+  - Emit clear logs such as spread %, estimated fee, and net opportunity.
+
+STRICT FORBIDDEN ITEMS:
+  - READ-ONLY MODE: do NOT call move_execute.
+  - Do NOT use random MCPs outside the intent allowlist.
+  - Do NOT invent unverified module/function names.
 
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                    CRITICAL FOR ARBITRAGE BOTS                               ║
@@ -432,15 +494,43 @@ class MetaAgent:
             intent = {
             "chain": "initia", "network": "initia-testnet",
             "strategy": "arbitrage",
-            "mcps": ["initia", "pyth"],
+            "mcps": ["initia"],
             "bot_name": "Initia Move Bot",
                 "requires_openai": False,
             }
         mcps = [str(m).strip().lower() for m in intent.get("mcps", []) if str(m).strip()]
         chain = "initia"
+        prompt_lc = prompt.lower()
+
+        is_yield_sweeper = any(
+          k in prompt_lc
+          for k in [
+            "yield sweeper",
+            "auto-consolidator",
+            "auto consolidator",
+            "sweep",
+            "consolidate",
+            "sweep_to_l1",
+            "bridge back to l1",
+            "consolidate idle funds",
+          ]
+        )
+        is_spread_scanner = any(k in prompt_lc for k in ["spread scanner", "read-only scanner", "read only scanner", "read-only", "market intelligence"])
+
+        if is_yield_sweeper:
+          intent["strategy"] = "yield"
+          intent["bot_name"] = "Cross-Rollup Yield Sweeper"
+          intent["requires_openai"] = False
+        elif is_spread_scanner:
+          intent["strategy"] = "arbitrage"
+          intent["bot_name"] = "Cross-Rollup Spread Scanner"
+          intent["requires_openai"] = False
+
         intent["chain"] = chain
         requested_network = str(intent.get("network", "")).strip().lower()
         intent["network"] = requested_network if requested_network in {"initia-mainnet", "initia-testnet"} else os.environ.get("INITIA_NETWORK", "initia-testnet")
+        strategy = str(intent.get("strategy", "")).strip().lower()
+        bot_name = str(intent.get("bot_name", "")).strip().lower()
 
         if chain == "initia":
           disallowed = {
@@ -449,6 +539,10 @@ class MetaAgent:
           }
           allowed = {"initia", "lunarcrush", "pyth"}
           cleaned = [m for m in mcps if m not in disallowed and m in allowed]
+          if strategy in {"yield", "arbitrage"} or "sweep" in bot_name or ("spread" in bot_name and "scanner" in bot_name):
+            cleaned = [m for m in cleaned if m == "initia"]
+          elif strategy == "sentiment" and "lunarcrush" not in cleaned:
+            cleaned.append("lunarcrush")
           if "initia" not in cleaned:
             cleaned.insert(0, "initia")
           intent["mcps"] = list(dict.fromkeys(cleaned))
@@ -494,6 +588,8 @@ class MetaAgent:
       mcps = [str(m).strip().lower() for m in intent.get("mcps", []) if str(m).strip()]
       strategy = str(intent.get("strategy", "unknown"))
       bot_name = str(intent.get("bot_name", "DeFi Bot"))
+      strategy_lc = strategy.strip().lower()
+      bot_name_lc = bot_name.strip().lower()
 
       if chain == "initia":
         if network not in {"initia-mainnet", "initia-testnet"}:
@@ -505,6 +601,10 @@ class MetaAgent:
         }
         allowed = {"initia", "lunarcrush", "pyth"}
         mcps = [m for m in mcps if m not in disallowed and m in allowed]
+        if strategy_lc in {"yield", "arbitrage"} or "sweep" in bot_name_lc or ("spread" in bot_name_lc and "scanner" in bot_name_lc):
+          mcps = [m for m in mcps if m == "initia"]
+        elif strategy_lc == "sentiment" and "lunarcrush" not in mcps:
+          mcps.append("lunarcrush")
         if "initia" not in mcps:
           mcps.insert(0, "initia")
         intent["mcps"] = list(dict.fromkeys(mcps))
@@ -521,6 +621,7 @@ class MetaAgent:
   Strategy: {strategy}
   MCP servers to use: {', '.join(mcps)}
   Requires OpenAI sub-agent: {intent.get('requires_openai', False)}
+  Original user intent: {prompt}
 
   {chain_ctx}
 
@@ -571,6 +672,9 @@ Solana key: support bs58 AND JSON-array export formats. Parse in runtime, NOT in
 Required deps: @solana/web3.js, bs58
 """
         if chain == "initia":
+            strategy_lc = str(strategy or "").lower()
+            is_yield_sweeper = strategy_lc == "yield"
+            is_spread_scanner = strategy_lc == "arbitrage"
             minitia_prices = "\n".join([
               "  - callMcpTool('initia', 'move_view', {address, module, function, args})  // only with verified module/function",
               "  - If oracle module/function are unknown, skip move_view and use deterministic fallback prices in runCycle for execution-path testing",
@@ -596,6 +700,8 @@ Required config values:
   INITIA_POOL_B_ADDRESS
   INITIA_FLASH_POOL_ADDRESS
   INITIA_SWAP_ROUTER_ADDRESS
+  USER_WALLET_ADDRESS
+  INITIA_BRIDGE_ADDRESS
 
 MCP tool signatures:
 {initia_mcp_hints}
@@ -610,6 +716,18 @@ Hot Potato flash-loan pattern:
     3) repay principal + fee in same atomic execution
   - No callback contracts, no calldata encoding, no manual signing.
   - MCP signs and submits using INITIA_KEY.
+
+Yield sweeper pattern (if strategy is yield):
+  - Poll every 15s and scan each configured Minitia endpoint/ID.
+  - Balance read call must use move_view on address 0x1/module coin/function balance.
+  - Only execute sweep when uusdc balance > 1000000n.
+  - Execute with module interwoven_bridge/function sweep_to_l1 and args [balance.toString()].
+  - Handle endpoint errors per-cycle without crashing.
+
+Spread scanner pattern (if strategy is read-only arbitrage scanner):
+  - Read-only operation with move_view only.
+  - Query comparable prices across endpoints, compute spread, subtract bridge fee, log net opportunity.
+  - Never call move_execute in scanner mode.
 """
         chain_ids = {"base-sepolia": 84532, "base-mainnet": 8453, "arbitrum": 42161}
         cid = chain_ids.get(network, 84532)

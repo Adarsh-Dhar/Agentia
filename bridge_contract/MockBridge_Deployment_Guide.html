@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MockBridge Deployment Guide — Initia Testnet</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2330;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --warn: #d29922;
+    --danger: #f85149;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --code-bg: #0d1117;
+    --purple: #bc8cff;
+    --orange: #ffa657;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ── Layout ── */
+  .page { max-width: 860px; margin: 0 auto; padding: 48px 24px 80px; }
+
+  /* ── Hero ── */
+  .hero {
+    background: linear-gradient(135deg, #1a2744 0%, #1c2330 100%);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 36px 40px;
+    margin-bottom: 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--purple), var(--accent2));
+  }
+  .hero-badge {
+    display: inline-block;
+    background: rgba(88,166,255,.15);
+    border: 1px solid rgba(88,166,255,.3);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-bottom: 14px;
+  }
+  .hero h1 { font-size: 28px; font-weight: 700; margin-bottom: 10px; }
+  .hero p  { color: var(--muted); font-size: 15px; max-width: 540px; }
+
+  /* ── TOC ── */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 40px;
+  }
+  .toc-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 12px; }
+  .toc ol { padding-left: 18px; }
+  .toc li { margin: 4px 0; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* ── Steps ── */
+  .step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 28px;
+    overflow: hidden;
+  }
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .step-num {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-title { font-size: 16px; font-weight: 600; }
+  .step-body { padding: 20px 24px; }
+  .step-body p { color: var(--muted); margin-bottom: 14px; }
+  .step-body p:last-child { margin-bottom: 0; }
+
+  /* ── Code blocks ── */
+  .code-wrap { margin: 14px 0; }
+  .code-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    padding: 6px 12px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .copy-btn {
+    background: rgba(88,166,255,.12);
+    border: 1px solid rgba(88,166,255,.25);
+    color: var(--accent);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background .15s;
+    font-family: inherit;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+  }
+  .copy-btn:hover { background: rgba(88,166,255,.25); }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 0 0 var(--radius) var(--radius);
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    white-space: pre;
+  }
+  /* Syntax tokens */
+  .k  { color: var(--purple); }   /* keywords */
+  .fn { color: #79c0ff; }          /* function names */
+  .cm { color: #6e7681; font-style: italic; } /* comments */
+  .s  { color: #a5d6ff; }          /* strings */
+  .n  { color: var(--orange); }    /* numbers / params */
+  .t  { color: var(--accent2); }   /* types */
+
+  /* ── Callouts ── */
+  .callout {
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 14px 0;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    border-left: 3px solid;
+    font-size: 14px;
+  }
+  .callout-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .callout.info  { background: rgba(88,166,255,.08);  border-color: var(--accent);  color: #c9d1d9; }
+  .callout.tip   { background: rgba(63,185,80,.08);   border-color: var(--accent2); color: #c9d1d9; }
+  .callout.warn  { background: rgba(210,153,34,.08);  border-color: var(--warn);    color: #c9d1d9; }
+
+  /* ── Inline code ── */
+  code { background: rgba(110,118,129,.2); padding: 1px 6px; border-radius: 4px; font-family: "SF Mono", monospace; font-size: .88em; }
+
+  /* ── Success box ── */
+  .success-box {
+    background: rgba(63,185,80,.1);
+    border: 1px solid rgba(63,185,80,.3);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin: 28px 0;
+  }
+  .success-box h3 { color: var(--accent2); margin-bottom: 8px; font-size: 16px; }
+  .success-box p  { color: var(--muted); font-size: 14px; }
+
+  /* ── File tree ── */
+  .tree {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    font-family: "SF Mono", monospace;
+    font-size: 13px;
+    line-height: 2;
+    margin: 14px 0;
+  }
+  .tree-dir  { color: var(--accent); }
+  .tree-file { color: var(--text); }
+  .tree-note { color: var(--muted); }
+
+  /* ── Section divider ── */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  h2 { font-size: 20px; font-weight: 700; margin: 40px 0 16px; }
+  h2 .icon { margin-right: 8px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-badge">Initia Testnet · MoveVM</div>
+    <h1>MockBridge Deployment Guide</h1>
+    <p>Deploy a simulated IBC bridge contract to Initia testnet so your Yield Sweeper bot can test its full execution path without needing real cryptographic proofs.</p>
+  </div>
+
+  <!-- TOC -->
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <ol>
+      <li><a href="#why">Why a Mock Bridge?</a></li>
+      <li><a href="#prereqs">Prerequisites</a></li>
+      <li><a href="#step1">Step 1 — Initialize the Move Project</a></li>
+      <li><a href="#step2">Step 2 — Configure Move.toml</a></li>
+      <li><a href="#step3">Step 3 — Write the Bridge Contract</a></li>
+      <li><a href="#step4">Step 4 — Deploy to Testnet</a></li>
+      <li><a href="#step5">Step 5 — Hook it up to Your Bot</a></li>
+      <li><a href="#verify">Verifying Success</a></li>
+      <li><a href="#troubleshoot">Troubleshooting</a></li>
+    </ol>
+  </div>
+
+  <!-- Why -->
+  <h2 id="why"><span class="icon">🤔</span>Why a Mock Bridge?</h2>
+  <p style="color:var(--muted); margin-bottom:16px;">Real Initia bridging uses IBC — Inter-Blockchain Communication. A live bridge call requires a massive payload including cryptographic Merkle proofs, destination chain IDs, sequence numbers, and timeout heights. Building that payload by hand is complex; if the blockchain rejects it, you won't know whether your <em>bot logic</em> is broken or your <em>bridge math</em> is wrong.</p>
+
+  <p style="color:var(--muted); margin-bottom:24px;">A Mock Bridge isolates the variable. It's a real on-chain contract that accepts the exact same function signature as the real bridge — so your bot's payload is 100% valid — but the contract body does nothing. One successful transaction proves end-to-end signing, gas estimation, address resolution, and broadcast all work correctly.</p>
+
+  <hr class="divider" />
+
+  <!-- Prerequisites -->
+  <h2 id="prereqs"><span class="icon">✅</span>Prerequisites</h2>
+  <div class="step">
+    <div class="step-body">
+      <p>Before you begin, make sure you have all of the following ready:</p>
+      <ul style="color:var(--muted); padding-left:20px; line-height:2.2;">
+        <li><code>initiad</code> CLI installed and in your PATH (<a href="https://github.com/initia-labs/initia/releases" style="color:var(--accent)">download here</a>)</li>
+        <li>A test wallet created with <code>initiad keys add test-account</code></li>
+        <li>Your wallet funded with testnet <code>uinit</code> tokens (use the <a href="https://faucet.testnet.initia.xyz" style="color:var(--accent)">Initia faucet</a>)</li>
+        <li>Your <code>init1...</code> wallet address (run <code>initiad keys show test-account -a</code>)</li>
+        <li>Your <code>0x...</code> hex wallet address (run <code>initiad keys show test-account --output json</code>)</li>
+      </ul>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- Step 1 -->
+  <div class="step" id="step1">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div class="step-title">Initialize the Move Project</div>
+    </div>
+    <div class="step-body">
+      <p>Open a terminal and run these commands to scaffold a new Move project:</p>
+      <div class="code-wrap">
+        <div class="code-label">bash <button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre>mkdir mock_bridge
+cd mock_bridge
+initiad move init --name MockBridge</pre>
+      </div>
+      <p>This generates the standard Move project layout:</p>
+      <div class="tree">
+<span class="tree-dir">mock_bridge/</span>
+├── <span class="tree-dir">sources/</span>          <span class="tree-note"># Your .move source files go here</span>
+├── <span class="tree-file">Move.toml</span>         <span class="tree-note"># Package manifest (edit in Step 2)</span>
+└── <span class="tree-file">.gitignore</span>        <span class="tree-note"># Auto-generated</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="step" id="step2">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div class="step-title">Configure Move.toml</div>
+    </div>
+    <div class="step-body">
+      <p>Open <code>Move.toml</code> and replace its contents with the following. The <code>deployer = "_"</code> placeholder is filled in automatically when you run the deploy command with <code>--named-addresses</code>.</p>
+      <div class="code-wrap">
+        <div class="code-label">Move.toml <button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre>[package]
+name = "MockBridge"
+version = "0.0.0"
+
+[addresses]
+deployer = "_"
+
+[dependencies]
+InitiaStdlib = { git = "https://github.com/initia-labs/initia.git", subdir = "api/move/ext/initia_stdlib", rev = "main" }</pre>
+      </div>
+      <div class="callout info">
+        <span class="callout-icon">ℹ️</span>
+        <span>The <code>InitiaStdlib</code> dependency is cloned from GitHub during compilation. Make sure you have internet access and <code>git</code> installed.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="step" id="step3">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div class="step-title">Write the Bridge Contract</div>
+    </div>
+    <div class="step-body">
+      <p>Inside <code>sources/</code>, create a file named <code>bridge.move</code> with the following content:</p>
+      <div class="code-wrap">
+        <div class="code-label">sources/bridge.move <button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><span class="cm">/// MockBridge — interwoven_bridge module
+///
+/// Simulates an IBC/L1 bridge for local testing.
+/// Accepts a sweep call, does nothing, returns success.</span>
+
+<span class="k">module</span> deployer::interwoven_bridge {
+    <span class="k">use</span> std::signer;
+
+    <span class="cm">/// Mock bridge entry point.
+    ///
+    /// &lt;CoinType&gt; lets your bot pass any token denom
+    /// (USDC, INIT, IBC-wrapped assets) without contract changes.
+    ///
+    /// On a real bridge this would lock tokens and emit an IBC packet.
+    /// Here it does nothing — that's the point. ✓</span>
+    <span class="k">public entry fun</span> <span class="fn">sweep_to_l1</span>&lt;<span class="t">CoinType</span>&gt;(
+        _account: &amp;signer,
+        _amount: u64
+    ) {
+        <span class="cm">// Intentionally empty.
+        // A successful no-op proves your bot's payload is correct.</span>
+    }
+}</pre>
+      </div>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <span>The underscore prefix on <code>_account</code> and <code>_amount</code> suppresses "unused variable" compiler warnings. The contract compiles cleanly with zero warnings.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="step" id="step4">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div class="step-title">Deploy to Testnet</div>
+    </div>
+    <div class="step-body">
+      <p>Run the publish command from inside the <code>mock_bridge/</code> directory. Replace <code>&lt;YOUR_WALLET_ADDRESS&gt;</code> with your actual <code>init1...</code> address:</p>
+      <div class="code-wrap">
+        <div class="code-label">bash <button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre>initiad tx move publish . \
+    --named-addresses deployer=&lt;YOUR_WALLET_ADDRESS&gt; \
+    --from test-account \
+    --gas auto \
+    --gas-adjustment 1.5 \
+    --gas-prices 0.015uinit \
+    --node https://rpc.testnet.initia.xyz:443 \
+    --chain-id initiation-2</pre>
+      </div>
+
+      <div class="callout warn">
+        <span class="callout-icon">⚠️</span>
+        <span>If your tokens are on the older testnet, use <code>--chain-id initiation-1</code> instead of <code>initiation-2</code>.</span>
+      </div>
+
+      <p>The CLI will ask you to confirm the transaction. Type <code>y</code> and press Enter. You'll see JSON output like this:</p>
+      <div class="code-wrap">
+        <div class="code-label">output (abbreviated)</div>
+        <pre>{
+  "txhash": "ABC123...",
+  "code": 0,
+  "raw_log": "...",
+  "events": [
+    {
+      "type": "move",
+      "attributes": [
+        {
+          "key": "type_tag",
+          "value": "ModulePublishedEvent"
+        },
+        {
+          "key": "data",
+          <span class="n">"value": "{ \"address\": \"0xYOUR_MODULE_ADDRESS\" }"</span>
+        }
+      ]
+    }
+  ]
+}</pre>
+      </div>
+      <p>Find the <code>ModulePublishedEvent</code> entry and copy the <code>0x...</code> address. <strong>This is your bridge contract address.</strong></p>
+    </div>
+  </div>
+
+  <!-- Step 5 -->
+  <div class="step" id="step5">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div class="step-title">Hook it up to Your Bot</div>
+    </div>
+    <div class="step-body">
+      <p>Open your bot's <code>.env</code> file and add these two lines:</p>
+      <div class="code-wrap">
+        <div class="code-label">.env <button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><span class="cm"># Address from the ModulePublishedEvent in Step 4</span>
+INITIA_BRIDGE_ADDRESS=0x&lt;address_from_event&gt;
+
+<span class="cm"># Your wallet's 0x hex address (NOT the init1... bech32 form)</span>
+USER_WALLET_ADDRESS=0x&lt;your_wallet_hex_address&gt;</pre>
+      </div>
+
+      <div class="callout info">
+        <span class="callout-icon">ℹ️</span>
+        <span>To get your <code>0x</code> hex address: run <code>initiad keys show test-account --output json</code> and look for the <code>"address"</code> field, or convert your <code>init1...</code> address using a Bech32 decoder.</span>
+      </div>
+
+      <p>Now restart your bot:</p>
+      <div class="code-wrap">
+        <div class="code-label">bash <button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre>npm run start</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verify -->
+  <h2 id="verify"><span class="icon">🎯</span>Verifying Success</h2>
+  <div class="success-box">
+    <h3>✓ You're done when you see this in your bot's log:</h3>
+    <p style="font-family:'SF Mono',monospace; font-size:14px; margin-top:10px; color: #3fb950;">[ACT] ✓ Atomic execution succeeded</p>
+    <p style="margin-top:10px;">This confirms that your bot correctly constructed the <code>sweep_to_l1</code> transaction, estimated gas, signed with your key, and broadcast to the chain — all without a real IBC relay involved.</p>
+  </div>
+
+  <hr class="divider" />
+
+  <!-- Troubleshoot -->
+  <h2 id="troubleshoot"><span class="icon">🔧</span>Troubleshooting</h2>
+
+  <div class="step">
+    <div class="step-header">
+      <div class="step-num" style="background: linear-gradient(135deg,var(--warn),#e3a22a);">?</div>
+      <div class="step-title">Common Issues & Fixes</div>
+    </div>
+    <div class="step-body">
+
+      <p><strong style="color:var(--text);">❌ "account not found" error</strong></p>
+      <p>Your wallet hasn't received any testnet tokens yet. Go to <a href="https://faucet.testnet.initia.xyz" style="color:var(--accent)">faucet.testnet.initia.xyz</a> and paste your <code>init1...</code> address.</p>
+
+      <p style="margin-top:16px;"><strong style="color:var(--text);">❌ "insufficient fees" error</strong></p>
+      <p>Try increasing <code>--gas-adjustment</code> to <code>2.0</code> or setting <code>--gas</code> to a fixed number like <code>500000</code>.</p>
+
+      <p style="margin-top:16px;"><strong style="color:var(--text);">❌ "wrong chain-id" error</strong></p>
+      <p>Run <code>initiad status --node https://rpc.testnet.initia.xyz:443 | grep chain_id</code> to confirm the current testnet ID and update your command accordingly.</p>
+
+      <p style="margin-top:16px;"><strong style="color:var(--text);">❌ Bot can't find the module</strong></p>
+      <p>Double-check that <code>INITIA_BRIDGE_ADDRESS</code> in your <code>.env</code> starts with <code>0x</code> and matches the address from <code>ModulePublishedEvent</code> exactly (not your <code>init1...</code> address).</p>
+
+      <p style="margin-top:16px;"><strong style="color:var(--text);">❌ Compilation fails with "unresolved dependency"</strong></p>
+      <p>The <code>InitiaStdlib</code> Git dependency needs network access. Make sure you're online, <code>git</code> is installed, and GitHub isn't blocked on your network.</p>
+
+    </div>
+  </div>
+
+  <div style="text-align:center; margin-top:48px; color:var(--muted); font-size:13px;">
+    MockBridge · Initia Testnet · MoveVM
+  </div>
+
+</div>
+
+<script>
+function copyCode(btn) {
+  const pre = btn.closest('.code-wrap').querySelector('pre');
+  navigator.clipboard.writeText(pre.innerText).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+</script>
+</body>
+</html>

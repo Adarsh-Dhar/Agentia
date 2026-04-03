@@ -1,0 +1,6 @@
+[package]
+name = "MockBridge"
+version = "0.0.0"
+
+[addresses]
+deployer = "_"

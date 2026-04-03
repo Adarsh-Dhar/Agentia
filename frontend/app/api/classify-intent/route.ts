@@ -43,6 +43,8 @@ Cover ALL of the following in your expansion:
 
 For EVM arbitrage, swap, scalper, grid, DCA, yield, perp, and MEV strategies, prefer Pyth Network price/oracle data for market pricing and avoid Chainlink-based stale-feed checks unless the user explicitly requests Chainlink.
 
+For Initia yield sweeper workflows, do not introduce Pyth or amm_oracle. Use only Initia move_view for 0x1::coin::balance and move_execute for interwoven_bridge::sweep_to_l1 when threshold is met.
+
 6. **Key Environment Variables Required**:
    - List every API key, private key, RPC URL, and config variable the bot needs
 
@@ -73,11 +75,67 @@ Required schema:
 
 Classification rules (first match wins):
 - ALWAYS return chain:"initia" for every request.
+- if request includes cross-rollup yield sweeper semantics (yield sweeper, auto-consolidator, consolidate idle funds, bridge back to l1, sweep_to_l1), classify as strategy:"yield" with required_mcps:["initia"] and bot_type:"Cross-Rollup Yield Sweeper".
 - sentiment | social | LunarCrush → execution_model:"agentic", strategy:"sentiment", required_mcps:["initia","lunarcrush"], requires_openai_key:true
+- yield sweeper | auto-consolidator | consolidate idle funds → execution_model:"polling", strategy:"yield", required_mcps:["initia"]
+- spread scanner | read-only arbitrage | market intelligence scanner → execution_model:"polling", strategy:"arbitrage", required_mcps:["initia"]
 - flash loan | arbitrage | hot potato → execution_model:"polling", strategy:"arbitrage", required_mcps:["initia"]
 - otherwise default execution_model:"polling", strategy:"unknown", required_mcps:["initia"]
 - if chain is initia, actively remove these MCPs if present: one_inch, webacy, goplus, goat_evm, alchemy, rugcheck, jupiter, nansen, hyperliquid, debridge, lifi, uniswap, chainlink
+- for initia yield sweeper flows, do NOT include pyth and do NOT imply amm_oracle usage
 - default network if unspecified → "initia-testnet"`;
+
+function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: string): Record<string, unknown> {
+  const mergedPrompt = String(prompt ?? "").toLowerCase();
+  const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|consolidate idle funds|sweep_to_l1|bridge back to l1|sweep)/.test(mergedPrompt);
+  const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(mergedPrompt);
+  const isSentiment = /(sentiment|lunarcrush|social)/.test(mergedPrompt);
+
+  const normalized: Record<string, unknown> = {
+    ...intent,
+    chain: "initia",
+    network: String(intent.network ?? "").toLowerCase().includes("mainnet") ? "initia-mainnet" : "initia-testnet",
+  };
+
+  if (isYieldSweeper) {
+    normalized.execution_model = "polling";
+    normalized.strategy = "yield";
+    normalized.bot_type = "Cross-Rollup Yield Sweeper";
+    normalized.bot_name = "Cross-Rollup Yield Sweeper";
+    normalized.required_mcps = ["initia"];
+    normalized.mcps = ["initia"];
+    normalized.requires_openai_key = false;
+    normalized.requires_openai = false;
+    normalized.requires_solana_wallet = false;
+    return normalized;
+  }
+
+  if (isSpreadScanner) {
+    normalized.execution_model = "polling";
+    normalized.strategy = "arbitrage";
+    normalized.bot_type = "Cross-Rollup Spread Scanner";
+    normalized.bot_name = "Cross-Rollup Spread Scanner";
+    normalized.required_mcps = ["initia"];
+    normalized.mcps = ["initia"];
+    normalized.requires_openai_key = false;
+    normalized.requires_openai = false;
+    normalized.requires_solana_wallet = false;
+    return normalized;
+  }
+
+  if (isSentiment) {
+    normalized.execution_model = "agentic";
+    normalized.strategy = "sentiment";
+    normalized.required_mcps = ["initia", "lunarcrush"];
+    normalized.mcps = ["initia", "lunarcrush"];
+    normalized.requires_openai_key = true;
+    normalized.requires_openai = true;
+    normalized.requires_solana_wallet = false;
+    return normalized;
+  }
+
+  return normalized;
+}
 
 // ─── Helper: call GitHub Models with a short timeout ─────────────────────────
 
@@ -219,7 +277,11 @@ export async function POST(req: NextRequest) {
       intent = deriveDefaultIntent(expandedPrompt);
     }
 
-    const sanitizedIntent = sanitizeIntentMcpLists(intent as Record<string, unknown>);
+    const normalizedIntent = normalizeIntentFromPrompt(
+      intent as Record<string, unknown>,
+      `${originalPrompt}\n${expandedPrompt}`,
+    );
+    const sanitizedIntent = sanitizeIntentMcpLists(normalizedIntent);
     console.log("[classify-intent] Final intent:", JSON.stringify(sanitizedIntent));
 
     return NextResponse.json({
@@ -238,16 +300,22 @@ export async function POST(req: NextRequest) {
 
 function deriveDefaultIntent(prompt: string): Record<string, unknown> {
   const lower = prompt.toLowerCase();
+  const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|sweep|consolidate|sweep_to_l1|bridge back to l1|consolidate idle funds)/.test(lower);
+  const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(lower);
   const isInitiaSentiment = lower.includes("sentiment") || lower.includes("lunarcrush") || lower.includes("social");
   const initiaNetwork = lower.includes("mainnet") ? "initia-mainnet" : "initia-testnet";
+  const strategy = isInitiaSentiment ? "sentiment" : (isYieldSweeper ? "yield" : ((isSpreadScanner || lower.includes("arbitrage") || lower.includes("flash loan")) ? "arbitrage" : "unknown"));
+  const botName = isInitiaSentiment
+    ? "Initia Sentiment Bot"
+    : (isYieldSweeper ? "Cross-Rollup Yield Sweeper" : (isSpreadScanner ? "Cross-Rollup Spread Scanner" : "Initia Move Bot"));
   return {
     chain: "initia", network: initiaNetwork,
     execution_model: isInitiaSentiment ? "agentic" : "polling",
-    strategy: isInitiaSentiment ? "sentiment" : (lower.includes("arbitrage") || lower.includes("flash loan") ? "arbitrage" : "unknown"),
+    strategy,
     required_mcps: ["initia"],
-    mcps: ["initia", ...(isInitiaSentiment ? ["lunarcrush"] : []), "pyth"],
-    bot_type: isInitiaSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
-    bot_name: isInitiaSentiment ? "Initia Sentiment Bot" : "Initia Move Bot",
+    mcps: ["initia", ...(isInitiaSentiment ? ["lunarcrush"] : [])],
+    bot_type: botName,
+    bot_name: botName,
     requires_openai: isInitiaSentiment,
     requires_openai_key: isInitiaSentiment,
     requires_solana_wallet: false,
