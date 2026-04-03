@@ -71,7 +71,7 @@ export function useDeployChat() {
     }
 
     greet()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Message helpers ───────────────────────────────────────────────────────
   function pushAssistant(content: string, card?: ChatMessage['card']) {
@@ -440,7 +440,7 @@ export function useDeployChat() {
     )
     if (convState === 'done') setChips(['Go to dashboard'])
 
-  }, [input, convState, currentPlan, currentGuardrails, pendingEditField, user, initiaAddress, router]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [input, convState, currentPlan, currentGuardrails, pendingEditField, user, initiaAddress, router])
 
   // ── Input handlers ────────────────────────────────────────────────────────
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -121,7 +121,6 @@ export function WebContainerBotRunner() {
 
       setPhase("idle");
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-launch only after both files and env state are hydrated.
@@ -163,31 +162,6 @@ export function WebContainerBotRunner() {
     },
     [selectedFile]
   );
-
-  const handleEnvChange = useCallback(
-    (key: keyof BotEnvConfig, value: string) => {
-      setEnvConfig(prev => ({ ...prev, [key]: value }));
-      // Also update the .env file shown in the editor
-      setFileEdits(prev => {
-        const existing = prev[".env"] || currentFiles.find(f => f.filepath === ".env")?.content || "";
-        const lines = existing.split("\n");
-        const idx = lines.findIndex(l => l.startsWith(`${key}=`));
-        if (idx >= 0) {
-          lines[idx] = `${key}=${value}`;
-        } else {
-          lines.push(`${key}=${value}`);
-        }
-        return { ...prev, ".env": lines.filter(Boolean).join("\n") };
-      });
-    },
-    [currentFiles]
-  );
-
-  const handleLaunch = () => {
-    setShowEnvModal(false);
-    setPhase("running");
-    bootAndRun();
-  };
 
   const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content ?? "";
   const isRunning = phase === "running";

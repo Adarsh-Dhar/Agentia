@@ -27,7 +27,6 @@ export function useBotConfigChat() {
   // Store both the original and expanded prompts across steps
   const [pendingOriginalPrompt,  setPendingOriginalPrompt]  = useState('')
   const [pendingExpandedPrompt,  setPendingExpandedPrompt]  = useState('')
-  const [pendingIntent,          setPendingIntent]          = useState<Record<string, unknown> | null>(null)
   const [pendingRequiredFields,  setPendingRequiredFields]  = useState<EnvFieldDef[]>([])
 
   const [generatedAgentId, setGeneratedAgentId] = useState<string | null>(null)
@@ -198,7 +197,6 @@ export function useBotConfigChat() {
         // Store both prompts + intent for when the user submits keys
         setPendingOriginalPrompt(text)
         setPendingExpandedPrompt(expandedPrompt)
-        setPendingIntent(intent)
         setPendingRequiredFields(fields)
 
         setIsTyping(true)
@@ -228,7 +226,7 @@ export function useBotConfigChat() {
       )
       setChips(defaultChips)
     }
-  }, [input, isGenerating, step, pushA, pushU, normalizeIntent]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [input, isGenerating, step, pushA, pushU, normalizeIntent])
 
   // ── Submit keys from the credentials form ─────────────────────────────────
 

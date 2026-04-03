@@ -172,7 +172,7 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
     });
   }
 
-  if (Boolean(intent?.requires_openai ?? intent?.requires_openai_key)) {
+  if (intent?.requires_openai ?? intent?.requires_openai_key) {
     fields.push({
       key: "OPENAI_API_KEY",
       label: "OpenAI API Key",

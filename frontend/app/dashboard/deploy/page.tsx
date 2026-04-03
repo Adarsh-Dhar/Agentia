@@ -33,7 +33,7 @@ export default function DeployChatPage() {
       if (!agentId) throw new Error('No agentId returned');
       // Route to the code page for the new agent
       router.push(`/dashboard/deploy/${agentId}/code`);
-    } catch (err) {
+    } catch {
       alert('Failed to create bot. Please try again.');
       // Optionally log error
       // console.error(err);

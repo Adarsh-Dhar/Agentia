@@ -2,13 +2,22 @@
 
 import React, { PropsWithChildren, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createConfig, http, WagmiProvider } from 'wagmi'
+import { mainnet } from 'wagmi/chains'
 import {
+  initiaPrivyWalletConnector,
   injectStyles,
   InterwovenKitProvider,
   TESTNET
 } from '@initia/interwovenkit-react'
 import interwovenKitStyles from '@initia/interwovenkit-react/styles.js'
 import { UserProvider } from '@/lib/user-context'
+
+const wagmiConfig = createConfig({
+  connectors: [initiaPrivyWalletConnector],
+  chains: [mainnet],
+  transports: { [mainnet.id]: http() },
+})
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,18 +33,20 @@ export default function Providers({ children }: PropsWithChildren) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <InterwovenKitProvider
-        {...TESTNET}
-        enableAutoSign={{
-          [TESTNET.defaultChainId]: [
-            "/initia.move.v1.MsgExecute",
-          ],
-        }}
-      >
-        <UserProvider>
-          {children}
-        </UserProvider>
-      </InterwovenKitProvider>
+      <WagmiProvider config={wagmiConfig}>
+        <InterwovenKitProvider
+          {...TESTNET}
+          enableAutoSign={{
+            [TESTNET.defaultChainId]: [
+              "/initia.move.v1.MsgExecute",
+            ],
+          }}
+        >
+          <UserProvider>
+            {children}
+          </UserProvider>
+        </InterwovenKitProvider>
+      </WagmiProvider>
     </QueryClientProvider>
   )
 }

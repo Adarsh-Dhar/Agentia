@@ -8,7 +8,6 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { prisma } from '@/lib/prisma' // only used server-side — client calls API
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -242,7 +241,6 @@ export default function AgentDetailPage({ params }: { params: Promise<{ id: stri
   )
 
   const isRunning    = agent.status === 'RUNNING'
-  const isTerminal   = agent.status === 'STOPPED' || agent.status === 'ERROR'
   const inTransition = agent.status === 'STARTING' || agent.status === 'STOPPING'
   const cfg          = agent.configuration as Record<string, unknown> | null
 

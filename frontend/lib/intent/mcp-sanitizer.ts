@@ -23,11 +23,7 @@ function asMcpList(value: unknown): string[] {
   return out;
 }
 
-function isInitiaChain(chain: unknown): boolean {
-  return typeof chain === "string" && chain.trim().toLowerCase() === "initia";
-}
-
-export function shouldUseInitiaDeterministicFallback(intent: Record<string, unknown>): boolean {
+export function shouldUseInitiaDeterministicFallback(): boolean {
   return true;
 }
 

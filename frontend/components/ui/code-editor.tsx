@@ -8,7 +8,7 @@ export function CodeEditor({ content, onChange }: CodeEditorProps) {
   if (content === undefined) {
     return (
       <div className="flex-1 overflow-auto bg-[#020617] p-4 text-[11px] text-slate-500 font-mono">
-        // Click Generate Bot to see files
+        <span>{"// Click Generate Bot to see files"}</span>
       </div>
     );
   }

@@ -16,7 +16,9 @@ export function EnvConfigModal({ envConfig, onChange, onLaunch, isDryRun }: EnvC
           <Settings size={15} className="text-cyan-400" />
           <div>
             <h3 className="text-sm font-bold text-slate-200">Flash Loan Configuration</h3>
-            <p className="text-[10px] text-slate-400">Environment variables for the arbitrage bot</p>
+            <p className="text-[10px] text-slate-400">
+              Environment variables for the arbitrage bot ({isDryRun ? "SIM" : "LIVE"} mode)
+            </p>
           </div>
         </div>
         <div className="p-5 space-y-3">
