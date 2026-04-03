@@ -109,6 +109,74 @@ export async function callMcpTool(
 }
 '''
 
+ONS_RESOLVER_CONTENT = '''\
+import { callMcpTool } from "./mcp_bridge.js";
+import { CONFIG } from "./config.js";
+
+const _resolvedCache = new Map<string, string>();
+
+export function isInitName(value: string): boolean {
+  return /^[a-z0-9_-]+\\.init$/i.test(String(value ?? "").trim());
+}
+
+function extractAddressFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  for (const field of ["address", "resolved_address", "value", "account"]) {
+    if (typeof root[field] === "string" && (root[field] as string).trim()) {
+      return (root[field] as string).trim();
+    }
+  }
+  const result = root.result;
+  if (result && typeof result === "object") {
+    const content = (result as Record<string, unknown>).content;
+    if (Array.isArray(content) && content.length > 0) {
+      const text = (content[0] as Record<string, unknown>).text;
+      if (typeof text === "string") {
+        const trimmed = text.trim();
+        if (trimmed.startsWith("{")) {
+          try {
+            const inner = JSON.parse(trimmed) as Record<string, unknown>;
+            for (const field of ["address", "resolved_address", "value"]) {
+              if (typeof inner[field] === "string") return (inner[field] as string).trim();
+            }
+          } catch {
+          }
+        }
+        if (trimmed.startsWith("init1") || trimmed.startsWith("0x")) {
+          return trimmed;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export async function resolveAddress(nameOrAddress: string): Promise<string> {
+  const normalized = String(nameOrAddress ?? "").trim().toLowerCase();
+  if (!isInitName(normalized)) {
+    return String(nameOrAddress ?? "").trim();
+  }
+  const cached = _resolvedCache.get(normalized);
+  if (cached) {
+    return cached;
+  }
+  const response = await callMcpTool("initia", "move_view", {
+    network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),
+    address: String(process.env.ONS_REGISTRY_ADDRESS ?? CONFIG.ONS_REGISTRY_ADDRESS ?? "0x1"),
+    module: "initia_names",
+    function: "resolve",
+    args: [normalized],
+  });
+  const resolved = extractAddressFromPayload(response);
+  if (!resolved) {
+    throw new Error(`ONS registry returned no address for '${normalized}'`);
+  }
+  _resolvedCache.set(normalized, resolved);
+  return resolved;
+}
+'''
+
 
 # ─── Classifier ───────────────────────────────────────────────────────────────
 
@@ -194,6 +262,7 @@ CORE CONSTRAINTS:
 13. Every generated file must be complete. No TODOs, stubs, or placeholder comments.
 14. Never use fake placeholder addresses (for example 0xinitia_pool_a/0xinitia_pool_b) or fabricated prices.
 15. Always resolve addresses and runtime inputs from CONFIG/process.env and fail fast when required values are missing.
+16. If USER_WALLET_ADDRESS or any configured address ends in '.init', resolve it before first use and cache the resolved address.
 
 INITIA RULES:
 - Chain is always Initia.
@@ -458,9 +527,11 @@ class MetaAgent:
 
       files = parsed.get("files", [])
       files.insert(1, {"filepath": "src/mcp_bridge.ts", "content": MCP_BRIDGE_CONTENT})
+      if strategy_lc in {"yield", "arbitrage", "sentiment", "custom_utility"}:
+        files.insert(2, {"filepath": "src/ons_resolver.ts", "content": ONS_RESOLVER_CONTENT})
 
       wanted = {"package.json", "src/config.ts", "src/index.ts"}
-      final_files = [f for f in files if f.get("filepath") in wanted or f.get("filepath") == "src/mcp_bridge.ts"]
+      final_files = [f for f in files if f.get("filepath") in wanted or f.get("filepath") in {"src/mcp_bridge.ts", "src/ons_resolver.ts"}]
 
       _log("INFO", f"build_bot: final_files={[f.get('filepath') for f in final_files]}", trace_id)
 
@@ -516,6 +587,11 @@ Initia write pattern:
   - No callback contracts, no calldata encoding, no manual signing.
   - MCP signs and submits using x-session-key when provided by INITIA_KEY.
   - INITIA_KEY may be injected at runtime when SESSION_KEY_MODE=true; do not fail process startup if missing.
+
+ONS pattern:
+  - If any configured address or USER_WALLET_ADDRESS ends in '.init', resolve it once before first use.
+  - Cache the resolved value for the current process or polling cycle.
+  - If resolution fails, log a warning and skip the cycle rather than crashing the bot.
 
 Yield sweeper pattern (if strategy is yield):
   - Poll every 15s and scan each configured Minitia endpoint/ID.

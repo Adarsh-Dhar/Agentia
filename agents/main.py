@@ -155,6 +155,23 @@ async def mcp_tool(server: str, tool: str, body: dict, request: Request):
     if server_l == "initia" and tool_l == "move_view":
         raw_args = body.get("args")
         args = raw_args if isinstance(raw_args, list) else []
+        is_ons_call = (
+            str(body.get("module") or "").lower() in {"initia_names", "ons", "name_service"}
+            and str(body.get("function") or "").lower() in {"resolve", "get_address", "lookup"}
+        )
+        if is_ons_call:
+            name_query = str(args[0] if args else "").strip().lower()
+            mock_resolved = {
+                "ok": True,
+                "tool": "move_view",
+                "network": str(body.get("network") or "initia-testnet"),
+                "address": f"init1mock_{name_query.replace('.init', '').replace('.', '_')}",
+                "ons_name": name_query,
+                "resolved": True,
+                "source": "mcp-http-compat-ons-mock",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            return _mcp_ok(mock_resolved)
         base_denom = str((args[0] if len(args) > 0 else None) or body.get("base_denom") or "uinit")
         quote_denom = str((args[1] if len(args) > 1 else None) or body.get("quote_denom") or "uusdc")
         module = str(body.get("module") or "")

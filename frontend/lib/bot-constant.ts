@@ -23,6 +23,7 @@ export interface BotEnvConfig {
   INITIA_RPC_URL: string;
   INITIA_NETWORK: string;
   USER_WALLET_ADDRESS: string;
+  ONS_REGISTRY_ADDRESS: string;
   INITIA_BRIDGE_ADDRESS: string;
   INITIA_POOL_A_ADDRESS: string;
   INITIA_POOL_B_ADDRESS: string;
@@ -42,6 +43,7 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   INITIA_RPC_URL: "",
   INITIA_NETWORK: "initia-testnet",
   USER_WALLET_ADDRESS: "",
+  ONS_REGISTRY_ADDRESS: "0x1",
   INITIA_BRIDGE_ADDRESS: "",
   INITIA_POOL_A_ADDRESS: "",
   INITIA_POOL_B_ADDRESS: "",
@@ -133,7 +135,16 @@ export function getRequiredEnvFields(
         key: "USER_WALLET_ADDRESS",
         label: "User Wallet Address",
         type: "text",
-        required: true,
+        required: true, or yourname.init",
+        helpText: "Your Initia wallet address, or a .init name. It will be resolved automatically.",
+      },
+      {
+        key: "ONS_REGISTRY_ADDRESS",
+        label: "ONS Registry Address (Optional)",
+        type: "text",
+        required: false,
+        placeholder: "0x1",
+        helpText: "The ONS registry contract address. Defaults to 0x1 on testnet.
         placeholder: "init1...",
       },
       {

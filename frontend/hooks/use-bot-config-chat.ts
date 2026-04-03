@@ -108,6 +108,7 @@ export function useBotConfigChat() {
       pushA(
         `Hey! 👋 I'm your **Universal Meta-Agent**.\n\n` +
         `I can architect and generate Initia-native bots — yield sweepers, spread scanners, sentiment bots, and custom Move utility workflows.\n\n` +
+        `I also support Initia Name Service (.init) addresses — you can type **adarsh.init** instead of a raw wallet address anywhere a wallet is needed.\n\n` +
         `Just describe your strategy in plain English. I'll expand it into a full technical specification and then generate production-ready TypeScript code.\n\n` +
         `What kind of bot do you want to build?`
       )

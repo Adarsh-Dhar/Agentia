@@ -14,6 +14,7 @@ export function assembleInitiaBotFiles(): BotFile[] {
     { filepath: ".env.example", content: INITIA_ENV_EXAMPLE },
     { filepath: "src/config.ts", content: INITIA_CONFIG_TS },
     { filepath: "src/mcp_bridge.ts", content: INITIA_MCP_BRIDGE_TS },
+    { filepath: "src/ons_resolver.ts", content: INITIA_ONS_RESOLVER_TS },
     { filepath: "src/index.ts", content: INITIA_INDEX_TS },
   ];
 }
@@ -60,12 +61,14 @@ const INITIA_ENV_EXAMPLE = `MCP_GATEWAY_URL=http://localhost:8000/mcp
 INITIA_KEY=replace_me
 INITIA_RPC_URL=
 INITIA_NETWORK=initia-testnet
-USER_WALLET_ADDRESS=
+# USER_WALLET_ADDRESS accepts either a raw address (init1...) or a .init name
+USER_WALLET_ADDRESS=yourname.init
 INITIA_BRIDGE_ADDRESS=
 INITIA_POOL_A_ADDRESS=
 INITIA_POOL_B_ADDRESS=
 INITIA_FLASH_POOL_ADDRESS=
 INITIA_SWAP_ROUTER_ADDRESS=
+ONS_REGISTRY_ADDRESS=0x1
 SIMULATION_MODE=true
 POLL_INTERVAL=15
 `;
@@ -77,6 +80,9 @@ export const CONFIG = {
   INITIA_KEY: process.env.INITIA_KEY ?? "",
   SESSION_KEY_MODE: process.env.SESSION_KEY_MODE ?? "false",
   INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",
+  // ONS: USER_WALLET_ADDRESS may be a .init name (e.g. "adarsh.init")
+  // The bot resolves it automatically at startup via the ONS registry.
+  ONS_REGISTRY_ADDRESS: process.env.ONS_REGISTRY_ADDRESS ?? "0x1",
   INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",
   USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",
   INITIA_BRIDGE_ADDRESS: process.env.INITIA_BRIDGE_ADDRESS ?? "",
@@ -120,8 +126,88 @@ export async function callMcpTool(server: string, tool: string, args: Record<str
 }
 `;
 
+const INITIA_ONS_RESOLVER_TS = `import { callMcpTool } from "./mcp_bridge.js";
+import { CONFIG } from "./config.js";
+
+const _resolvedCache = new Map<string, string>();
+
+export function isInitName(value: string): boolean {
+  return /^[a-z0-9_-]+\\.init$/i.test(String(value ?? "").trim());
+}
+
+function extractAddressFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+
+  for (const field of ["address", "resolved_address", "value", "account"]) {
+    if (typeof root[field] === "string" && (root[field] as string).trim()) {
+      return (root[field] as string).trim();
+    }
+  }
+
+  const result = root.result;
+  if (result && typeof result === "object") {
+    const content = (result as Record<string, unknown>).content;
+    if (Array.isArray(content) && content.length > 0) {
+      const text = (content[0] as Record<string, unknown>).text;
+      if (typeof text === "string") {
+        const trimmed = text.trim();
+        if (trimmed.startsWith("{")) {
+          try {
+            const inner = JSON.parse(trimmed) as Record<string, unknown>;
+            for (const field of ["address", "resolved_address", "value"]) {
+              if (typeof inner[field] === "string") return (inner[field] as string).trim();
+            }
+          } catch {
+            // fall through to raw text parsing
+          }
+        }
+        if (trimmed.startsWith("init1") || trimmed.startsWith("0x")) {
+          return trimmed;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function resolveAddress(nameOrAddress: string): Promise<string> {
+  const normalized = String(nameOrAddress ?? "").trim().toLowerCase();
+
+  if (!isInitName(normalized)) {
+    return String(nameOrAddress ?? "").trim();
+  }
+
+  const cached = _resolvedCache.get(normalized);
+  if (cached) {
+    return cached;
+  }
+
+  console.log(`[ONS] Resolving ${normalized}...`);
+
+  const response = await callMcpTool("initia", "move_view", {
+    network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),
+    address: String(process.env.ONS_REGISTRY_ADDRESS ?? CONFIG.ONS_REGISTRY_ADDRESS ?? "0x1"),
+    module: "initia_names",
+    function: "resolve",
+    args: [normalized],
+  });
+
+  const resolved = extractAddressFromPayload(response);
+  if (!resolved) {
+    throw new Error(`ONS registry returned no address for '${normalized}'`);
+  }
+
+  console.log(`[ONS] Resolved ${normalized} -> ${resolved}`);
+  _resolvedCache.set(normalized, resolved);
+  return resolved;
+}
+`;
+
 const INITIA_INDEX_TS = `import { CONFIG } from "./config.js";
 import { callMcpTool } from "./mcp_bridge.js";
+import { resolveAddress } from "./ons_resolver.js";
 
 function log(level: "INFO" | "WARN" | "ERROR", message: string): void {
   console.log("[" + new Date().toISOString() + "] [" + level + "] " + message);
@@ -129,8 +215,16 @@ function log(level: "INFO" | "WARN" | "ERROR", message: string): void {
 
 let inFlight = false;
 
+async function resolveWalletAddress(): Promise<string> {
+  const configured = String(CONFIG.USER_WALLET_ADDRESS ?? "").trim();
+  if (!configured) {
+    throw new Error("USER_WALLET_ADDRESS is required");
+  }
+  return resolveAddress(configured);
+}
+
 async function runCycle(): Promise<void> {
-  const wallet = CONFIG.USER_WALLET_ADDRESS;
+  const wallet = await resolveWalletAddress();
   const bridge = CONFIG.INITIA_BRIDGE_ADDRESS;
   if (!wallet || !bridge) {
     throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");
