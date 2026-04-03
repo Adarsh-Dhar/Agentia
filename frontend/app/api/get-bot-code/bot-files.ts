@@ -94,7 +94,7 @@ INITIA_POOL_B_ADDRESS=
 INITIA_FLASH_POOL_ADDRESS=
 INITIA_SWAP_ROUTER_ADDRESS=
 SIMULATION_MODE=true
-POLL_INTERVAL=5
+POLL_INTERVAL=15
 `;
 
 const INITIA_CONFIG_TS = `import "dotenv/config";
@@ -109,7 +109,7 @@ export const CONFIG = {
   INITIA_FLASH_POOL_ADDRESS: process.env.INITIA_FLASH_POOL_ADDRESS ?? "",
   INITIA_SWAP_ROUTER_ADDRESS: process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "",
   SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",
-  POLL_MS: Math.max(1000, (parseInt(process.env.POLL_INTERVAL ?? "5", 10) || 5) * 1000),
+  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),
   NETWORK: process.env.INITIA_NETWORK ?? "initia-mainnet",
 };
 `;
@@ -347,30 +347,45 @@ async function runCycle(): Promise<void> {
 }
 
 let cycleInFlight = false;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let backoffMs = CONFIG.POLL_MS;
+
+function scheduleNextCycle(delayMs: number): void {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => { void runCycleSafely(); }, delayMs);
+}
+
 const runCycleSafely = async () => {
   if (cycleInFlight) return;
   cycleInFlight = true;
   try {
     await runCycle();
+    backoffMs = CONFIG.POLL_MS;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log("ERROR", msg);
+    backoffMs = Math.min(CONFIG.POLL_MS * 8, Math.max(CONFIG.POLL_MS, backoffMs * 2));
   } finally {
     cycleInFlight = false;
+    scheduleNextCycle(backoffMs);
   }
 };
 
 void runCycleSafely();
-const timer = setInterval(() => { void runCycleSafely(); }, CONFIG.POLL_MS);
+
+function stopPolling(): void {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+}
 
 process.on("SIGINT", () => {
-  clearInterval(timer);
+  stopPolling();
   log("INFO", "Shutdown complete");
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  clearInterval(timer);
+  stopPolling();
   log("INFO", "Shutdown complete");
   process.exit(0);
 });
@@ -446,7 +461,7 @@ MCP_GATEWAY_URL=http://localhost:8000/mcp
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
 BORROW_AMOUNT_HUMAN=1
-POLL_INTERVAL=5
+POLL_INTERVAL=15
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -481,7 +496,7 @@ export const GAS_BUFFER_USDC = 2_000_000n; // 2 USDC safety buffer (6-decimal un
 // ── Runtime config ────────────────────────────────────────────────────────────
 export const SIMULATION_MODE       = (process.env.SIMULATION_MODE ?? "false") === "true";
 export const BORROW_AMOUNT_HUMAN   = String(process.env.BORROW_AMOUNT_HUMAN ?? "1").trim() || "1";
-export const POLL_INTERVAL_MS      = Math.max(1000, (parseInt(process.env.POLL_INTERVAL ?? "5", 10) || 5) * 1000);
+export const POLL_INTERVAL_MS      = Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000);
 
 // ── Credentials ───────────────────────────────────────────────────────────────
 export const WALLET_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY ?? "";

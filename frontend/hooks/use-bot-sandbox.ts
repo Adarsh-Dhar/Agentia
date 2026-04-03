@@ -179,14 +179,14 @@ function patchOverlappingRunCycleInterval(content: string): string {
 
   let rewritten = content;
 
-  // Normalize explicit fast timers to 10 seconds.
-  rewritten = rewritten.replace(/setInterval\(([^,]+),\s*(1000|2000|3000|4000|5000)\s*\)/g, "setInterval($1, 10000)");
-  rewritten = rewritten.replace(/setTimeout\(([^,]+),\s*(1000|2000|3000|4000|5000)\s*\)/g, "setTimeout($1, 10000)");
-  rewritten = rewritten.replace(/setTimeout\(\(\)\s*=>\s*\{\s*void\s+([A-Za-z_$][\w$]*)\(\)\s*;?\s*\}\s*,\s*(1000|2000|3000|4000|5000)\s*\)/g, "setTimeout(() => { void $1(); }, 10000)");
+  // Normalize explicit fast timers to 15 seconds.
+  rewritten = rewritten.replace(/setInterval\(([^,]+),\s*(1000|2000|3000|4000|5000|6000|7000|8000|9000|10000|11000|12000|13000|14000)\s*\)/g, "setInterval($1, 15000)");
+  rewritten = rewritten.replace(/setTimeout\(([^,]+),\s*(1000|2000|3000|4000|5000|6000|7000|8000|9000|10000|11000|12000|13000|14000)\s*\)/g, "setTimeout($1, 15000)");
+  rewritten = rewritten.replace(/setTimeout\(\(\)\s*=>\s*\{\s*void\s+([A-Za-z_$][\w$]*)\(\)\s*;?\s*\}\s*,\s*(1000|2000|3000|4000|5000|6000|7000|8000|9000|10000|11000|12000|13000|14000)\s*\)/g, "setTimeout(() => { void $1(); }, 15000)");
 
   // Normalize common POLL_INTERVAL defaults that are too aggressive.
-  rewritten = rewritten.replace(/(POLL_INTERVAL\s*=\s*Number\([^)]*\|\|\s*)(1|2|3|4|5)(\s*\))/g, "$110$3");
-  rewritten = rewritten.replace(/(POLL_INTERVAL\s*=\s*)(1|2|3|4|5)(\s*;)/g, "$110$3");
+  rewritten = rewritten.replace(/(POLL_INTERVAL\s*=\s*Number\([^)]*\|\|\s*)(1|2|3|4|5|6|7|8|9|10|11|12|13|14)(\s*\))/g, "$115$3");
+  rewritten = rewritten.replace(/(POLL_INTERVAL\s*=\s*)(1|2|3|4|5|6|7|8|9|10|11|12|13|14)(\s*;)/g, "$115$3");
 
   return rewritten;
 }
@@ -999,8 +999,8 @@ function buildFallbackSentimentIndexTs(): string {
     "",
     "log('INFO', 'Bot starting...');",
     "void run();",
-    "const timer = setInterval(run, 10000);",
-    "log('INFO', 'Cycle interval: 10 seconds');",
+    "const timer = setInterval(run, 15000);",
+    "log('INFO', 'Cycle interval: 15 seconds');",
     "",
     "process.on('SIGINT', () => {",
     "  clearInterval(timer);",

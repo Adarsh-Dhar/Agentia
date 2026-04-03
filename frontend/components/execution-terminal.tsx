@@ -96,7 +96,7 @@ export function ExecutionTerminal({ logs }: ExecutionTerminalProps) {
       {/* Footer */}
       <div className="bg-muted/30 border-t border-border px-4 py-2 text-xs text-muted-foreground flex items-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-        Polling every 5s · {logs.length} events loaded
+        Polling every 15s · {logs.length} events loaded
       </div>
     </div>
   )

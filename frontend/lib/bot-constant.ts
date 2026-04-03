@@ -99,7 +99,7 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   PYTH_PRO_ACCESS_TOKEN: "",
 
   BORROW_AMOUNT_HUMAN: "1",
-  POLL_INTERVAL:       "5",
+  POLL_INTERVAL:       "15",
 };
 
 // ─── Field definitions keyed by intent ───────────────────────────────────────
@@ -383,7 +383,7 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
         label:       "Poll Interval (seconds)",
         type:        "text",
         required:    false,
-        placeholder: "5",
+        placeholder: "15",
         helpText:    "Seconds between each arbitrage opportunity check.",
       },
     );

@@ -49,7 +49,7 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
         `CONTRACT_ADDRESS=${envConfig.CONTRACT_ADDRESS}`,
         `MAX_LOAN_USD=${envConfig.MAX_LOAN_USD}`,
         `MIN_PROFIT_USD=${envConfig.MIN_PROFIT_USD}`,
-        `POLL_MS=3000`,
+        `POLL_MS=15000`,
       ].join("\n");
       
       const finalFiles = [
