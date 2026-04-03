@@ -52,6 +52,9 @@ export async function callMcpTool(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
+  if (server === "initia" && tool === "move_execute" && !CONFIG.INITIA_KEY) {
+    throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");
+  }
   const gatewayBase = CONFIG.MCP_GATEWAY_URL.replace(/\\/+$/, "");
   const url = `${gatewayBase}/${server}/${tool}`;
   const attempts = 3;
@@ -69,6 +72,7 @@ export async function callMcpTool(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(CONFIG.INITIA_KEY ? { "x-session-key": CONFIG.INITIA_KEY } : {}),
           "ngrok-skip-browser-warning": "true",
           "Bypass-Tunnel-Reminder": "true",
         },
@@ -178,7 +182,7 @@ CORE CONSTRAINTS:
 1. TypeScript + Node.js only. Never Python.
 2. package.json must use "type": "module" and "start": "tsx src/index.ts".
 3. Keep dependencies minimal: dotenv, tsx, typescript, @types/node. Add only what the requested bot truly needs.
-4. src/config.ts must read all secrets from process.env and throw if required values are missing.
+4. src/config.ts must read all secrets from process.env. INITIA_KEY can be empty at startup when SESSION_KEY_MODE=true and must be validated lazily at first write.
 5. MCP_GATEWAY_URL must fail fast if unset. No hardcoded IP fallback.
 6. All money and token math must use BigInt only.
 7. SIMULATION_MODE defaults to true unless explicitly set to "false".
@@ -196,6 +200,7 @@ INITIA RULES:
 - All reads must use callMcpTool('initia', 'move_view', {...}).
 - All writes must use callMcpTool('initia', 'move_execute', {...}).
 - Do not use external chain SDK signing flows for Initia.
+- Always forward INITIA_KEY as header x-session-key when present.
 - Use the exact MCP server names from the intent's mcps list.
 - Never invent module or function names. Only use names explicitly supported by the prompt context.
 - Never inject mocked balance/price values into production generation paths.
@@ -509,7 +514,8 @@ Initia read pattern:
 Initia write pattern:
   - Build one atomic move_execute payload with sequential calls inside transaction.calls when execution is required.
   - No callback contracts, no calldata encoding, no manual signing.
-  - MCP signs and submits using INITIA_KEY.
+  - MCP signs and submits using x-session-key when provided by INITIA_KEY.
+  - INITIA_KEY may be injected at runtime when SESSION_KEY_MODE=true; do not fail process startup if missing.
 
 Yield sweeper pattern (if strategy is yield):
   - Poll every 15s and scan each configured Minitia endpoint/ID.

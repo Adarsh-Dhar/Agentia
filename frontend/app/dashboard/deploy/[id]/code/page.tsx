@@ -32,7 +32,7 @@ export default function WebcontainerPage() {
             },
             {
               title: "2. Configure Credentials",
-              body:  "Set your Webacy API key (required). Add RPC URL and wallet key only for live mode — simulation mode requires no wallet.",
+              body:  "Enable AutoSign first, then configure non-key environment values. Session key mode injects INITIA_KEY at launch, so no master key paste is needed.",
             },
             {
               title: "3. Launch & Monitor",

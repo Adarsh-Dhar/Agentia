@@ -1,4 +1,4 @@
-import { EnvConfig } from "../types";
+import { EnvConfig } from "@/lib/types";
 import { Settings, Zap } from "lucide-react";
 
 interface EnvConfigModalProps {

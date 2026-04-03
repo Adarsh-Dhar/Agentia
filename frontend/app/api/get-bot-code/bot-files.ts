@@ -74,7 +74,8 @@ const INITIA_CONFIG_TS = `import "dotenv/config";
 
 export const CONFIG = {
   MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),
-  INITIA_KEY: process.env.INITIA_KEY ?? (() => { throw new Error("INITIA_KEY not set"); })(),
+  INITIA_KEY: process.env.INITIA_KEY ?? "",
+  SESSION_KEY_MODE: process.env.SESSION_KEY_MODE ?? "false",
   INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",
   INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",
   USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",
@@ -96,12 +97,16 @@ function normalizeGatewayBase(raw: string): string {
 }
 
 export async function callMcpTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
+  if (server === "initia" && tool === "move_execute" && !CONFIG.INITIA_KEY) {
+    throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");
+  }
   const base = normalizeGatewayBase(CONFIG.MCP_GATEWAY_URL);
   const url = base + "/" + server + "/" + tool;
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(CONFIG.INITIA_KEY ? { "x-session-key": CONFIG.INITIA_KEY } : {}),
       "ngrok-skip-browser-warning": "true",
       "Bypass-Tunnel-Reminder": "true",
     },

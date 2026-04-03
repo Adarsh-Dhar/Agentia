@@ -534,6 +534,7 @@ function buildMcpBridgeTs(): string {
   return [
     'const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp";',
     'const MCP_GATEWAY_UPSTREAM_URL = process.env.MCP_GATEWAY_UPSTREAM_URL ?? "";',
+    'const INITIA_KEY = process.env.INITIA_KEY ?? "";',
     '',
     'function isProxyGateway(value: string): boolean {',
     '  return /\\/api\\/mcp-proxy\\/?$/i.test(String(value || ""));',
@@ -563,6 +564,9 @@ function buildMcpBridgeTs(): string {
     '}',
     '',
     'export async function callMcpTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {',
+    '  if (server === "initia" && tool === "move_execute" && !INITIA_KEY) {',
+    '    throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");',
+    '  }',
     '  const base = normalizeGatewayBase(MCP_GATEWAY_URL);',
     '  const url = `${base}/${server}/${tool}`;',
     '  console.log(`[MCP] request start server=${server} tool=${tool} base=${base} url=${url} upstream=${MCP_GATEWAY_UPSTREAM_URL || "<empty>"}`);',
@@ -572,6 +576,7 @@ function buildMcpBridgeTs(): string {
     '      method: "POST",',
     '      headers: {',
     '        "Content-Type": "application/json",',
+    '        ...(INITIA_KEY ? { "x-session-key": INITIA_KEY } : {}),',
     '        "x-mcp-upstream-url": MCP_GATEWAY_UPSTREAM_URL,',
     '        "ngrok-skip-browser-warning": "true",',
     '        "Bypass-Tunnel-Reminder": "true",',
@@ -1001,7 +1006,7 @@ export async function POST(req: NextRequest) {
       if (lastMetaStatus === 504) {
         console.warn(`[generate-bot] [${requestId}] Falling back to deterministic bot files after Meta-Agent timeout`);
         const fallbackIntent = deriveFallbackIntent(boundedPrompt || originalPrompt || "");
-        const useInitiaFallback = shouldUseInitiaDeterministicFallback(fallbackIntent);
+        const useInitiaFallback = shouldUseInitiaDeterministicFallback();
         metaData = {
           output: {
             thoughts:
@@ -1084,6 +1089,13 @@ export async function POST(req: NextRequest) {
       MCP_GATEWAY_URL: pickPublicGateway(envConfig.MCP_GATEWAY_URL || "", publicGatewayFallback),
       SIMULATION_MODE: "false",
     };
+
+    const sessionKeyMode = String(finalEnv.SESSION_KEY_MODE || "").toLowerCase() === "true";
+    if (sessionKeyMode) {
+      // Session key is browser-derived and injected only at runtime.
+      delete finalEnv.INITIA_KEY;
+      finalEnv.SESSION_KEY_MODE = "true";
+    }
 
     let envPlaintext = "";
     for (const [key, val] of Object.entries(finalEnv)) {

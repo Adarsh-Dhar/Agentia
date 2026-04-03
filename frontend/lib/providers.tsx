@@ -39,6 +39,8 @@ export default function Providers({ children }: PropsWithChildren) {
           enableAutoSign={{
             [TESTNET.defaultChainId]: [
               "/initia.move.v1.MsgExecute",
+              "/cosmos.bank.v1beta1.MsgSend",
+              "/ibc.applications.transfer.v1.MsgTransfer",
             ],
           }}
         >

@@ -176,6 +176,10 @@ export function useDeployChat() {
   // ── Deploy ────────────────────────────────────────────────────────────────
   async function handleDeploy() {
     if (!currentPlan || !currentGuardrails || !user?.id || !initiaAddress) return
+    if (!autosignEnabled) {
+      pushAssistant('Enable AutoSign before deploying or starting bots. This grants a scoped session key used for execution.')
+      return
+    }
 
     setConvState('deploying')
     setChips([])

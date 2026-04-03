@@ -137,7 +137,7 @@ function Calendar({
             />
           )
         },
-        Chevron: function Chevron({ className, orientation, ...props }: React.ComponentProps<'svg'> & { orientation?: 'left' | 'right' }) {
+        Chevron: function Chevron({ className, orientation, ...props }: React.ComponentProps<'svg'> & { orientation?: 'left' | 'right' | 'up' | 'down' }) {
           if (orientation === 'left') {
             return (
               <ChevronLeftIcon className={cn('size-4', className)} {...props} />

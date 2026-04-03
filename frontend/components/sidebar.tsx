@@ -153,7 +153,7 @@ export function Sidebar() {
                   </div>
                 )}
                 {!autosignEnabled && (
-                  <div className="text-xs opacity-60">Sign once, trade freely</div>
+                  <div className="text-xs opacity-60">Required before launching any bot</div>
                 )}
               </div>
             </button>

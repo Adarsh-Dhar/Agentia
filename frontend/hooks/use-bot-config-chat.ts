@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { getRequiredEnvFields, type EnvFieldDef } from '@/lib/bot-constant'
+import { TESTNET, useInterwovenKit } from '@initia/interwovenkit-react'
 
 export interface BotConfigChatMessage {
   id: string;
@@ -18,6 +19,7 @@ const uid = () => String(++_msgId)
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 export function useBotConfigChat() {
+  const { autoSign } = useInterwovenKit()
   const [messages, setMessages]         = useState<BotConfigChatMessage[]>([])
   const [input, setInput]               = useState('')
   const [isTyping, setIsTyping]         = useState(false)
@@ -31,6 +33,8 @@ export function useBotConfigChat() {
 
   const [generatedAgentId, setGeneratedAgentId] = useState<string | null>(null)
   const [envDefaults, setEnvDefaults] = useState<Record<string, string>>({})
+
+  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
 
   const bottomRef  = useRef<HTMLDivElement>(null)
   const initialized = useRef(false)
@@ -190,7 +194,8 @@ export function useBotConfigChat() {
       )
 
       // ── Step 2: Check which API keys are required ─────────────────────────
-      const fields = getRequiredEnvFields(intent as Parameters<typeof getRequiredEnvFields>[0])
+      const sessionKeyMode = autosignEnabled || String(envDefaults.SESSION_KEY_MODE ?? '').toLowerCase() === 'true'
+      const fields = getRequiredEnvFields(intent as Parameters<typeof getRequiredEnvFields>[0], { sessionKeyMode })
         .filter(f => f.required)
 
       if (fields.length > 0) {
@@ -210,7 +215,10 @@ export function useBotConfigChat() {
         setIsGenerating(false)
       } else {
         // No keys needed — generate immediately
-        await generateBot(text, expandedPrompt, envDefaults)
+        await generateBot(text, expandedPrompt, {
+          ...envDefaults,
+          SESSION_KEY_MODE: sessionKeyMode ? 'true' : String(envDefaults.SESSION_KEY_MODE ?? 'false'),
+        })
       }
 
     } catch (err: unknown) {
@@ -226,13 +234,15 @@ export function useBotConfigChat() {
       )
       setChips(defaultChips)
     }
-  }, [input, isGenerating, step, pushA, pushU, normalizeIntent])
+  }, [input, isGenerating, step, pushA, pushU, normalizeIntent, autosignEnabled, envDefaults])
 
   // ── Submit keys from the credentials form ─────────────────────────────────
 
   const submitDynamicKeys = async (envData: Record<string, string>) => {
-    const mergedEnv = {
+    const sessionKeyMode = autosignEnabled || String(envDefaults.SESSION_KEY_MODE ?? '').toLowerCase() === 'true'
+    const mergedEnv: Record<string, string> = {
       ...envDefaults,
+      SESSION_KEY_MODE: sessionKeyMode ? 'true' : String(envDefaults.SESSION_KEY_MODE ?? 'false'),
       ...envData,
     }
 

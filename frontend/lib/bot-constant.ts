@@ -18,6 +18,7 @@ export interface BotIntent {
 export interface BotEnvConfig {
   SIMULATION_MODE: string;
   MCP_GATEWAY_URL: string;
+  SESSION_KEY_MODE: string;
   INITIA_KEY: string;
   INITIA_RPC_URL: string;
   INITIA_NETWORK: string;
@@ -36,6 +37,7 @@ export interface BotEnvConfig {
 export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   SIMULATION_MODE: "false",
   MCP_GATEWAY_URL: "http://192.168.1.50:8000/mcp",
+  SESSION_KEY_MODE: "false",
   INITIA_KEY: "",
   INITIA_RPC_URL: "",
   INITIA_NETWORK: "initia-testnet",
@@ -63,9 +65,13 @@ export interface EnvFieldDef {
 
 export const BOT_NPMRC = "fund=false\naudit=false\n";
 
-export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
+export function getRequiredEnvFields(
+  intent?: BotIntent | null,
+  options?: { sessionKeyMode?: boolean },
+): EnvFieldDef[] {
   const strategy = (intent?.strategy ?? "").toLowerCase();
   const botName = (intent?.bot_name ?? intent?.bot_type ?? "").toLowerCase();
+  const sessionKeyMode = options?.sessionKeyMode ?? false;
   const mcps = Array.from(
     new Set([
       ...((intent?.mcps ?? []).map((m) => String(m || "").trim()).filter(Boolean)),
@@ -97,9 +103,11 @@ export function getRequiredEnvFields(intent?: BotIntent | null): EnvFieldDef[] {
       key: "INITIA_KEY",
       label: "Initia Private Key",
       type: "password",
-      required: true,
+      required: !sessionKeyMode,
       placeholder: "0x...",
-      helpText: "Required for move_execute signing via Initia MCP.",
+      helpText: sessionKeyMode
+        ? "Session Key Active: provided automatically by Initia AutoSign at launch."
+        : "Required for move_execute signing via Initia MCP.",
     },
     {
       key: "INITIA_RPC_URL",

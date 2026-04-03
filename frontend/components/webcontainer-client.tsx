@@ -1,11 +1,11 @@
 "use client";
 import dynamic from "next/dynamic";
 
-const WebContainerRunner = dynamic(
-  () => import("@/components/webcontainer-runner").then(mod => mod.WebContainerRunner),
+const WebContainerBotRunner = dynamic(
+  () => import("@/components/webcontainer-bot-runner").then(mod => mod.WebContainerBotRunner),
   { ssr: false }
 );
 
 export default function WebcontainerClient() {
-  return <WebContainerRunner />;
+  return <WebContainerBotRunner />;
 }

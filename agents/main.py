@@ -62,7 +62,7 @@ async def mcp_health():
 
 
 @app.post("/mcp/{server}/{tool}")
-async def mcp_tool(server: str, tool: str, body: dict):
+async def mcp_tool(server: str, tool: str, body: dict, request: Request):
     """
     HTTP MCP compatibility endpoint for generated bots.
     Always returns 200 with MCP-shaped JSON to avoid retry storms on 404.
@@ -112,6 +112,12 @@ async def mcp_tool(server: str, tool: str, body: dict):
 
     # Initia compatibility
     if server_l == "initia" and tool_l == "move_execute":
+        session_key_header = str(request.headers.get("x-session-key") or "").strip()
+        session_key_body = str(body.get("sessionKey") or body.get("session_key") or "").strip()
+        request_session_key = session_key_header or session_key_body
+        fallback_server_key = str(os.environ.get("INITIA_KEY") or "").strip()
+        key_source = "header" if session_key_header else ("body" if session_key_body else ("server-env" if fallback_server_key else "none"))
+
         transaction = body.get("transaction") if isinstance(body.get("transaction"), dict) else {}
         calls = transaction.get("calls") if isinstance(transaction, dict) and isinstance(transaction.get("calls"), list) else []
         first_call = calls[0] if calls and isinstance(calls[0], dict) else {}
@@ -140,6 +146,8 @@ async def mcp_tool(server: str, tool: str, body: dict):
             "call_count": len(calls),
             "simulated": True,
             "source": "mcp-http-compat",
+            "session_key_provided": bool(request_session_key or fallback_server_key),
+            "session_key_source": key_source,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         return _mcp_ok(mock_tx)

@@ -102,7 +102,7 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
     termRef.current?.writeln("\x1b[33m[System]\x1b[0m Bot process stopped.");
   };
 
-  const bootAndRun = async (): Promise<void> => {
+  const bootAndRun = async (launchEnvConfig?: BotEnvConfig): Promise<void> => {
     const term = termRef.current;
     if (!term) return;
 
@@ -115,7 +115,8 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
       const wc = (globalWC as InstanceType<typeof WebContainer> | null) ?? (await WebContainer.boot());
       globalWC = wc;
 
-      const envContent = buildEnvFileContent(envConfig);
+      const effectiveEnvConfig = launchEnvConfig ?? envConfig;
+      const envContent = buildEnvFileContent(effectiveEnvConfig);
       const { needsInstall, runCmd } = detectRunStrategy(generatedFiles);
       const files: BotFile[] = [
         ...generatedFiles.filter((f) => f.filepath !== ".env" && f.filepath !== ".npmrc"),
@@ -123,7 +124,7 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
         { filepath: ".npmrc", content: BOT_NPMRC },
       ];
 
-      await wc.mount(parseFilesToTree(files));
+      await wc.mount(parseFilesToTree(files) as any);
 
       if (needsInstall) {
         setPhase("installing");
@@ -146,7 +147,7 @@ export function useBotSandbox({ generatedFiles, envConfig, termRef }: UseBotSand
       term.writeln(`\x1b[36m[System]\x1b[0m ${runCmd}`);
 
       const runProc = await wc.spawn("sh", ["-lc", runCmd], {
-        env: buildProcessEnv(envConfig),
+        env: buildProcessEnv(effectiveEnvConfig),
       });
       activeProcessRef.current = runProc as unknown as { kill(): void };
 

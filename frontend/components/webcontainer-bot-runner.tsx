@@ -7,13 +7,14 @@
  * renders its files, and runs it inside a WebContainer sandbox.
  *
  * Key changes:
- *  - Passes `intent` to BotEnvConfigModal so it renders the correct fields
  *  - Pre-populates MCP_GATEWAY_URL in the env config
  *  - Shows strategy/chain badges in the header
+ *  - Enforces AutoSign session-key launch prerequisites
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Zap, Play, Square, Bot } from "lucide-react";
+import { Zap, Play, Square, Bot, ShieldCheck, ShieldOff } from "lucide-react";
+import { TESTNET, useInterwovenKit } from "@initia/interwovenkit-react";
 
 import { useTerminal }       from "@/hooks/use-terminal";
 import { useBotCodeGen }     from "@/hooks/use-bot-code-gen";
@@ -21,6 +22,7 @@ import { useBotSandbox }     from "@/hooks/use-bot-sandbox";
 import { FileExplorer }      from "@/components/ui/FileExplorer";
 import { CodeEditor }        from "@/components/ui/code-editor";
 import { TerminalPanel }     from "@/components/ui/TerminalPanel";
+import { SessionKeyConfirmModal } from "@/components/ui/session-key-confirm-modal";
 import type { BotEnvConfig, BotIntent } from "@/lib/bot-constant";
 import { DEFAULT_BOT_ENV_CONFIG } from "@/lib/bot-constant";
 
@@ -67,9 +69,10 @@ export function WebContainerBotRunner() {
   const [fileEdits, setFileEdits] = useState<Record<string, string>>({});
   const [envLoaded, setEnvLoaded] = useState(false);
   const [intent,    setIntent]    = useState<BotIntent | null>(null);
-  const [showEnvModal, setShowEnvModal] = useState(false);
+  const [showSessionKeyModal, setShowSessionKeyModal] = useState(false);
   const didAutoLaunchRef = useRef(false);
   const shouldAutoLaunchRef = useRef(false);
+  const { autoSign } = useInterwovenKit();
 
   const { terminalRef, termRef } = useTerminal();
 
@@ -85,6 +88,9 @@ export function WebContainerBotRunner() {
 
   const sandbox = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
   const { phase, setPhase, status, stopProcess, bootAndRun } = sandbox;
+  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false;
+  const sessionKey = String((autoSign as { wallet?: { privateKey?: unknown } } | undefined)?.wallet?.privateKey ?? "").trim();
+  const sessionKeyActive = autosignEnabled && sessionKey.length > 0;
 
   // On mount: load files + env + intent from DB
   useEffect(() => {
@@ -129,13 +135,21 @@ export function WebContainerBotRunner() {
     if (!shouldAutoLaunchRef.current) return;
     if (generatedFiles.length === 0) return;
     if (!envLoaded) return;
+    if (!sessionKeyActive) {
+      termRef.current?.writeln("\x1b[33m[System]\x1b[0m AutoSign is required before launch. Enable AutoSign in the sidebar.");
+      shouldAutoLaunchRef.current = false;
+      return;
+    }
 
     didAutoLaunchRef.current = true;
     shouldAutoLaunchRef.current = false;
-    setShowEnvModal(false);
-    setPhase("running");
-    void bootAndRun();
-  }, [generatedFiles.length, envLoaded, bootAndRun, setPhase]);
+    setPhase("booting");
+    void bootAndRun({
+      ...envConfig,
+      SESSION_KEY_MODE: "true",
+      INITIA_KEY: sessionKey,
+    });
+  }, [generatedFiles.length, envLoaded, bootAndRun, envConfig, sessionKey, sessionKeyActive, setPhase, termRef]);
 
   // Sync .env file edits back to envConfig
   useEffect(() => {
@@ -165,6 +179,36 @@ export function WebContainerBotRunner() {
 
   const selectedContent = currentFiles.find(f => f.filepath === selectedFile)?.content ?? "";
   const isRunning = phase === "running";
+
+  const handleLaunch = useCallback(() => {
+    if (!autosignEnabled) {
+      setShowSessionKeyModal(true);
+      return;
+    }
+    if (!sessionKey) {
+      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Re-enable AutoSign and retry.");
+      return;
+    }
+    setShowSessionKeyModal(true);
+  }, [autosignEnabled, sessionKey, termRef]);
+
+  const handleSessionKeyConfirm = useCallback(() => {
+    setShowSessionKeyModal(false);
+    if (!sessionKey) {
+      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Re-enable AutoSign and retry.");
+      return;
+    }
+    setPhase("booting");
+    void bootAndRun({
+      ...envConfig,
+      SESSION_KEY_MODE: "true",
+      INITIA_KEY: sessionKey,
+    });
+  }, [bootAndRun, envConfig, sessionKey, setPhase, termRef]);
+
+  const handleSessionKeyCancel = useCallback(() => {
+    setShowSessionKeyModal(false);
+  }, []);
 
   return (
     <div style={{
@@ -242,61 +286,72 @@ export function WebContainerBotRunner() {
             </span>
           )}
 
-          {/* Configure button */}
-          {!showEnvModal && (
+          <span style={{
+            fontSize: 10,
+            background: sessionKeyActive ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+            padding: "2px 8px", borderRadius: 4,
+            border: `1px solid ${sessionKeyActive ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+            color: sessionKeyActive ? "#4ade80" : "#fca5a5",
+            display: "flex", alignItems: "center", gap: 4,
+          }}>
+            {sessionKeyActive ? <ShieldCheck size={10} /> : <ShieldOff size={10} />}
+            {sessionKeyActive ? "Session Key Active" : "AutoSign Required"}
+          </span>
+
+          <button
+            type="button"
+            style={{
+              display: "flex", alignItems: "center", gap: 5,
+              background: "#1e293b", border: "1px solid #334155",
+              borderRadius: 6, padding: "5px 10px",
+              color: "#94a3b8", fontSize: 11, fontWeight: 600,
+              fontFamily: "inherit",
+              cursor: "default",
+            }}
+            title={sessionKeyActive ? "Session key is sourced from AutoSign and injected at launch." : "Enable AutoSign to activate session key mode."}
+          >
+            <Bot size={11} /> {sessionKeyActive ? "Session Key Active ✓" : "Session Key Inactive"}
+          </button>
+
+          {/* Start / Stop */}
+          {isRunning ? (
             <button
-              onClick={() => setShowEnvModal(true)}
+              onClick={stopProcess}
               style={{
                 display: "flex", alignItems: "center", gap: 5,
-                background: "#1e293b", border: "1px solid #334155",
-                borderRadius: 6, padding: "5px 10px",
-                color: "#94a3b8", fontSize: 11, fontWeight: 600,
+                background: "#7f1d1d", border: "1px solid #991b1b",
+                borderRadius: 6, padding: "5px 12px",
+                color: "#fca5a5", fontSize: 11, fontWeight: 700,
                 cursor: "pointer", fontFamily: "inherit",
               }}
             >
-              <Bot size={11} /> Configure
+              <Square size={10} fill="currentColor" /> Stop
             </button>
-          )}
-
-          {/* Start / Stop */}
-          {!showEnvModal && (
-            isRunning ? (
-              <button
-                onClick={stopProcess}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  background: "#7f1d1d", border: "1px solid #991b1b",
-                  borderRadius: 6, padding: "5px 12px",
-                  color: "#fca5a5", fontSize: 11, fontWeight: 700,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
-                <Square size={10} fill="currentColor" /> Stop
-              </button>
-            ) : generatedFiles.length === 0 ? (
-              <button disabled style={{
+          ) : generatedFiles.length === 0 ? (
+            <button disabled style={{
+              display: "flex", alignItems: "center", gap: 5,
+              background: "#1e293b", border: "1px solid #334155",
+              borderRadius: 6, padding: "5px 12px",
+              color: "#475569", fontSize: 11, fontWeight: 700,
+              cursor: "not-allowed", fontFamily: "inherit",
+            }}>
+              <Play size={11} fill="currentColor" /> Loading…
+            </button>
+          ) : (
+            <button
+              onClick={handleLaunch}
+              disabled={!sessionKeyActive}
+              style={{
                 display: "flex", alignItems: "center", gap: 5,
-                background: "#1e293b", border: "1px solid #334155",
+                background: sessionKeyActive ? "#059669" : "#1e293b",
+                border: sessionKeyActive ? "1px solid #10b981" : "1px solid #334155",
                 borderRadius: 6, padding: "5px 12px",
-                color: "#475569", fontSize: 11, fontWeight: 700,
-                cursor: "not-allowed", fontFamily: "inherit",
-              }}>
-                <Play size={11} fill="currentColor" /> Loading…
-              </button>
-            ) : (
-              <button
-                onClick={() => { setShowEnvModal(true); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  background: "#059669", border: "1px solid #10b981",
-                  borderRadius: 6, padding: "5px 12px",
-                  color: "#a7f3d0", fontSize: 11, fontWeight: 700,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
-                <Play size={11} fill="currentColor" /> Launch Bot
-              </button>
-            )
+                color: sessionKeyActive ? "#a7f3d0" : "#64748b", fontSize: 11, fontWeight: 700,
+                cursor: sessionKeyActive ? "pointer" : "not-allowed", fontFamily: "inherit",
+              }}
+            >
+              <Play size={11} fill="currentColor" /> Launch Bot
+            </button>
           )}
         </div>
       </div>
@@ -319,6 +374,15 @@ export function WebContainerBotRunner() {
           />
         </div>
       </div>
+
+      {/* ── Session Key Confirmation Modal ─────────────────────────────── */}
+      <SessionKeyConfirmModal
+        isOpen={showSessionKeyModal}
+        isEnabled={autosignEnabled}
+        onConfirm={handleSessionKeyConfirm}
+        onCancel={handleSessionKeyCancel}
+        isDryRun={isDryRun}
+      />
     </div>
   );
 }

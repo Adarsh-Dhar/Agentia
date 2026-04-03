@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { Settings2, Play, Square, Loader2 } from 'lucide-react'
 import { Agent } from '@/lib/api'
 import { AgentsTableProps } from '@/lib/types'
+import { TESTNET, useInterwovenKit } from '@initia/interwovenkit-react'
 
 // ── Status styles ─────────────────────────────────────────────────────────────
 
@@ -103,8 +104,15 @@ async function callWorkerAction(agentId: string, action: 'start' | 'stop') {
 export function AgentsTable({ agents, onRefresh }: AgentsTableProps) {
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [errors, setErrors]       = useState<Record<string, string>>({})
+  const { autoSign } = useInterwovenKit()
+  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
 
   const handleToggle = async (agent: Agent) => {
+    if (agent.status !== 'RUNNING' && !autosignEnabled) {
+      setErrors(prev => ({ ...prev, [agent.id]: 'Enable AutoSign before starting bots.' }))
+      return
+    }
+
     setLoadingId(agent.id)
     setErrors(prev => { const n = { ...prev }; delete n[agent.id]; return n })
     try {
