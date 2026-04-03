@@ -141,10 +141,13 @@ CONFIGURATION:
 INITIA EXECUTION RULES:
 1. Do NOT use ethers, @solana/web3.js, or bs58.
 2. Do NOT use Aave fee assumptions or 1inch calldata instructions.
-3. Read prices with callMcpTool('initia', 'move_view', {{address, module, function, args}}).
-4. Execute atomically with callMcpTool('initia', 'move_execute', {{address, module, function, type_args, args}}).
-5. Flash-loan style flow must be sequential Move calls inside one atomic payload: borrow -> swap -> repay.
-6. No callback contracts, no manual RPC signing, no private key parsing in code.
+3. Only use callMcpTool('initia', 'move_view', {{address, module, function, args}}) when module/function are explicitly verified for the target contract.
+4. If oracle module/function are unknown or unreliable, bypass fetch in runCycle with deterministic bigint prices (poolAPrice=1050000n, poolBPrice=1000000n) so execution path can be tested safely.
+5. Never call callMcpTool('pyth', 'move_view', ...). Pyth must use only supported Pyth MCP tools.
+6. Execute atomically with callMcpTool('initia', 'move_execute', {{transaction: {{calls: [{{address, module, function, type_args, args}}, ...]}}}}).
+7. Flash-loan style flow must be sequential Move calls inside one atomic payload: borrow -> swap -> repay.
+8. Prefer Initia router module 'dex' for swaps (do not emit module 'swap' unless user explicitly verifies it).
+9. No callback contracts, no manual RPC signing, no private key parsing in code.
 
 REQUIRED FILES:
 - package.json, tsconfig.json, src/config.ts, src/index.ts.
@@ -157,7 +160,7 @@ ENV VARS:
 
 ARCHITECTURE:
 - Use Listen -> Quantify -> Corroborate -> Protect -> Act cycle.
-- Corroborate by querying at least two Minitia pools via move_view.
+- Corroborate with supported MCP tools only; if corroboration tools are unavailable, continue with deterministic fallback and explicit logs.
 - Only execute when spread exceeds threshold and post-fee estimate is positive.
 - Use structured logs and graceful SIGINT/SIGTERM shutdown.
 """.strip()

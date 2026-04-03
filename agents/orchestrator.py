@@ -502,8 +502,8 @@ Required deps: @solana/web3.js, bs58
 """
         if chain == "initia":
             minitia_prices = "\n".join([
-                "  - callMcpTool('initia', 'move_view', {address:INITIA_POOL_A_ADDRESS, module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
-                "  - callMcpTool('initia', 'move_view', {address:INITIA_POOL_B_ADDRESS, module:'amm_oracle', function:'spot_price', args:['uinit','uusdc']})",
+              "  - callMcpTool('initia', 'move_view', {address, module, function, args})  // only with verified module/function",
+              "  - If oracle module/function are unknown, skip move_view and use deterministic fallback prices in runCycle for execution-path testing",
             ])
             initia_mcp_hints = ""
             if "initia" in mcps:
@@ -536,7 +536,7 @@ Cross-rollup price query pattern (read-only move_view):
 Hot Potato flash-loan pattern:
   - Build one atomic move_execute payload with sequential calls inside transaction.calls:
     1) borrow from flash pool module
-    2) swap on target pool/module
+    2) swap on target pool/module (prefer module 'dex', never 'swap' unless explicitly verified)
     3) repay principal + fee in same atomic execution
   - No callback contracts, no calldata encoding, no manual signing.
   - MCP signs and submits using INITIA_KEY.

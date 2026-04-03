@@ -114,10 +114,17 @@ async function run(): Promise<void> {
       );
 
       const missing = requiredGeneratedFiles.filter((p) => !filepaths.has(p));
+      const mcpBridge = files.find((f) => f.filepath === "src/mcp_bridge.ts");
+      const mcpBridgeContent = typeof mcpBridge?.content === "string" ? mcpBridge.content : "";
 
       assert(typeof generate.data.agentId === "string", "agentId missing in success response");
       assert(files.length > 0, "files list is empty in success response");
       assert(missing.length === 0, `missing required generated files: ${missing.join(", ")}`);
+      assert(
+        mcpBridgeContent.includes("ngrok-skip-browser-warning") &&
+          mcpBridgeContent.includes("Bypass-Tunnel-Reminder"),
+        "generated src/mcp_bridge.ts is missing required tunnel bypass headers",
+      );
 
       console.log(`[ok] generate-bot success in ${elapsedSec}s`);
       console.log("agentId:", generate.data.agentId);

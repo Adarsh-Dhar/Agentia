@@ -149,18 +149,21 @@ async def mcp_tool(server: str, tool: str, body: dict):
         args = raw_args if isinstance(raw_args, list) else []
         base_denom = str((args[0] if len(args) > 0 else None) or body.get("base_denom") or "uinit")
         quote_denom = str((args[1] if len(args) > 1 else None) or body.get("quote_denom") or "uusdc")
+        module = str(body.get("module") or "")
+        function = str(body.get("function") or "")
         mock_price = {
             "ok": True,
             "tool": "move_view",
             "network": str(body.get("network") or "initia-mainnet"),
             "address": str(body.get("address") or "0xminitia_pool"),
-            "module": str(body.get("module") or "amm_oracle"),
-            "function": str(body.get("function") or "spot_price"),
+            "module": module,
+            "function": function,
             "args": args,
             "pair": [base_denom, quote_denom],
             "price": "1.234500",
             "price_num": 1.2345,
             "decimals": 6,
+            "requires_explicit_target": not bool(module and function),
             "source": "mcp-http-compat",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
