@@ -71,8 +71,8 @@ export interface GeneratedFile {
 }
 
 export interface EnvConfig {
-  EVM_RPC_URL: string;
-  EVM_PRIVATE_KEY: string;
+  INITIA_RPC_URL: string;
+  INITIA_KEY: string;
   CONTRACT_ADDRESS: string;
   MAX_LOAN_USD: string;
   MIN_PROFIT_USD: string;
@@ -121,17 +121,14 @@ export interface AgentsTableProps {
 /**
  * frontend/lib/bot-config-types.ts
  *
- * Types and constants for the customizable arbitrage bot configurator.
- * The base architecture (MCP, flash loans, structured logging) never changes —
- * only these parameters are exposed to the user.
+ * Types and constants for the Initia-only bot configurator.
  */
 
 // ─── Enumerations ─────────────────────────────────────────────────────────────
 
 export const SUPPORTED_CHAINS = {
-  "base-sepolia": { label: "Base Sepolia (Testnet)", chainId: 84532, rpcHint: "https://base-sepolia.g.alchemy.com/v2/YOUR_KEY" },
-  "base-mainnet": { label: "Base Mainnet",           chainId: 8453,  rpcHint: "https://mainnet.base.org" },
-  "arbitrum":     { label: "Arbitrum One",            chainId: 42161, rpcHint: "https://arb1.arbitrum.io/rpc" },
+  "initia-testnet": { label: "Initia Testnet", chainId: "initiation-2", rpcHint: "https://rpc.testnet.initia.xyz/" },
+  "initia-mainnet": { label: "Initia Mainnet", chainId: "interwoven-1", rpcHint: "https://rpc.initia.xyz/" },
 } as const;
 
 export type ChainKey = keyof typeof SUPPORTED_CHAINS;
@@ -140,74 +137,48 @@ export const SUPPORTED_BASE_TOKENS: Record<string, { label: string; address: Rec
   USDC: {
     label:    "USDC",
     address:  {
-      "base-sepolia": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      "base-mainnet": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      "arbitrum":     "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+      "initia-testnet": "uusdc",
+      "initia-mainnet": "uusdc",
     },
     decimals: 6,
   },
-  USDT: {
-    label:    "USDT",
+  INIT: {
+    label:    "INIT",
     address:  {
-      "base-sepolia": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
-      "base-mainnet": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
-      "arbitrum":     "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+      "initia-testnet": "uinit",
+      "initia-mainnet": "uinit",
     },
     decimals: 6,
-  },
-  WETH: {
-    label:    "WETH",
-    address:  {
-      "base-sepolia": "0x4200000000000000000000000000000000000006",
-      "base-mainnet": "0x4200000000000000000000000000000000000006",
-      "arbitrum":     "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-    },
-    decimals: 18,
   },
 };
 
 export const SUPPORTED_TARGET_TOKENS: Record<string, { label: string; address: Record<string, string>; decimals: number }> = {
-  WETH: {
-    label:    "WETH",
-    address:  {
-      "base-sepolia": "0x4200000000000000000000000000000000000006",
-      "base-mainnet": "0x4200000000000000000000000000000000000006",
-      "arbitrum":     "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+  USDC: {
+    label: "USDC",
+    address: {
+      "initia-testnet": "uusdc",
+      "initia-mainnet": "uusdc",
     },
-    decimals: 18,
+    decimals: 6,
   },
-  CBBTC: {
-    label:    "cbBTC",
-    address:  {
-      "base-sepolia": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
-      "base-mainnet": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
-      "arbitrum":     "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+  INIT: {
+    label: "INIT",
+    address: {
+      "initia-testnet": "uinit",
+      "initia-mainnet": "uinit",
     },
-    decimals: 8,
-  },
-  AERO: {
-    label:    "AERO (Base only)",
-    address:  {
-      "base-sepolia": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
-      "base-mainnet": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
-      "arbitrum":     "",
-    },
-    decimals: 18,
+    decimals: 6,
   },
 };
 
 export const SUPPORTED_DEXES = {
-  "1inch":    { label: "1inch Aggregator",        description: "Best price routing across all DEXes" },
-  "paraswap": { label: "Paraswap",                description: "MEV-protected swaps" },
-  "uniswap":  { label: "Uniswap Universal Router", description: "Direct Uniswap V3 routing" },
+  initia: { label: "Initia", description: "Initia-native Move execution" },
 } as const;
 
 export type DexKey = keyof typeof SUPPORTED_DEXES;
 
 export const SUPPORTED_SECURITY = {
-  webacy:  { label: "Webacy (Recommended)", description: "Token risk scoring before every trade" },
-  goplus:  { label: "GoPlus Security",      description: "On-chain security analysis" },
-  none:    { label: "None (Speed mode)",    description: "Skip risk checks — faster but riskier" },
+  none:    { label: "None", description: "Initia-only execution without external risk providers" },
 } as const;
 
 export type SecurityKey = keyof typeof SUPPORTED_SECURITY;
@@ -238,8 +209,8 @@ export interface BotConfig {
   pollingIntervalSec: number;  // e.g. 5
   simulationMode:     boolean;
 
-  oneInchApiKey?: string; // Optional API key for 1inch (if using 1inch dex)
-  webacyApiKey?: string; // Optional API key for Webacy (if using Webacy security)
+  oneInchApiKey?: string;
+  webacyApiKey?: string;
   rpcUrl?: string;      // Optional custom RPC URL (if not using defaults)
   privateKey?: string; // Optional private key (if not generated server-side)
 
@@ -248,16 +219,16 @@ export interface BotConfig {
 }
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
-  botName:            "ArbitrageBot",
-  chain:              "base-sepolia",
+  botName:            "InitiaBot",
+  chain:              "initia-testnet",
   baseToken:          "USDC",
-  targetToken:        "WETH",
-  dex:                "1inch",
-  securityProvider:   "webacy",
+  targetToken:        "USDC",
+  dex:                "initia",
+  securityProvider:   "none",
   borrowAmountHuman:  1,
-  minProfitUsd:       0.5,
-  gasBufferUsdc:      2,
-  pollingIntervalSec: 5,
+  minProfitUsd:       0.0,
+  gasBufferUsdc:      0,
+  pollingIntervalSec: 15,
   simulationMode:     true,
   maxRiskScore:       20,
 };

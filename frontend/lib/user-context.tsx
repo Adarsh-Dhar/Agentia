@@ -33,7 +33,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Whichever address exists — initia bech32 preferred, evm hex as fallback
+  // Prefer the Initia bech32 address when present.
   const walletAddr = initiaAddress ?? address
 
   useEffect(() => {

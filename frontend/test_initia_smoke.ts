@@ -10,21 +10,7 @@ const INITIA_PROMPT =
   process.env.TEST_INITIA_PROMPT ??
   "Write a Cross-Rollup Yield Sweeper bot in TypeScript: every 15s read 0x1::coin::balance for USER_WALLET_ADDRESS and call interwoven_bridge::sweep_to_l1 when balance > 1000000n";
 
-const INITIA_EXCLUDED_MCPS = [
-  "one_inch",
-  "webacy",
-  "goplus",
-  "goat_evm",
-  "alchemy",
-  "rugcheck",
-  "jupiter",
-  "nansen",
-  "hyperliquid",
-  "debridge",
-  "lifi",
-  "uniswap",
-  "chainlink",
-];
+const INITIA_ALLOWED_MCPS = new Set(["initia", "lunarcrush", "pyth"]);
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {
@@ -94,8 +80,8 @@ async function testInitiaIntentAndFallbackSelection(): Promise<void> {
   assert(String(intent.strategy ?? "").toLowerCase() === "yield", "intent should classify to strategy=yield");
   assert(shouldUseInitiaDeterministicFallback(intent), "intent should use initia deterministic fallback");
   const mcps = asStringArray(intent.mcps);
-  for (const excluded of INITIA_EXCLUDED_MCPS) {
-    assert(!mcps.includes(excluded), `intent should exclude ${excluded}`);
+  for (const mcp of mcps) {
+    assert(INITIA_ALLOWED_MCPS.has(mcp), `intent should include only initia-compatible MCPs: found ${mcp}`);
   }
   assert(mcps.includes("initia"), "intent should include initia MCP");
   console.log("[ok] Initia intent detection + fallback selection smoke test passed");
@@ -117,6 +103,26 @@ async function testGenericPromptStillPinsInitia(): Promise<void> {
   assert(String(intent.chain ?? "").toLowerCase() === "initia", "generic prompt should still return chain=initia");
   assert(shouldUseInitiaDeterministicFallback(intent), "generic prompt should still choose initia deterministic fallback");
   console.log("[ok] generic prompt pin-to-initia smoke test passed");
+}
+
+async function testCustomUtilityPromptStaysInitiaOnly(): Promise<void> {
+  const response = await fetchJson(
+    `${BASE_URL}/api/classify-intent`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "Intent: custom. Strategy: custom. Build a custom utility bot for Initia that polls balances and executes Move actions." }),
+    },
+    60_000,
+  );
+
+  assert(response.status === 200, `custom classify-intent failed (${response.status}): ${response.text.slice(0, 400)}`);
+  const intent = (response.data.intent ?? {}) as Json;
+  assert(String(intent.chain ?? "").toLowerCase() === "initia", "custom utility prompt should classify to chain=initia");
+  assert(String(intent.strategy ?? "").toLowerCase() === "custom_utility", "custom utility prompt should classify to strategy=custom_utility");
+  const mcps = asStringArray(intent.mcps);
+  assert(mcps.length === 1 && mcps[0] === "initia", "custom utility prompt should stay initia-only");
+  console.log("[ok] custom utility prompt stays initia-only smoke test passed");
 }
 
 async function testInitiaMoveViewContract(): Promise<void> {
@@ -209,6 +215,7 @@ async function run(): Promise<void> {
 
   await testInitiaIntentAndFallbackSelection();
   await testGenericPromptStillPinsInitia();
+  await testCustomUtilityPromptStaysInitiaOnly();
   await testInitiaMoveViewContract();
   await testInitiaMoveExecuteContract();
 

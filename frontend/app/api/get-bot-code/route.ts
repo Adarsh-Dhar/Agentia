@@ -1,16 +1,14 @@
 /**
  * frontend/app/api/get-bot-code/route.ts
  *
- * Serves the Base Sepolia MCP arbitrage bot files so the WebContainer
- * can install deps and run them.  The Python bot talks to 1inch / Webacy /
- * GOAT-EVM via MCP servers that the user must supply credentials for.
+ * Serves Initia bot files so the WebContainer can install deps and run them.
  *
  * All file content is inlined here so the route works without filesystem
  * access to the /agents directory in production.
  */
 
 import { NextResponse } from "next/server";
-import { assembleBotFiles } from "./bot-files";
+import { assembleInitiaBotFiles } from "./bot-files";
 import { prisma } from "@/lib/prisma";
 import { encryptEnvConfig } from "@/lib/crypto-env";
 
@@ -18,21 +16,21 @@ export async function POST(req: Request) {
   // If called with a body, use envConfig/configuration from the request, else just save files
   let envConfig = undefined;
   let configuration = undefined;
-  let name = "Base Sepolia Arbitrage Bot";
-  try {
-    if (req && typeof req.json === "function") {
-      try {
-        const body = await req.json();
-        if (body) {
-          envConfig = body.envConfig;
-          configuration = body.configuration;
-          if (body.name) name = body.name;
-        }
-      } catch {}
+  let name = "Initia Bot";
+  if (req && typeof req.json === "function") {
+    try {
+      const body = await req.json();
+      if (body) {
+        envConfig = body.envConfig;
+        configuration = body.configuration;
+        if (body.name) name = body.name;
+      }
+    } catch {
+      // Request body is optional for this endpoint.
     }
-  } catch {}
+  }
 
-  const files = assembleBotFiles();
+  const files = assembleInitiaBotFiles();
   console.log(`[GET /api/get-bot-code]`, files);
 
   // Save to DB (same as save-bot logic)
@@ -52,7 +50,7 @@ export async function POST(req: Request) {
       }
       if (typeof f.content !== "string") {
         return NextResponse.json(
-          { error: `File \"${f.filepath}\" is missing content.` },
+          { error: `File "${f.filepath}" is missing content.` },
           { status: 400 }
         );
       }
@@ -60,7 +58,7 @@ export async function POST(req: Request) {
 
     // Build the configuration object stored in the DB.
     // envConfig is encrypted; nothing sensitive lands in plaintext.
-    let mergedConfiguration = { ...(configuration ?? {}) };
+    const mergedConfiguration = { ...(configuration ?? {}) };
 
     if (envConfig && typeof envConfig === "object") {
       // Strip empty values so we don't encrypt "" for optional fields
@@ -107,10 +105,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       thoughts:
-        "Base Sepolia MCP arbitrage bot: borrows USDC via Aave flash loan, " +
-        "swaps USDC→WETH→USDC via 1inch, repays loan + 0.09 % fee. " +
-        "Token risk checked with Webacy before every execution. " +
-        "Set SIMULATION_MODE=true to disable sending transactions.",
+        "Initia MCP bot generated successfully. Configure Initia keys and addresses, " +
+        "then run in simulation or live mode.",
       files,
       verified: true,
       agentId: agent.id,
@@ -118,10 +114,10 @@ export async function POST(req: Request) {
       saved: true,
     });
   } catch (error) {
-    const err = error;
+    const err = error instanceof Error ? error.message : String(error);
     console.error("[POST /api/get-bot-code] Error:", err);
     return NextResponse.json(
-      { error: err|| String(error)|| null },
+      { error: err || null },
       { status: 500 }
     );
   }

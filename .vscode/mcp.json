@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "initia-docs": {
+      "type": "http",
+      "url": "https://docs.initia.xyz/mcp"
+    }
+  }
+}

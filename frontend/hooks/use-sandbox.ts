@@ -32,20 +32,20 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
     term.writeln("\x1b[36m[System]\x1b[0m Injecting environment and booting WebContainer...");
     
     try {
-      if (!envConfig.EVM_RPC_URL || !envConfig.CONTRACT_ADDRESS) {
+      if (!envConfig.INITIA_RPC_URL || !envConfig.CONTRACT_ADDRESS) {
         term.writeln("\x1b[31m[Error]\x1b[0m Please fill in the RPC URL and Contract Address.");
         setPhase("env-setup");
         return;
       }
       
-      const validHexKey = /^[0-9a-fA-F]{64}$/.test(envConfig.EVM_PRIVATE_KEY.replace('0x', '')) 
-        ? envConfig.EVM_PRIVATE_KEY 
+      const validHexKey = /^[0-9a-fA-F]{64}$/.test(envConfig.INITIA_KEY.replace('0x', '')) 
+        ? envConfig.INITIA_KEY 
         : "0000000000000000000000000000000000000000000000000000000000000000";
         
       const envContent = [
         `DRY_RUN=${envConfig.DRY_RUN}`,
-        `EVM_RPC_URL=${envConfig.EVM_RPC_URL}`,
-        `EVM_PRIVATE_KEY=${validHexKey}`,
+        `INITIA_RPC_URL=${envConfig.INITIA_RPC_URL}`,
+        `INITIA_KEY=${validHexKey}`,
         `CONTRACT_ADDRESS=${envConfig.CONTRACT_ADDRESS}`,
         `MAX_LOAN_USD=${envConfig.MAX_LOAN_USD}`,
         `MIN_PROFIT_USD=${envConfig.MIN_PROFIT_USD}`,
@@ -108,8 +108,8 @@ export function useSandbox({ generatedFiles, envConfig, termRef }: {
       }
       
       const processEnv = {
-        EVM_RPC_URL:      envConfig.EVM_RPC_URL,
-        EVM_PRIVATE_KEY:  validHexKey,
+        INITIA_RPC_URL:   envConfig.INITIA_RPC_URL,
+        INITIA_KEY:       validHexKey,
         CONTRACT_ADDRESS: envConfig.CONTRACT_ADDRESS || "NOT_DEPLOYED_YET",
         MAX_LOAN_USD:     envConfig.MAX_LOAN_USD,
         MIN_PROFIT_USD:   envConfig.MIN_PROFIT_USD,

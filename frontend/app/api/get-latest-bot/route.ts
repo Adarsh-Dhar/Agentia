@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
           content: decryptedEnv,
           language: "plaintext"
         });
-      } catch (e) {
+      } catch {
         console.error("Failed to decrypt envConfig for agent:", agent.id);
       }
     }

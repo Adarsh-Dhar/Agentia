@@ -119,6 +119,8 @@ async function run(): Promise<void> {
       const mcpBridgeContent = typeof mcpBridge?.content === "string" ? mcpBridge.content : "";
       const indexFile = files.find((f) => f.filepath === "src/index.ts");
       const indexContent = typeof indexFile?.content === "string" ? indexFile.content : "";
+      const packageFile = files.find((f) => f.filepath === "package.json");
+      const packageContent = typeof packageFile?.content === "string" ? packageFile.content : "";
       const loweredIndex = indexContent.toLowerCase();
 
       const intent = (generate.data.intent ?? {}) as Json;
@@ -130,6 +132,14 @@ async function run(): Promise<void> {
       assert(missing.length === 0, `missing required generated files: ${missing.join(", ")}`);
       assert(chain === "initia", `expected chain=initia but got ${chain || "<empty>"}`);
       assert(strategy === "yield", `expected strategy=yield but got ${strategy || "<empty>"}`);
+      assert(/"type"\s*:\s*"module"/.test(packageContent), "package.json should use ESM modules");
+      assert(/"start"\s*:\s*"tsx src\/index\.ts"/.test(packageContent), "package.json should start with tsx src/index.ts");
+      assert(/"dotenv"/.test(packageContent), "package.json should include dotenv");
+      assert(/"typescript"/.test(packageContent), "package.json should include typescript");
+      assert(/"tsx"/.test(packageContent), "package.json should include tsx");
+      assert(!packageContent.includes("viem"), "package.json should avoid non-Initia client SDKs for Initia bots");
+      assert(!packageContent.includes("web3.js"), "package.json should not include external web3 SDKs for Initia bots");
+      assert(!packageContent.includes("bs58"), "package.json should not include bs58 for Initia bots");
       assert(
         mcpBridgeContent.includes("ngrok-skip-browser-warning") &&
           mcpBridgeContent.includes("Bypass-Tunnel-Reminder"),
@@ -144,6 +154,10 @@ async function run(): Promise<void> {
       assert(loweredIndex.includes('function: "sweep_to_l1"') || loweredIndex.includes("function: 'sweep_to_l1'"), "generated index must execute sweep_to_l1 function");
       assert(!loweredIndex.includes("amm_oracle"), "generated index must not use amm_oracle");
       assert(!/callmcptool\s*\(\s*["']pyth["']/.test(loweredIndex), "generated index must not call pyth for yield sweeper");
+      assert(!loweredIndex.includes("0xinitia_pool_a"), "generated index must not include fake pool placeholder addresses");
+      assert(!loweredIndex.includes("0xinitia_pool_b"), "generated index must not include fake pool placeholder addresses");
+      assert(!loweredIndex.includes("bypassing oracle fetch"), "generated index must not inject fake oracle bypass logic");
+      assert(!loweredIndex.includes("fake pool a price"), "generated index must not inject fake pool prices");
 
       console.log(`[ok] generate-bot success in ${elapsedSec}s`);
       console.log("agentId:", generate.data.agentId);

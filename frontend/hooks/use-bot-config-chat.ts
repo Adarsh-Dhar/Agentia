@@ -37,11 +37,11 @@ export function useBotConfigChat() {
   const initialized = useRef(false)
 
   const defaultChips = [
-    "Flash Loan Arbitrage Bot",
-    "Solana Sentiment Bot",
-    "Memecoin Sniper",
-    "Cross-Chain Yield Arbitrage",
-    "Whale Mirror Bot",
+    "Initia Yield Sweeper",
+    "Initia Spread Scanner",
+    "Initia Sentiment Bot",
+    "Initia Custom Utility Bot",
+    "Initia Move Action Bot",
   ]
   const [chips, setChips] = useState<string[]>(defaultChips)
 
@@ -104,7 +104,7 @@ export function useBotConfigChat() {
       setIsTyping(false)
       pushA(
         `Hey! 👋 I'm your **Universal Meta-Agent**.\n\n` +
-        `I can architect and generate over 20 types of on-chain trading bots — flash loan arbitrage, memecoin snipers, sentiment traders, whale mirrors, cross-chain yield bots, perpetual funding rate bots, and more.\n\n` +
+        `I can architect and generate Initia-native bots — yield sweepers, spread scanners, sentiment bots, and custom Move utility workflows.\n\n` +
         `Just describe your strategy in plain English. I'll expand it into a full technical specification and then generate production-ready TypeScript code.\n\n` +
         `What kind of bot do you want to build?`
       )
@@ -173,8 +173,8 @@ export function useBotConfigChat() {
       // Show the user what was classified
       const botType    = (intent.bot_name as string) ?? "Trading Bot"
       const strategy   = (intent.strategy as string) ?? "unknown"
-      const chain      = (intent.chain as string) ?? "evm"
-      const network    = (intent.network as string) ?? "base-sepolia"
+      const chain      = (intent.chain as string) ?? "initia"
+      const network    = (intent.network as string) ?? "initia-testnet"
       const execModel  = (intent.execution_model as string) ?? "polling"
 
       setIsTyping(true)
@@ -183,7 +183,7 @@ export function useBotConfigChat() {
       pushA(
         `✅ **Strategy identified:** ${botType}\n\n` +
         `📋 **Details:**\n` +
-        `• Chain: ${chain === 'solana' ? '◎ Solana' : `⬡ ${network}`}\n` +
+        `• Chain: ${chain === 'initia' ? `◇ ${network}` : '◇ initia-testnet'}\n` +
         `• Strategy: ${strategy.replace(/_/g, ' ')}\n` +
         `• Execution model: ${execModel}\n` +
         `• Required MCPs: ${((intent.mcps as string[]) ?? []).join(', ') || 'standard'}\n\n` +

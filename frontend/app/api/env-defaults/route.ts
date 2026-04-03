@@ -37,12 +37,12 @@ export async function GET() {
     const envText = fs.readFileSync(envPath, "utf8");
     const values = parseEnvText(envText);
     
-    // Ensure common RPC URLs are always present for discovery
-    if (!values["RPC_PROVIDER_URL"] && values["EVM_RPC_URL"]) {
-      values["RPC_PROVIDER_URL"] = values["EVM_RPC_URL"];
+    // Ensure Initia RPC URL aliases are always present for discovery
+    if (!values["RPC_PROVIDER_URL"] && values["INITIA_RPC_URL"]) {
+      values["RPC_PROVIDER_URL"] = values["INITIA_RPC_URL"];
     }
-    if (!values["EVM_RPC_URL"] && values["RPC_PROVIDER_URL"]) {
-      values["EVM_RPC_URL"] = values["RPC_PROVIDER_URL"];
+    if (!values["INITIA_RPC_URL"] && values["RPC_PROVIDER_URL"]) {
+      values["INITIA_RPC_URL"] = values["RPC_PROVIDER_URL"];
     }
     
     return NextResponse.json({ values });

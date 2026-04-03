@@ -74,7 +74,7 @@ function extractIntent(config: Record<string, unknown> | null | undefined): BotI
     ].map((m) => String(m || "").trim()).filter(Boolean);
 
     return {
-      chain: raw.chain === "solana" ? "solana" : "evm",
+      chain: "initia",
       network: typeof raw.network === "string" ? raw.network : undefined,
       strategy: typeof raw.strategy === "string" ? raw.strategy : undefined,
       execution_model: typeof raw.execution_model === "string"
@@ -86,14 +86,12 @@ function extractIntent(config: Record<string, unknown> | null | undefined): BotI
       bot_type: typeof raw.bot_type === "string" ? raw.bot_type : undefined,
       requires_openai: Boolean(raw.requires_openai ?? raw.requires_openai_key),
       requires_openai_key: Boolean(raw.requires_openai ?? raw.requires_openai_key),
-      requires_solana_wallet: Boolean(raw.requires_solana_wallet ?? raw.chain === "solana"),
     };
   }
 
   // Fallback: reconstruct a minimal intent from flat config fields
-  const chain   = typeof config.chain === "string" && config.chain.includes("solana")
-    ? "solana" : "evm";
-  const network = typeof config.chain === "string" ? config.chain : undefined;
+  const chain = "initia";
+  const network = typeof config.network === "string" ? config.network : "initia-testnet";
 
   if (config.strategy || config.chain) {
     return {
@@ -107,7 +105,6 @@ function extractIntent(config: Record<string, unknown> | null | undefined): BotI
       bot_type:        typeof config.bot_type === "string" ? config.bot_type : undefined,
       requires_openai: Boolean(config.requires_openai ?? config.requires_openai_key),
       requires_openai_key:    Boolean(config.requires_openai_key),
-      requires_solana_wallet: chain === "solana",
     };
   }
 
@@ -163,7 +160,7 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
             setIntent(detectedIntent);
             term.writeln(
               `\x1b[36m[System]\x1b[0m Intent: \x1b[32m${detectedIntent.strategy ?? "unknown"}\x1b[0m` +
-              ` on \x1b[32m${detectedIntent.network ?? detectedIntent.chain ?? "evm"}\x1b[0m`
+              ` on \x1b[32m${detectedIntent.network ?? detectedIntent.chain ?? "initia-testnet"}\x1b[0m`
             );
           }
 
@@ -220,13 +217,13 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
       setSelectedFile("src/index.ts");
       if (data.agentId) setAgentId(data.agentId);
 
-      // Demo bot is always EVM arbitrage
+      // Demo bot is always Initia
       const demoIntent: BotIntent = {
-        chain: "evm", network: "base-sepolia",
+        chain: "initia", network: "initia-testnet",
         strategy: "arbitrage", execution_model: "polling",
-        required_mcps: ["one_inch", "webacy", "goat_evm"],
-        bot_type: "Flash Loan Arbitrage Bot",
-        requires_openai_key: false, requires_solana_wallet: false,
+        required_mcps: ["initia"],
+        bot_type: "Initia Bot",
+        requires_openai_key: false,
       };
       setIntent(demoIntent);
 

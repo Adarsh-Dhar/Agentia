@@ -2,10 +2,10 @@
 orchestrator.py
 
 Simplified Meta-Agent.
-Input:  plain-English prompt like "create a sentiment analysis solana bot"
-Output: exactly 3 files:
+Input:  plain-English prompt like "create a sentiment analysis initia bot"
+Output: exactly 3 generated files plus the hardcoded MCP bridge:
           1. package.json
-          2. src/mcp_bridge.ts
+          2. src/config.ts
           3. src/index.ts
 
 Pipeline:
@@ -116,7 +116,7 @@ Schema:
 {
   "chain": "initia",
   "network": "initia-mainnet" | "initia-testnet",
-  "strategy": "arbitrage" | "sentiment" | "sniping" | "dca" | "grid" | "whale_mirror" | "yield" | "perp" | "unknown",
+  "strategy": "arbitrage" | "sentiment" | "sniping" | "dca" | "grid" | "whale_mirror" | "yield" | "yield_sweeper" | "custom_utility" | "perp" | "unknown",
   "mcps": ["list of MCP server names to use"],
   "bot_name": "human-readable name",
   "requires_openai": true | false
@@ -125,32 +125,44 @@ Schema:
 Rules:
 - ALWAYS set chain:"initia"
 - Classification precedence: if prompt includes yield sweeper semantics (yield sweeper, auto-consolidator, consolidate idle funds, sweep_to_l1, bridge back to l1), classify as strategy:"yield" first.
+- If prompt asks for a custom utility bot, classify as strategy:"custom_utility" and do not fall back to arbitrage.
 - sentiment / social / lunarcrush -> mcps include "lunarcrush", requires_openai:true
 - yield sweeper / auto-consolidator / sweep idle funds -> strategy:"yield", mcps:["initia"], requires_openai:false
+- custom utility / custom bot / custom workflow -> strategy:"custom_utility", mcps:["initia"], requires_openai:false
 - spread scanner / read-only arbitrage / no execution -> strategy:"arbitrage", mcps:["initia"], requires_openai:false
 - arbitrage / flash loan / hot potato -> strategy:"arbitrage", mcps:["initia"]
 - for initia arbitrage and yield workflows, do NOT auto-add pyth
-- when chain is initia, actively exclude: one_inch, webacy, goplus, goat_evm, alchemy, rugcheck, jupiter, nansen, hyperliquid, debridge, lifi, uniswap, chainlink
 - for initia bots, allowed MCPs are: initia (required), lunarcrush (optional), pyth (optional)
 - default network: initia-testnet
 """
 
 
+def _normalize_strategy(strategy: str) -> str:
+  value = str(strategy or "").strip().lower()
+  if value in {"yield_sweeper", "yield-sweeper"}:
+    return "yield"
+  if value in {"custom", "custom_utility", "custom-utility", "utility", "custombot", "custom_bot"}:
+    return "custom_utility"
+  if value in {"spread_scanner", "scanner", "read_only_arbitrage", "read-only-arbitrage"}:
+    return "arbitrage"
+  return value or "unknown"
+
+
 # ─── Bot Generator System Prompt ─────────────────────────────────────────────
 
 GENERATOR_SYSTEM = """\
-You are an expert DeFi bot engineer. Generate a production-ready TypeScript bot.
+You are an expert Initia bot engineer. Generate production-ready TypeScript for the current Agentia contract.
 
-OUTPUT FORMAT — CRITICAL:
+OUTPUT FORMAT - CRITICAL:
 Respond with RAW JSON only. No markdown fences. No preamble. No trailing text.
 
 Schema:
 {
   "thoughts": "<one paragraph: architecture rationale>",
   "files": [
-    {"filepath": "package.json",    "content": "..."},
-    {"filepath": "src/config.ts",   "content": "..."},
-    {"filepath": "src/index.ts",    "content": "..."}
+    {"filepath": "package.json", "content": "..."},
+    {"filepath": "src/config.ts", "content": "..."},
+    {"filepath": "src/index.ts", "content": "..."}
   ]
 }
 
@@ -159,252 +171,65 @@ You MUST generate EXACTLY these 3 files in this order:
   2. src/config.ts
   3. src/index.ts
 
-The file src/mcp_bridge.ts is provided separately — do NOT generate it.
-Import it in src/index.ts as: import { callMcpTool } from "./mcp_bridge.js";
+The file src/mcp_bridge.ts is provided separately - do NOT generate it.
+Import it in src/index.ts as: import { callMcpTool } from "./mcp_bridge.js".
 
-ARCHITECTURE — Listen → Quantify → Corroborate → Protect → Act:
+CORE CONSTRAINTS:
+1. TypeScript + Node.js only. Never Python.
+2. package.json must use "type": "module" and "start": "tsx src/index.ts".
+3. Keep dependencies minimal: dotenv, tsx, typescript, @types/node. Add only what the requested bot truly needs.
+4. src/config.ts must read all secrets from process.env and throw if required values are missing.
+5. MCP_GATEWAY_URL must fail fast if unset. No hardcoded IP fallback.
+6. All money and token math must use BigInt only.
+7. SIMULATION_MODE defaults to true unless explicitly set to "false".
+8. Use structured logs in the form [timestamp] [LEVEL] message.
+9. Add graceful SIGINT and SIGTERM shutdown.
+10. Use a guarded scheduler to prevent overlapping cycles.
+11. Use Promise.allSettled when fetching multiple independent sources.
+12. Never instantiate OpenAI clients or wallets at module scope.
+13. Every generated file must be complete. No TODOs, stubs, or placeholder comments.
+14. Never use fake placeholder addresses (for example 0xinitia_pool_a/0xinitia_pool_b) or fabricated prices.
+15. Always resolve addresses and runtime inputs from CONFIG/process.env and fail fast when required values are missing.
 
-Every bot MUST follow this exact 5-step cycle inside async function runCycle():
+INITIA RULES:
+- Chain is always Initia.
+- All reads must use callMcpTool('initia', 'move_view', {...}).
+- All writes must use callMcpTool('initia', 'move_execute', {...}).
+- Do not use external chain SDK signing flows for Initia.
+- Use the exact MCP server names from the intent's mcps list.
+- Never invent module or function names. Only use names explicitly supported by the prompt context.
+- Never inject mocked balance/price values into production generation paths.
 
-  // STEP 1 & 2: LISTEN & QUANTIFY — fetch signals
-  // STEP 3: CORROBORATE — cross-check with a second source
-  // STEP 4: PROTECT — safety/risk check before any execution
-  // STEP 5: ACT — execute the trade/action
+STRATEGY TEMPLATES:
+1. Yield sweeper:
+   - Run every 15 seconds.
+   - Read 0x1::coin::balance via move_view for USER_WALLET_ADDRESS and uusdc.
+   - Parse balance as BigInt.
+   - Only sweep when balance > 1000000n.
+   - Execute interwoven_bridge::sweep_to_l1 with move_execute.
+   - Do not use Pyth or any oracle MCPs.
 
-HARD RULES:
-1.  TypeScript + Node.js ONLY. Never Python.
-2.  package.json MUST have: "type": "module", "start": "tsx src/index.ts"
-3.  All dependencies: typescript, tsx, dotenv, ethers (for EVM) or @solana/web3.js + bs58 (for Solana)
-4.  src/config.ts reads ALL secrets from process.env. Never hardcode keys.
-5.  MCP_GATEWAY_URL in config.ts MUST throw if not set:
-      MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })()
-6.  All token math uses BigInt — never float.
-7.  SIMULATION_MODE defaults true (process.env.SIMULATION_MODE !== "false").
-8.  Structured logging: [timestamp] [LEVEL] message
-9.  Graceful shutdown: SIGINT + SIGTERM handlers.
-10. Async loop safety — use guarded scheduler:
-      let cycleInFlight = false;
-      const runCycleSafely = async () => {
-        if (cycleInFlight) return;
-        cycleInFlight = true;
-        try { await runCycle(); } finally { cycleInFlight = false; }
-      };
-      void runCycleSafely();
-      const timer = setInterval(() => { void runCycleSafely(); }, POLL_MS);
-11. Use Promise.allSettled for fetching multiple data sources.
-12. NEVER hardcode any IP as MCP_GATEWAY_URL fallback.
-13. All callMcpTool calls must reference the exact server name from the intent's mcps list.
-14. OpenAI (if used): NEVER instantiate at module scope. Always inside the function:
-      const OpenAIClass = (OpenAI as any).default ?? (OpenAI as any).OpenAI ?? OpenAI;
-      const client = new OpenAIClass({ apiKey: process.env.OPENAI_API_KEY });
-15. Solana private key: support BOTH bs58 and JSON-array formats. Validate before decode.
-    In simulation mode, allow missing key and use ephemeral keypair.
-16. Every file must be COMPLETE — no stubs, no TODOs, no placeholder comments.
-17. Include a .env.example as a comment block at the top of src/config.ts showing every required env var.
+2. Read-only spread scanner:
+   - Use move_view only.
+   - Compare read-only values across endpoints.
+   - Compute spread and log estimated net opportunity.
+   - Never call move_execute.
 
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║                      CRITICAL FOR INITIA BOTS                                ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
+3. Custom utility bot:
+   - Prioritize the user's requested action exactly.
+   - Do not force arbitrage framing, flash-loan language, or external DEX assumptions.
+   - Keep the bot Initia-native, minimal, and deterministic.
 
-When the chain is Initia, these rules override EVM/Solana boilerplate:
+4. Other Initia workflows:
+   - If the prompt mentions a verified module or function, use it directly with move_view or move_execute as appropriate.
+   - If a contract interface is not verified, do not hallucinate it.
 
-A. REMOVE EVM/SOLANA IMPLEMENTATION BOILERPLATE:
-  - Do NOT use ethers.js, @solana/web3.js, or bs58.
-  - Do NOT include Aave flash loan fee math (0.09%) or 1inch MCP calls.
-  - Do NOT instantiate RPC providers, wallets, or manual signing flows.
-  - Do NOT encode calldata/callback contracts.
+REQUIRED RUNTIME SHAPE:
+- Use a runCycle() function.
+- Use a guarded scheduler that prevents concurrent runs.
+- Keep logging and control flow simple, explicit, and deterministic.
 
-B. INITIA EXECUTION MODEL:
-  - All writes MUST use: callMcpTool('initia', 'move_execute', {...}).
-  - All reads MUST use: callMcpTool('initia', 'move_view', {...}).
-  - For flash-loan style arbitrage, construct a sequential Move call payload in one move_execute atomic call:
-    borrow -> swap -> repay.
-  - The MCP handles wallet signing and chain execution.
-
-C. INITIA ENV + DEPENDENCIES:
-  - Required credential: INITIA_KEY.
-  - INITIA_RPC_URL may be optional; include if referenced by user intent.
-  - Keep package deps minimal: dotenv, tsx, typescript, @types/node.
-
-D. INITIA MCP ALLOWLIST:
-  - Always include initia.
-  - Optional only: lunarcrush (sentiment), pyth (price corroboration).
-  - Never call one_inch/webacy/goplus/goat_evm/alchemy/jupiter/rugcheck for Initia bots.
-
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║            CRITICAL: INITIA YIELD SWEEPER (CROSS-ROLLUP)                    ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-
-ONLY FOR: Initia chain + yield strategy
-
-MUST IMPLEMENT THIS EXACT FLOW:
-
-1) SCHEDULE
-  - Run one cycle every 15 seconds (testing cadence).
-
-2) SCAN (READ ONLY)
-  - Iterate through a list of simulated Minitia endpoints/IDs.
-  - For each endpoint call:
-      callMcpTool('initia', 'move_view', {
-        address: '0x1',
-        module: 'coin',
-        function: 'balance',
-        args: [CONFIG.USER_WALLET_ADDRESS, 'uusdc']
-      })
-
-3) CONDITION
-  - Parse balance as BigInt.
-  - Only continue when: balance > 1000000n.
-
-4) SWEEP (EXECUTE)
-  - Execute with:
-      callMcpTool('initia', 'move_execute', {
-        address: CONFIG.INITIA_BRIDGE_ADDRESS,
-        module: 'interwoven_bridge',
-        function: 'sweep_to_l1',
-        args: [balance.toString()]
-      })
-
-5) RESILIENCE
-  - Catch per-endpoint network errors and continue the loop.
-  - Never crash the bot because one endpoint fails.
-
-STRICT FORBIDDEN ITEMS:
-  - Do NOT use Pyth or any oracle MCPs.
-  - Do NOT hallucinate module names.
-  - Do NOT call move_execute unless threshold condition is satisfied.
-
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║      CRITICAL: INITIA CROSS-ROLLUP SPREAD SCANNER (READ-ONLY)               ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-
-ONLY FOR: Initia chain + arbitrage strategy when user intent is scanner/read-only
-
-MUST IMPLEMENT:
-  - Poll multiple endpoints with move_view to fetch comparable market values.
-  - Compute spread and subtract estimated bridge fee before logging opportunity.
-  - Emit clear logs such as spread %, estimated fee, and net opportunity.
-
-STRICT FORBIDDEN ITEMS:
-  - READ-ONLY MODE: do NOT call move_execute.
-  - Do NOT use random MCPs outside the intent allowlist.
-  - Do NOT invent unverified module/function names.
-
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║                    CRITICAL FOR ARBITRAGE BOTS                               ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-
-When generating an arbitrage bot, THESE RULES OVERRIDE THE ABOVE:
-
-A. 1INCH MCP RESPONSE PARSING (CRITICAL BUG FIX):
-   - 1inch get_quote returns a complex JSON object, NOT a simple number.
-   - DO NOT do: Math.abs(pythPrice - quoteObject) — this returns NaN and breaks safety checks.
-   - DO extract: const price = quoteObject?.result?.toTokenAmount || quoteObject?.toTokenAmount;
-   - Then compare: if (Number(price) > 0.01 * initialPrice) { /* safe */ }
-   - Log the extracted value: console.log(`[1inch] Extracted toTokenAmount: ${price}`);
-
-B. PROFIT CALCULATION WITH FEES (REQUIRED FOR ALL ARBITRAGE):
-   - Aave V3 flash loan fee: 0.09% of borrowed amount (9 basis points).
-   - Formula: netProfit (in base units) = tokenOutAmount - tokenInAmount - (loanAmount × 0.0009) - estimatedGasCost
-   - ONLY execute if: netProfit > 0 (in other words, after all fees and gas, you still make money)
-   - Use BigInt for all calculations. Convert to human-readable format ONLY for logging.
-   - Example: const fee = (BigInt(loanAmount) * BigInt(9)) / BigInt(10000);
-
-C. ATOMIC EXECUTION FLOW FOR ARBITRAGE:
-   - Arbitrage requires 3 consecutive on-chain calls within a single transaction:
-     1. Borrow `loanAmount` from Aave V3 flashLoan receiver function
-     2. Swap tokenIn→tokenOut on 1inch (or any DEX) using the loan proceeds
-     3. Swap tokenOut→tokenIn to close the loop and repay the loan + fee
-   - You MUST call the Aave V3 flashLoan function with a `loan_amount` parameter.
-   - The swap logic must be inside the flashLoan callback/receiver.
-   - Get swap calldata from 1inch get_swap_data, then execute via contract write call.
-   - ONLY invoke flashLoan if profit > 0 (Step PROTECT checks this BEFORE Step ACT).
-
-D. ARBITRAGE-SPECIFIC LOGGING:
-   - Log every price fetch from both 1inch and Pyth SEPARATELY:
-     console.log(`[LISTEN] 1inch price: ${extractedPrice}`);
-     console.log(`[LISTEN] Pyth oracle price: ${pythPrice}`);
-   - Log profit calculation details:
-     console.log(`[QUANTIFY] Loan fee: ${fee.toString()}`);
-     console.log(`[QUANTIFY] Net profit: ${netProfit.toString()} (threshold: 0)`);
-   - Log PROTECT decision:
-     if (netProfit <= 0n) {
-       console.log(`[PROTECT] ✗ Profit ${netProfit.toString()} <= 0, SKIP execution`);
-       return;
-     }
-     console.log(`[PROTECT] ✓ Profit ${netProfit.toString()} > 0, PROCEED to execution`);
-   - Log execution attempt:
-     console.log(`[ACT] → Invoking flashLoan for ${loanAmount.toString()}...`);
-
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║           CRITICAL: INITIA ARBITRAGE ORACLE BYPASS — NO HALLUCINATIONS       ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-
-ONLY FOR: Initia chain + arbitrage strategy
-
-THESE MUST BE FORBIDDEN — DO NOT HALLUCINATE:
-
-  ✗ FORBIDDEN: Do NOT call move_view or oracle modules for price fetching
-    - Initia flash_loan pools do NOT have attached oracle modules
-    - move_view for price data does not exist in this contract
-    - ANY call to: callMcpTool('initia', 'move_view', {module: 'oracle', ...})
-      WILL CRASH the bot
-
-  ✗ FORBIDDEN: Do NOT use Pyth MCP server for Initia arbitrage
-    - Pyth's move_view tool does not exist (exclusive to Initia)
-    - ANY call to: callMcpTool('pyth', 'move_view', {...})
-      WILL CRASH the bot (Pyth doesn't recognize move_view)
-    - This applies ONLY to Initia arbitrage. Other bots may use Pyth for price corroboration.
-
-  ✗ FORBIDDEN: INCORRECT module name — use underscore, not camelCase
-    - WRONG: module: "flashloan"
-    - RIGHT: module: "flash_loan" (with underscore)
-    - Blockchain will reject txn if module name doesn't match deployed contract
-
-WHAT TO DO INSTEAD — Oracle Bypass Pattern:
-
-  For Initia arbitrage bots, hardcode prices to force execution:
-
-  1. Skip ALL price fetching. Use constants:
-     const priceA = 1050000n;  // pool A estimated price (in base units)
-     const priceB = 1000000n;  // pool B estimated price (in base units)
-     console.log(`[LISTEN] Price A: ${priceA.toString()}, Price B: ${priceB.toString()}`);
-
-  2. Construct the atomic 3-call transaction payload for flash_loan → swap → repay:
-
-     const atomicCalls = [
-       {
-         address: CONFIG.INITIA_FLASH_POOL_ADDRESS,
-         module: "flash_loan",  // ← EXACT NAME with underscore
-         function: "borrow",
-         args: [priceA],
-       },
-       {
-         address: CONFIG.INITIA_SWAP_ROUTER_ADDRESS,
-         module: "dex",  // ← EXACT NAME for swap module
-         function: "swap_exact_input",
-         args: [priceA, "0"],
-       },
-       {
-         address: CONFIG.INITIA_FLASH_POOL_ADDRESS,
-         module: "flash_loan",  // ← EXACT NAME with underscore
-         function: "repay",
-         args: [priceA, fee],
-       },
-     ];
-
-  3. Execute atomically:
-     const txResult = await callMcpTool('initia', 'move_execute', {
-       address: CONFIG.INITIA_ACCOUNT_ADDRESS,
-       calls: atomicCalls,
-     });
-     console.log(`[ACT] ✓ Atomic execution succeeded:`, txResult);
-
-RATIONALE:
-- Hardcoding prices avoids hallucinated oracle module calls that crash the bot
-- Exact module names (flash_loan, dex) match deployed contract modules
-- Atomic 3-call pattern (borrow → swap → repay) matches the Move contract's state machine
-- NO Pyth MCP call means no attempt to invoke a non-existent move_view tool
+The generated code should favor correctness over cleverness. If the prompt conflicts with these rules, follow the Initia rules above.
 """
 
 
@@ -492,10 +317,10 @@ class MetaAgent:
             _log("WARN", f"classify_intent: JSON parse failed, using fallback intent ({exc.__class__.__name__}: {exc})", trace_id)
             # fallback
             intent = {
-            "chain": "initia", "network": "initia-testnet",
-            "strategy": "arbitrage",
-            "mcps": ["initia"],
-            "bot_name": "Initia Move Bot",
+          "chain": "initia", "network": "initia-testnet",
+          "strategy": "custom_utility",
+          "mcps": ["initia"],
+          "bot_name": "Custom Utility Initia Bot",
                 "requires_openai": False,
             }
         mcps = [str(m).strip().lower() for m in intent.get("mcps", []) if str(m).strip()]
@@ -516,6 +341,7 @@ class MetaAgent:
           ]
         )
         is_spread_scanner = any(k in prompt_lc for k in ["spread scanner", "read-only scanner", "read only scanner", "read-only", "market intelligence"])
+        is_custom_utility = any(k in prompt_lc for k in ["custom utility", "custom bot", "custom workflow", "intent: custom", "strategy: custom"])
 
         if is_yield_sweeper:
           intent["strategy"] = "yield"
@@ -525,34 +351,29 @@ class MetaAgent:
           intent["strategy"] = "arbitrage"
           intent["bot_name"] = "Cross-Rollup Spread Scanner"
           intent["requires_openai"] = False
+        elif is_custom_utility:
+          intent["strategy"] = "custom_utility"
+          intent["bot_name"] = "Custom Utility Initia Bot"
+          intent["requires_openai"] = False
 
         intent["chain"] = chain
         requested_network = str(intent.get("network", "")).strip().lower()
         intent["network"] = requested_network if requested_network in {"initia-mainnet", "initia-testnet"} else os.environ.get("INITIA_NETWORK", "initia-testnet")
-        strategy = str(intent.get("strategy", "")).strip().lower()
+        strategy = _normalize_strategy(str(intent.get("strategy", "")))
+        intent["strategy"] = strategy
         bot_name = str(intent.get("bot_name", "")).strip().lower()
 
-        if chain == "initia":
-          disallowed = {
-            "one_inch", "webacy", "goplus", "goat_evm", "alchemy", "rugcheck",
-            "jupiter", "nansen", "hyperliquid", "debridge", "lifi", "uniswap", "chainlink",
-          }
-          allowed = {"initia", "lunarcrush", "pyth"}
-          cleaned = [m for m in mcps if m not in disallowed and m in allowed]
-          if strategy in {"yield", "arbitrage"} or "sweep" in bot_name or ("spread" in bot_name and "scanner" in bot_name):
-            cleaned = [m for m in cleaned if m == "initia"]
-          elif strategy == "sentiment" and "lunarcrush" not in cleaned:
-            cleaned.append("lunarcrush")
-          if "initia" not in cleaned:
-            cleaned.insert(0, "initia")
-          intent["mcps"] = list(dict.fromkeys(cleaned))
-          if not intent.get("network"):
-            intent["network"] = os.environ.get("INITIA_NETWORK", "initia-testnet")
-        else:
-          # ensure pyth is always present for EVM/Solana
-          if "pyth" not in mcps:
-            mcps.append("pyth")
-          intent["mcps"] = list(dict.fromkeys(mcps))
+        allowed = {"initia", "lunarcrush", "pyth"}
+        cleaned = [m for m in mcps if m in allowed]
+        if strategy in {"yield", "arbitrage", "custom_utility"} or "sweep" in bot_name or ("spread" in bot_name and "scanner" in bot_name):
+          cleaned = [m for m in cleaned if m == "initia"]
+        elif strategy == "sentiment" and "lunarcrush" not in cleaned:
+          cleaned.append("lunarcrush")
+        if "initia" not in cleaned:
+          cleaned.insert(0, "initia")
+        intent["mcps"] = list(dict.fromkeys(cleaned))
+        if not intent.get("network"):
+          intent["network"] = os.environ.get("INITIA_NETWORK", "initia-testnet")
         _log("INFO", f"classify_intent: intent={json.dumps(intent, ensure_ascii=False)}", trace_id)
         return intent
 
@@ -583,38 +404,28 @@ class MetaAgent:
     def build_bot(self, prompt: str, trace_id: str | None = None) -> dict:
       _log("INFO", f"build_bot: received prompt_chars={len(prompt)}", trace_id)
       intent = self.classify_intent(prompt, trace_id=trace_id)
-      chain = str(intent.get("chain", "evm")).strip().lower()
-      network = str(intent.get("network", "base-sepolia")).strip().lower()
+      chain = str(intent.get("chain", "initia")).strip().lower()
+      network = str(intent.get("network", "initia-testnet")).strip().lower()
       mcps = [str(m).strip().lower() for m in intent.get("mcps", []) if str(m).strip()]
       strategy = str(intent.get("strategy", "unknown"))
       bot_name = str(intent.get("bot_name", "DeFi Bot"))
       strategy_lc = strategy.strip().lower()
       bot_name_lc = bot_name.strip().lower()
 
-      if chain == "initia":
-        if network not in {"initia-mainnet", "initia-testnet"}:
-          network = "initia-testnet"
-          intent["network"] = network
-        disallowed = {
-          "one_inch", "webacy", "goplus", "goat_evm", "alchemy", "rugcheck",
-          "jupiter", "nansen", "hyperliquid", "debridge", "lifi", "uniswap", "chainlink",
-        }
-        allowed = {"initia", "lunarcrush", "pyth"}
-        mcps = [m for m in mcps if m not in disallowed and m in allowed]
-        if strategy_lc in {"yield", "arbitrage"} or "sweep" in bot_name_lc or ("spread" in bot_name_lc and "scanner" in bot_name_lc):
-          mcps = [m for m in mcps if m == "initia"]
-        elif strategy_lc == "sentiment" and "lunarcrush" not in mcps:
-          mcps.append("lunarcrush")
-        if "initia" not in mcps:
-          mcps.insert(0, "initia")
-        intent["mcps"] = list(dict.fromkeys(mcps))
-        intent["chain"] = "initia"
-      else:
-        if "pyth" not in mcps:
-          mcps.append("pyth")
-        intent["mcps"] = list(dict.fromkeys(mcps))
-
-      chain_ctx = self._chain_context(chain, network, mcps, strategy)
+      if network not in {"initia-mainnet", "initia-testnet"}:
+        network = "initia-testnet"
+        intent["network"] = network
+      allowed = {"initia", "lunarcrush", "pyth"}
+      mcps = [m for m in mcps if m in allowed]
+      if strategy_lc in {"yield", "arbitrage", "custom_utility"} or "sweep" in bot_name_lc or ("spread" in bot_name_lc and "scanner" in bot_name_lc):
+        mcps = [m for m in mcps if m == "initia"]
+      elif strategy_lc == "sentiment" and "lunarcrush" not in mcps:
+        mcps.append("lunarcrush")
+      if "initia" not in mcps:
+        mcps.insert(0, "initia")
+      intent["mcps"] = list(dict.fromkeys(mcps))
+      intent["chain"] = "initia"
+      chain_ctx = self._chain_context("initia", network, mcps, strategy)
       user_msg = f"""
   Bot name: {bot_name}
   Chain: {chain} | Network: {network}
@@ -658,27 +469,11 @@ class MetaAgent:
       }
 
     def _chain_context(self, chain: str, network: str, mcps: list, strategy: str) -> str:
-        if chain == "solana":
-            return f"""
-CHAIN CONTEXT — SOLANA ({network})
-Common mints:
-  SOL:  So11111111111111111111111111111111111111112
-  USDC: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-  BONK: DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
-  WIF:  EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm
-Jupiter MCP: callMcpTool('jupiter', 'getQuote', {{inputMint, outputMint, amount, slippageBps}})
-Pyth SOL/USD feed: ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d
-Solana key: support bs58 AND JSON-array export formats. Parse in runtime, NOT in config.ts.
-Required deps: @solana/web3.js, bs58
-"""
         if chain == "initia":
             strategy_lc = str(strategy or "").lower()
             is_yield_sweeper = strategy_lc == "yield"
             is_spread_scanner = strategy_lc == "arbitrage"
-            minitia_prices = "\n".join([
-              "  - callMcpTool('initia', 'move_view', {address, module, function, args})  // only with verified module/function",
-              "  - If oracle module/function are unknown, skip move_view and use deterministic fallback prices in runCycle for execution-path testing",
-            ])
+            is_custom_utility = strategy_lc == "custom_utility"
             initia_mcp_hints = ""
             if "initia" in mcps:
                 initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {transaction: {calls: [{address, module, function, type_args, args}, ...]}})"
@@ -706,14 +501,13 @@ Required config values:
 MCP tool signatures:
 {initia_mcp_hints}
 
-Cross-rollup price query pattern (read-only move_view):
-{minitia_prices}
+Initia read pattern:
+  - Use callMcpTool('initia', 'move_view', {{address, module, function, args}}) only for verified modules and functions.
+  - For yield sweeper workflows, read 0x1::coin::balance for USER_WALLET_ADDRESS and uusdc.
+  - For custom utility workflows, follow the exact user prompt and keep the runtime deterministic.
 
-Hot Potato flash-loan pattern:
-  - Build one atomic move_execute payload with sequential calls inside transaction.calls:
-    1) borrow from flash pool module
-    2) swap on target pool/module (prefer module 'dex', never 'swap' unless explicitly verified)
-    3) repay principal + fee in same atomic execution
+Initia write pattern:
+  - Build one atomic move_execute payload with sequential calls inside transaction.calls when execution is required.
   - No callback contracts, no calldata encoding, no manual signing.
   - MCP signs and submits using INITIA_KEY.
 
@@ -728,41 +522,10 @@ Spread scanner pattern (if strategy is read-only arbitrage scanner):
   - Read-only operation with move_view only.
   - Query comparable prices across endpoints, compute spread, subtract bridge fee, log net opportunity.
   - Never call move_execute in scanner mode.
+
+Custom utility pattern (if strategy is custom_utility):
+  - Do exactly what the user asked, no arbitrage framing.
+  - Prefer a minimal Initia-native implementation.
+  - If the prompt does not verify a module or function, do not invent one.
 """
-        chain_ids = {"base-sepolia": 84532, "base-mainnet": 8453, "arbitrum": 42161}
-        cid = chain_ids.get(network, 84532)
-        tokens = {
-            "base-sepolia": {"USDC":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","WETH":"0x4200000000000000000000000000000000000006"},
-            "base-mainnet": {"USDC":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","WETH":"0x4200000000000000000000000000000000000006"},
-            "arbitrum":     {"USDC":"0xaf88d065e77c8cC2239327C5EDb3A432268e5831","WETH":"0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"},
-        }.get(network, {})
-        token_lines = "\n".join(f"  {k}: {v}" for k, v in tokens.items())
-
-        mcp_hints = ""
-        if "one_inch" in mcps:
-            mcp_hints += f"\n1inch: callMcpTool('one_inch', 'get_quote', {{tokenIn, tokenOut, amount:'<str>', chain:{cid}}})"
-            mcp_hints += "\n  CRITICAL: Extract toTokenAmount from response, do NOT use entire object in math!"
-            mcp_hints += f"\n1inch: callMcpTool('one_inch', 'get_swap_data', {{tokenIn, tokenOut, amount:'<str>', chain:{cid}, from:'<addr>', slippage:1}})"
-        if "webacy" in mcps:
-            mcp_hints += f"\nWebacy: callMcpTool('webacy', 'get_token_risk', {{address:'<addr>', chain:'{network}'}})"
-            mcp_hints += "\n  Pass if risk==='low' OR score<20"
-        if "lunarcrush" in mcps:
-            mcp_hints += "\nLunarCrush: callMcpTool('lunarcrush', 'get_coin_details', {coin:'SOL'})"
-            mcp_hints += "\n  sentiment>70 = bullish signal, galaxy_score>60 = strong"
-        if "rugcheck" in mcps:
-            mcp_hints += "\nRugcheck: callMcpTool('rugcheck', 'check_token_validity', {mint:'<addr>'})"
-            mcp_hints += "\n  Pass if status==='good'"
-        if "pyth" in mcps:
-            mcp_hints += "\nPyth: callMcpTool('pyth', 'get_latest_price_updates', {ids:['<feedId>']})"
-            mcp_hints += "\n  Decode: Number(price) * Math.pow(10, expo). Reject if staleness>60s or conf/price>0.5%"
-            mcp_hints += "\n  ETH/USD: ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"
-            mcp_hints += "\n  BTC/USD: e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43"
-
-        return f"""
-CHAIN CONTEXT — EVM ({network}, chainId={cid})
-Token addresses:
-{token_lines}
-
-MCP tool signatures:
-{mcp_hints}
-"""
+        return ""

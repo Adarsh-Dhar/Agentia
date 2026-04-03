@@ -31,7 +31,7 @@ export async function POST(
 
   const upstreamUrl = `${gateway}/${server}/${tool}`;
 
-  let payload: unknown = {};
+  let payload: unknown;
   try {
     payload = await req.json();
   } catch {

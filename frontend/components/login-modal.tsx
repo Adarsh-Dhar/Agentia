@@ -54,14 +54,14 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
               variant="outline"
               className="w-full border-border hover:border-primary/50 hover:bg-primary/5"
             >
-              MetaMask
+              Interwoven Wallet
             </Button>
 
             <Button
               variant="outline"
               className="w-full border-border hover:border-primary/50 hover:bg-primary/5"
             >
-              WalletConnect
+              Initia Extension
             </Button>
           </div>
 

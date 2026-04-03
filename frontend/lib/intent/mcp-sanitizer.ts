@@ -1,19 +1,3 @@
-const INITIA_EXCLUDED_MCPS = new Set([
-  "one_inch",
-  "webacy",
-  "goplus",
-  "goat_evm",
-  "alchemy",
-  "rugcheck",
-  "jupiter",
-  "nansen",
-  "hyperliquid",
-  "debridge",
-  "lifi",
-  "uniswap",
-  "chainlink",
-]);
-
 const INITIA_ALLOWED_MCPS = new Set(["initia", "lunarcrush", "pyth"]);
 const INITIA_NETWORKS = new Set(["initia-mainnet", "initia-testnet"]);
 
@@ -64,13 +48,14 @@ export function sanitizeIntentMcpLists(intent: Record<string, unknown>): Record<
 
   const seedMcps = [...required, ...mcps];
   const nextMcps = seedMcps
-    .filter((name) => !INITIA_EXCLUDED_MCPS.has(name))
-    .filter((name) => INITIA_ALLOWED_MCPS.has(name));
+    .filter((name) => INITIA_ALLOWED_MCPS.has(name))
+    .filter((name, index, arr) => arr.indexOf(name) === index);
 
   const isYieldSweeper = strategy === "yield" || /sweep|consolidator|consolidate/.test(botLabel);
   const isSpreadScanner = /spread/.test(botLabel) && /scanner/.test(botLabel);
+  const isCustomUtility = strategy === "custom_utility" || /custom utility|custom bot|custom workflow/.test(botLabel);
 
-  if (isYieldSweeper || isSpreadScanner || strategy === "arbitrage") {
+  if (isYieldSweeper || isSpreadScanner || isCustomUtility || strategy === "arbitrage") {
     const initiaOnly = nextMcps.filter((name) => name === "initia");
     nextMcps.length = 0;
     nextMcps.push(...initiaOnly);
@@ -87,6 +72,5 @@ export function sanitizeIntentMcpLists(intent: Record<string, unknown>): Record<
     network,
     required_mcps: nextRequired,
     mcps: nextMcps,
-    requires_solana_wallet: false,
   };
 }

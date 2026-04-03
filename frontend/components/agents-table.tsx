@@ -69,14 +69,12 @@ function strategyLabel(strategy?: string): string {
 }
 
 function chainLabel(intent?: BotIntent | null): { label: string; color: string } {
-  if (!intent) return { label: "EVM", color: "text-cyan-400" };
-  if (intent.chain === "solana") return { label: "◎ Solana", color: "text-purple-400" };
+  if (!intent) return { label: "◇ Initia", color: "text-cyan-400" };
   const nets: Record<string, { label: string; color: string }> = {
-    "base-sepolia": { label: "⬡ Base Sepolia", color: "text-blue-400" },
-    "base-mainnet": { label: "⬡ Base",         color: "text-blue-400" },
-    "arbitrum":     { label: "🔴 Arbitrum",     color: "text-red-400"  },
+    "initia-testnet": { label: "◇ Initia Testnet", color: "text-blue-400" },
+    "initia-mainnet": { label: "◇ Initia Mainnet", color: "text-blue-400" },
   };
-  return nets[intent.network ?? ""] ?? { label: "⬡ EVM", color: "text-cyan-400" };
+  return nets[intent.network ?? ""] ?? { label: "◇ Initia", color: "text-cyan-400" };
 }
 
 function execModelBadge(model?: string): string | null {

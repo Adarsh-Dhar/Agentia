@@ -13,7 +13,7 @@ Your task: take a brief user idea for a crypto trading bot and expand it into an
 
 Cover ALL of the following in your expansion:
 
-1. **Target Blockchain & Network**: Specify the exact chain (e.g. Base Sepolia, Solana Mainnet, Arbitrum One), chain ID, and why it suits this strategy.
+1. **Target Blockchain & Network**: Specify the exact Initia network (initia-testnet or initia-mainnet), chain ID, and why it suits this strategy.
 
 2. **Execution Architecture**: 
    - Polling loop (REST) vs WebSocket (real-time) vs Agentic (AI sub-agent nested inside) 
@@ -21,7 +21,7 @@ Cover ALL of the following in your expansion:
    - Graceful shutdown, SIGINT/SIGTERM handling
 
 3. **Required Data Sources & APIs**:
-  - List every MCP server or REST API needed (e.g. 1inch for EVM swaps, Jupiter for Solana, LunarCrush for sentiment, Nansen for whale tracking, Hyperliquid for perps, DeBridge for cross-chain, Alchemy for mempool)
+  - List every MCP server or REST API needed (for example Initia MCP for Move reads/writes, LunarCrush for sentiment, and any analytics APIs required by the strategy)
    - For each: what data it provides, what endpoint/tool to call, what fields to parse
 
 4. **Step-by-Step Trading Logic**:
@@ -41,7 +41,7 @@ Cover ALL of the following in your expansion:
    - Flash loan fee accounting (Aave 0.09% fee + gas buffer)
   - Explicit profit/loss reporting every cycle: log gross spread, fee estimate, gas estimate, and net profit or loss in the same token units before any trade decision
 
-For EVM arbitrage, swap, scalper, grid, DCA, yield, perp, and MEV strategies, prefer Pyth Network price/oracle data for market pricing and avoid Chainlink-based stale-feed checks unless the user explicitly requests Chainlink.
+For Initia price-sensitive strategies, prefer Initia-native data sources and include oracle usage only if the user explicitly asks for it.
 
 For Initia yield sweeper workflows, do not introduce Pyth or amm_oracle. Use only Initia move_view for 0x1::coin::balance and move_execute for interwoven_bridge::sweep_to_l1 when threshold is met.
 
@@ -66,22 +66,22 @@ Required schema:
   "chain": "initia",
   "network": "initia-mainnet" | "initia-testnet",
   "execution_model": "polling" | "websocket" | "agentic",
-  "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
-  "required_mcps": ["initia","one_inch","webacy","lunarcrush","jupiter","nansen","hyperliquid","lifi","debridge","coingecko","twitter","alchemy","goat_evm","uniswap","chainlink"],
+  "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "yield_sweeper" | "custom_utility" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
+  "required_mcps": ["initia","lunarcrush","pyth"],
   "bot_type": "human-readable bot name",
-  "requires_openai_key": true | false,
-  "requires_solana_wallet": true | false
+  "requires_openai_key": true | false
 }
 
 Classification rules (first match wins):
 - ALWAYS return chain:"initia" for every request.
 - if request includes cross-rollup yield sweeper semantics (yield sweeper, auto-consolidator, consolidate idle funds, bridge back to l1, sweep_to_l1), classify as strategy:"yield" with required_mcps:["initia"] and bot_type:"Cross-Rollup Yield Sweeper".
+- if request asks for a custom utility bot, classify as strategy:"custom_utility" with required_mcps:["initia"] and bot_type:"Custom Utility Initia Bot".
 - sentiment | social | LunarCrush → execution_model:"agentic", strategy:"sentiment", required_mcps:["initia","lunarcrush"], requires_openai_key:true
 - yield sweeper | auto-consolidator | consolidate idle funds → execution_model:"polling", strategy:"yield", required_mcps:["initia"]
 - spread scanner | read-only arbitrage | market intelligence scanner → execution_model:"polling", strategy:"arbitrage", required_mcps:["initia"]
 - flash loan | arbitrage | hot potato → execution_model:"polling", strategy:"arbitrage", required_mcps:["initia"]
 - otherwise default execution_model:"polling", strategy:"unknown", required_mcps:["initia"]
-- if chain is initia, actively remove these MCPs if present: one_inch, webacy, goplus, goat_evm, alchemy, rugcheck, jupiter, nansen, hyperliquid, debridge, lifi, uniswap, chainlink
+- if chain is initia, allow only these MCPs: initia (required), lunarcrush (optional), pyth (optional)
 - for initia yield sweeper flows, do NOT include pyth and do NOT imply amm_oracle usage
 - default network if unspecified → "initia-testnet"`;
 
@@ -90,12 +90,25 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
   const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|consolidate idle funds|sweep_to_l1|bridge back to l1|sweep)/.test(mergedPrompt);
   const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(mergedPrompt);
   const isSentiment = /(sentiment|lunarcrush|social)/.test(mergedPrompt);
+  const isCustomUtility = /(custom utility|custom bot|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(mergedPrompt);
 
   const normalized: Record<string, unknown> = {
     ...intent,
     chain: "initia",
     network: String(intent.network ?? "").toLowerCase().includes("mainnet") ? "initia-mainnet" : "initia-testnet",
   };
+
+  if (isCustomUtility) {
+    normalized.execution_model = "polling";
+    normalized.strategy = "custom_utility";
+    normalized.bot_type = "Custom Utility Initia Bot";
+    normalized.bot_name = "Custom Utility Initia Bot";
+    normalized.required_mcps = ["initia"];
+    normalized.mcps = ["initia"];
+    normalized.requires_openai_key = false;
+    normalized.requires_openai = false;
+    return normalized;
+  }
 
   if (isYieldSweeper) {
     normalized.execution_model = "polling";
@@ -106,7 +119,6 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
     normalized.mcps = ["initia"];
     normalized.requires_openai_key = false;
     normalized.requires_openai = false;
-    normalized.requires_solana_wallet = false;
     return normalized;
   }
 
@@ -119,7 +131,6 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
     normalized.mcps = ["initia"];
     normalized.requires_openai_key = false;
     normalized.requires_openai = false;
-    normalized.requires_solana_wallet = false;
     return normalized;
   }
 
@@ -130,7 +141,6 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
     normalized.mcps = ["initia", "lunarcrush"];
     normalized.requires_openai_key = true;
     normalized.requires_openai = true;
-    normalized.requires_solana_wallet = false;
     return normalized;
   }
 
@@ -303,11 +313,18 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
   const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|sweep|consolidate|sweep_to_l1|bridge back to l1|consolidate idle funds)/.test(lower);
   const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(lower);
   const isInitiaSentiment = lower.includes("sentiment") || lower.includes("lunarcrush") || lower.includes("social");
+  const isCustomUtility = /(custom utility|custom bot|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(lower);
   const initiaNetwork = lower.includes("mainnet") ? "initia-mainnet" : "initia-testnet";
-  const strategy = isInitiaSentiment ? "sentiment" : (isYieldSweeper ? "yield" : ((isSpreadScanner || lower.includes("arbitrage") || lower.includes("flash loan")) ? "arbitrage" : "unknown"));
+  const strategy = isInitiaSentiment
+    ? "sentiment"
+    : (isYieldSweeper
+      ? "yield"
+      : (isCustomUtility
+        ? "custom_utility"
+        : ((isSpreadScanner || lower.includes("arbitrage") || lower.includes("flash loan")) ? "arbitrage" : "unknown")));
   const botName = isInitiaSentiment
     ? "Initia Sentiment Bot"
-    : (isYieldSweeper ? "Cross-Rollup Yield Sweeper" : (isSpreadScanner ? "Cross-Rollup Spread Scanner" : "Initia Move Bot"));
+    : (isYieldSweeper ? "Cross-Rollup Yield Sweeper" : (isCustomUtility ? "Custom Utility Initia Bot" : (isSpreadScanner ? "Cross-Rollup Spread Scanner" : "Initia Move Bot")));
   return {
     chain: "initia", network: initiaNetwork,
     execution_model: isInitiaSentiment ? "agentic" : "polling",
@@ -318,6 +335,5 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
     bot_name: botName,
     requires_openai: isInitiaSentiment,
     requires_openai_key: isInitiaSentiment,
-    requires_solana_wallet: false,
   };
 }

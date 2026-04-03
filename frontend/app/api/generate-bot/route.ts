@@ -47,126 +47,6 @@ function parseEnvText(text: string): Record<string, string> {
   return out;
 }
 
-function loadAgentEnvDefaults(): Record<string, string> {
-  try {
-    const envPath = path.resolve(process.cwd(), "../agents/.env");
-    const envText = fs.readFileSync(envPath, "utf8");
-    return parseEnvText(envText);
-  } catch {
-    return {};
-  }
-}
-
-function isLocalGateway(value: string): boolean {
-  return /(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(String(value || ""));
-}
-
-function pickPublicGateway(candidate: string, fallback: string): string {
-  const value = String(candidate || "").trim();
-  if (!value) return fallback;
-  if (/^\/api\/mcp-proxy\/?/i.test(value)) return fallback;
-  if (isLocalGateway(value)) return fallback || value;
-  return value;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isSolanaSentimentIntent(intent: Record<string, unknown>): boolean {
-  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
-  const chain = String(intent.chain ?? "").toLowerCase();
-  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
-
-  return chain.includes("solana") && strategy.includes("sentiment") && botType.includes("sentiment");
-}
-
-function deriveFallbackIntent(prompt: string): Record<string, unknown> {
-  const normalized = prompt.toLowerCase();
-  const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|sweep|consolidate|sweep_to_l1|bridge back to l1|consolidate idle funds)/.test(normalized);
-  const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(normalized);
-  const isSentiment = normalized.includes("sentiment") || normalized.includes("lunarcrush") || normalized.includes("social");
-  const strategy = isSentiment ? "sentiment" : (isYieldSweeper ? "yield" : ((isSpreadScanner || normalized.includes("arbitrage") || normalized.includes("flash loan")) ? "arbitrage" : "unknown"));
-  const botName = isSentiment
-    ? "Initia Sentiment Bot"
-    : (isYieldSweeper ? "Cross-Rollup Yield Sweeper" : (isSpreadScanner ? "Cross-Rollup Spread Scanner" : "Initia Move Bot"));
-  return sanitizeIntentMcpLists({
-    chain: "initia",
-    network: normalized.includes("mainnet") ? "initia-mainnet" : "initia-testnet",
-    execution_model: isSentiment ? "agentic" : "polling",
-    strategy,
-    required_mcps: ["initia"],
-    mcps: ["initia", ...(isSentiment ? ["lunarcrush"] : [])],
-    bot_type: botName,
-    bot_name: botName,
-    requires_openai_key: isSentiment,
-    requires_solana_wallet: false,
-  });
-}
-
-function isInitiaSentimentIntent(intent: Record<string, unknown>): boolean {
-  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
-  const chain = String(intent.chain ?? "").toLowerCase();
-  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
-
-  return chain.includes("initia") && strategy.includes("sentiment") && botType.includes("sentiment");
-}
-
-function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
-  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
-  const chain = String(intent.chain ?? "").toLowerCase();
-  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
-
-  return chain.includes("initia") && (strategy.includes("yield") || /sweep|consolidator|consolidate/.test(botType));
-}
-
-function isInitiaSpreadScannerIntent(intent: Record<string, unknown>): boolean {
-  const strategy = String(intent.strategy ?? intent.execution_model ?? "").toLowerCase();
-  const chain = String(intent.chain ?? "").toLowerCase();
-  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
-
-  return chain.includes("initia") && (
-    (botType.includes("spread") && botType.includes("scanner")) ||
-    botType.includes("read-only scanner") ||
-    botType.includes("market intelligence")
-  );
-}
-
-function buildSafeInitiaYieldConfigTs(): string {
-  return [
-    'import "dotenv/config";',
-    '',
-    'export const CONFIG = {',
-    '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),',
-    '  INITIA_KEY: process.env.INITIA_KEY ?? (() => { throw new Error("INITIA_KEY not set"); })(),',
-    '  INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",',
-    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
-    '  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? (() => { throw new Error("USER_WALLET_ADDRESS not set"); })(),',
-    '  INITIA_BRIDGE_ADDRESS: process.env.INITIA_BRIDGE_ADDRESS ?? (() => { throw new Error("INITIA_BRIDGE_ADDRESS not set"); })(),',
-    '  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",',
-    '  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),',
-    '} as const;',
-    '',
-  ].join("\n");
-}
-
-function buildSafeInitiaSpreadConfigTs(): string {
-  return [
-    'import "dotenv/config";',
-    '',
-    'export const CONFIG = {',
-    '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),',
-    '  INITIA_KEY: process.env.INITIA_KEY ?? (() => { throw new Error("INITIA_KEY not set"); })(),',
-    '  INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",',
-    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
-    '  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",',
-    '  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),',
-    '  ESTIMATED_BRIDGE_FEE_USDC: BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? "5000"),',
-    '} as const;',
-    '',
-  ].join("\n");
-}
-
 function buildSafeInitiaYieldSweeperIndexTs(): string {
   return [
     'import * as configModule from "./config.js";',
@@ -174,20 +54,10 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '',
     'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
     'const POLL_MS = Number(config.POLL_MS ?? 15000);',
-    'const SIMULATION_MODE = Boolean(config.SIMULATION_MODE);',
-    'const ENDPOINTS = ["minitia-a", "minitia-b", "minitia-c"];',
-    'const THRESHOLD = 1000000n;',
+    'const THRESHOLD = BigInt(config.SWEEP_THRESHOLD_UUSDC ?? 1000000n);',
     '',
     'function log(level: string, message: string): void {',
     '  console.log("[" + new Date().toISOString() + "] [" + level + "] " + message);',
-    '}',
-    '',
-    'function safeString(value: unknown): string {',
-    '  try {',
-    '    return JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item));',
-    '  } catch {',
-    '    return String(value);',
-    '  }',
     '}',
     '',
     'function toBigInt(value: unknown): bigint | null {',
@@ -195,38 +65,33 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '  if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.trunc(value));',
     '  if (typeof value === "string") {',
     '    const trimmed = value.trim();',
-    '    if (!trimmed) return null;',
+    '    if (!trimmed || !/^[0-9]+$/.test(trimmed)) return null;',
     '    try { return BigInt(trimmed); } catch { return null; }',
     '  }',
     '  return null;',
     '}',
     '',
-    'function extractBalance(payload: unknown, endpointIndex: number): bigint {',
-    '  if (payload && typeof payload === "object") {',
-    '    const root = payload as Record<string, unknown>;',
-    '    const direct = toBigInt(root.balance ?? root.amount ?? root.value ?? root.coin_amount);',
-    '    if (direct !== null) return direct;',
-    '    const result = root.result && typeof root.result === "object" ? (root.result as Record<string, unknown>) : null;',
-    '    if (result) {',
-    '      const nested = toBigInt(result.balance ?? result.amount ?? result.value);',
-    '      if (nested !== null) return nested;',
-    '      const content = result.content;',
-    '      if (Array.isArray(content) && content.length > 0) {',
-    '        for (const item of content) {',
-    '          if (item && typeof item === "object") {',
-    '            const balance = toBigInt((item as Record<string, unknown>).balance ?? (item as Record<string, unknown>).amount ?? (item as Record<string, unknown>).value);',
-    '            if (balance !== null) return balance;',
-    '            const rawText = (item as Record<string, unknown>).text;',
-    '            if (typeof rawText === "string") {',
-    '              const parsed = toBigInt(rawText.replace(/[^0-9]/g, ""));',
-    '              if (parsed !== null) return parsed;',
-    '            }',
-    '          }',
-    '        }',
-    '      }',
+    'function extractBalance(payload: unknown): bigint | null {',
+    '  if (!payload || typeof payload !== "object") return null;',
+    '  const root = payload as Record<string, unknown>;',
+    '  const direct = toBigInt(root.balance ?? root.amount ?? root.value ?? root.coin_amount);',
+    '  if (direct !== null) return direct;',
+    '  const result = root.result && typeof root.result === "object" ? (root.result as Record<string, unknown>) : null;',
+    '  if (!result) return null;',
+    '  const nested = toBigInt(result.balance ?? result.amount ?? result.value ?? result.coin_amount);',
+    '  if (nested !== null) return nested;',
+    '  const content = result.content;',
+    '  if (Array.isArray(content) && content.length > 0) {',
+    '    for (const item of content) {',
+    '      if (!item || typeof item !== "object") continue;',
+    '      const text = (item as Record<string, unknown>).text;',
+    '      if (typeof text !== "string") continue;',
+    '      const digits = text.replace(/[^0-9]/g, "");',
+    '      const parsed = toBigInt(digits);',
+    '      if (parsed !== null) return parsed;',
     '    }',
     '  }',
-    '  return 1000000n + BigInt(endpointIndex + 1) * 250000n;',
+    '  return null;',
     '}',
     '',
     'async function safeMcp(server: string, tool: string, args: Record<string, unknown>): Promise<unknown | null> {',
@@ -240,86 +105,65 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '}',
     '',
     'async function runCycle(): Promise<void> {',
-    '  log("INFO", "Yield sweep cycle start");',
     '  const wallet = String(config.USER_WALLET_ADDRESS ?? "").trim();',
     '  const bridge = String(config.INITIA_BRIDGE_ADDRESS ?? "").trim();',
-    '  if (!wallet || !bridge) {',
-    '    throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");',
-    '  }',
-    '',
-    '  const results = await Promise.allSettled(',
-    '    ENDPOINTS.map((endpoint, index) => safeMcp("initia", "move_view", {',
+    '  if (!wallet || !bridge) throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");',
+    '  let payload: unknown = null;',
+    '  try {',
+    '    payload = await callMcpTool("initia", "move_view", {',
     '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
-    '      endpoint,',
     '      address: "0x1",',
     '      module: "coin",',
     '      function: "balance",',
     '      args: [wallet, "uusdc"],',
-    '      endpointIndex: index,',
-    '    }).then((payload) => ({ endpoint, index, payload })))',
-    '  );',
-    '',
-    '  for (const settled of results) {',
-    '    if (settled.status !== "fulfilled") {',
-    '      const msg = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);',
-    '      log("WARN", "Endpoint scan failed: " + msg);',
-    '      continue;',
-    '    }',
-    '    const { endpoint, index, payload } = settled.value;',
-    '    const balance = extractBalance(payload, index);',
-    '    log("INFO", "[SCAN] " + endpoint + " balance=" + balance.toString());',
-    '    if (balance <= THRESHOLD) continue;',
-    '',
-    '    log("INFO", "[ACT] threshold crossed at " + endpoint + ", sweeping " + balance.toString());',
-    '    const result = await safeMcp("initia", "move_execute", {',
+    '    });',
+    '  } catch (error) {',
+    '    const msg = error instanceof Error ? error.message : String(error);',
+    '    log("WARN", "move_view failed: " + msg);',
+    '    return;',
+    '  }',
+    '  const balance = extractBalance(payload) ?? 0n;',
+    '  log("INFO", "[SCAN] balance=" + balance.toString() + " threshold=" + THRESHOLD.toString());',
+    '  if (balance <= THRESHOLD) return;',
+    '  let result: unknown = null;',
+    '  try {',
+    '    result = await callMcpTool("initia", "move_execute", {',
     '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
     '      address: bridge,',
     '      module: "interwoven_bridge",',
     '      function: "sweep_to_l1",',
     '      args: [balance.toString()],',
     '    });',
-    '    if (result) {',
-    '      log("INFO", "[ACT] sweep result=" + safeString(result));',
-    '    }',
+    '  } catch (error) {',
+    '    const msg = error instanceof Error ? error.message : String(error);',
+    '    log("WARN", "move_execute failed: " + msg);',
+    '    return;',
     '  }',
+    '  log("INFO", "[ACT] sweep result=" + JSON.stringify(result ?? {}));',
     '}',
     '',
-    'let cycleInFlight = false;',
+    'let inFlight = false;',
     'let timer: ReturnType<typeof setTimeout> | null = null;',
     '',
     'async function tick(): Promise<void> {',
-    '  if (cycleInFlight) return;',
-    '  cycleInFlight = true;',
+    '  if (inFlight) return;',
+    '  inFlight = true;',
     '  try {',
     '    await runCycle();',
     '  } catch (error) {',
     '    const msg = error instanceof Error ? error.message : String(error);',
     '    log("ERROR", msg);',
     '  } finally {',
-    '    cycleInFlight = false;',
+    '    inFlight = false;',
     '    if (timer) clearTimeout(timer);',
     '    timer = setTimeout(() => { void tick(); }, POLL_MS);',
     '  }',
     '}',
     '',
-    'function stop(): void {',
-    '  if (timer) clearTimeout(timer);',
-    '  timer = null;',
-    '}',
-    '',
     'void tick();',
     '',
-    'process.on("SIGINT", () => {',
-    '  stop();',
-    '  log("INFO", "Shutdown complete");',
-    '  process.exit(0);',
-    '});',
-    '',
-    'process.on("SIGTERM", () => {',
-    '  stop();',
-    '  log("INFO", "Shutdown complete");',
-    '  process.exit(0);',
-    '});',
+    'process.on("SIGINT", () => process.exit(0));',
+    'process.on("SIGTERM", () => process.exit(0));',
   ].join("\n");
 }
 
@@ -331,9 +175,18 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
     'const POLL_MS = Number(config.POLL_MS ?? 15000);',
     'const ESTIMATED_BRIDGE_FEE_USDC = BigInt(config.ESTIMATED_BRIDGE_FEE_USDC ?? 5000n);',
+    '',
+    'function requireConfiguredAddress(name: string, value: unknown): string {',
+    '  const resolved = String(value ?? "").trim();',
+    '  if (!resolved) throw new Error(name + " is not set");',
+    '  return resolved;',
+    '}',
+    '',
+    'const poolAAddress = requireConfiguredAddress("INITIA_POOL_A_ADDRESS", config.INITIA_POOL_A_ADDRESS);',
+    'const poolBAddress = requireConfiguredAddress("INITIA_POOL_B_ADDRESS", config.INITIA_POOL_B_ADDRESS);',
     'const ENDPOINTS = [',
-    '  { id: "minitia-a", address: "0xinitia_pool_a" },',
-    '  { id: "minitia-b", address: "0xinitia_pool_b" },',
+    '  { id: "minitia-a", address: poolAAddress },',
+    '  { id: "minitia-b", address: poolBAddress },',
     '];',
     '',
     'function log(level: string, message: string): void {',
@@ -346,23 +199,24 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '  if (typeof value === "string") {',
     '    const trimmed = value.trim();',
     '    if (!trimmed) return null;',
-    '    try { return BigInt(trimmed.replace(/[^0-9]/g, "")); } catch { return null; }',
+    '    if (!/^[0-9]+$/.test(trimmed)) return null;',
+    '    try { return BigInt(trimmed); } catch { return null; }',
     '  }',
     '  return null;',
     '}',
     '',
-    'function extractPrice(payload: unknown, endpointIndex: number): bigint {',
+    'function extractPrice(payload: unknown): bigint | null {',
     '  if (payload && typeof payload === "object") {',
     '    const root = payload as Record<string, unknown>;',
-    '    const direct = toBigInt(root.price_num ?? root.price ?? root.value);',
-    '    if (direct !== null) return direct * 1000000n;',
+    '    const direct = toBigInt(root.balance ?? root.amount ?? root.value ?? root.coin_amount);',
+    '    if (direct !== null) return direct;',
     '    const result = root.result && typeof root.result === "object" ? (root.result as Record<string, unknown>) : null;',
     '    if (result) {',
-    '      const nested = toBigInt(result.price ?? result.price_num ?? result.value);',
-    '      if (nested !== null) return nested * 1000000n;',
+    '      const nested = toBigInt(result.balance ?? result.amount ?? result.value ?? result.coin_amount);',
+    '      if (nested !== null) return nested;',
     '    }',
     '  }',
-    '  return 1000000n + BigInt(endpointIndex + 1) * 35000n;',
+    '  return null;',
     '}',
     '',
     'async function safeMcp(server: string, tool: string, args: Record<string, unknown>): Promise<unknown | null> {',
@@ -378,15 +232,13 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     'async function runCycle(): Promise<void> {',
     '  log("INFO", "Spread scan cycle start");',
     '  const quotes = await Promise.allSettled(',
-    '    ENDPOINTS.map((endpoint, index) => safeMcp("initia", "move_view", {',
+    '    ENDPOINTS.map((endpoint) => safeMcp("initia", "move_view", {',
     '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
-    '      endpoint: endpoint.id,',
-    '      address: endpoint.address,',
-    '      module: "amm_oracle",',
-    '      function: "spot_price",',
-    '      args: ["INIT", "USDC"],',
-    '      endpointIndex: index,',
-    '    }).then((payload) => ({ endpoint, index, payload })))',
+    '      address: "0x1",',
+    '      module: "coin",',
+    '      function: "balance",',
+    '      args: [endpoint.address, "uusdc"],',
+    '    }).then((payload) => ({ endpoint, payload })))',
     '  );',
     '',
     '  const prices: Array<{ id: string; price: bigint }> = [];',
@@ -396,8 +248,12 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '      log("WARN", "Endpoint quote failed: " + msg);',
     '      continue;',
     '    }',
-    '    const { endpoint, index, payload } = settled.value;',
-    '    const price = extractPrice(payload, index);',
+    '    const { endpoint, payload } = settled.value;',
+    '    const price = extractPrice(payload);',
+    '    if (price === null) {',
+    '      log("WARN", "[SCAN] " + endpoint.id + " returned non-numeric payload");',
+    '      continue;',
+    '    }',
     '    prices.push({ id: endpoint.id, price });',
     '    log("INFO", "[SCAN] " + endpoint.id + " price=" + price.toString());',
     '  }',
@@ -546,12 +402,45 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '  return resolved;',
     '}',
     '',
-    'async function fetchPrices(): Promise<{ poolA: bigint; poolB: bigint }> {',
-    '  log("INFO", "[LISTEN] Bypassing oracle fetch to force Flash Loan execution...");',
-    '  const poolA = 1050000n;',
-    '  const poolB = 1000000n;',
-    '  log("INFO", "[LISTEN] Fake Pool A price: " + poolA.toString());',
-    '  log("INFO", "[LISTEN] Fake Pool B price: " + poolB.toString());',
+    'function toBigInt(value: unknown): bigint | null {',
+    '  if (typeof value === "bigint") return value;',
+    '  if (typeof value === "number" && Number.isFinite(value)) return BigInt(Math.trunc(value));',
+    '  if (typeof value === "string") {',
+    '    const trimmed = value.trim();',
+    '    if (!/^[0-9]+$/.test(trimmed)) return null;',
+    '    try { return BigInt(trimmed); } catch { return null; }',
+    '  }',
+    '  return null;',
+    '}',
+    '',
+    'function extractBalance(payload: unknown): bigint | null {',
+    '  if (!payload || typeof payload !== "object") return null;',
+    '  const root = payload as Record<string, unknown>;',
+    '  const direct = toBigInt(root.balance ?? root.amount ?? root.value ?? root.coin_amount);',
+    '  if (direct !== null) return direct;',
+    '  const result = (root.result && typeof root.result === "object") ? (root.result as Record<string, unknown>) : null;',
+    '  if (!result) return null;',
+    '  return toBigInt(result.balance ?? result.amount ?? result.value ?? result.coin_amount);',
+    '}',
+    '',
+    'async function readPoolBalance(address: string): Promise<bigint | null> {',
+    '  const payload = await safeMcp("initia", "move_view", {',
+    '    network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),',
+    '    address: "0x1",',
+    '    module: "coin",',
+    '    function: "balance",',
+    '    args: [address, "uusdc"],',
+    '  });',
+    '  return extractBalance(payload);',
+    '}',
+    '',
+    'async function fetchPrices(poolAAddress: string, poolBAddress: string): Promise<{ poolA: bigint; poolB: bigint }> {',
+    '  const [poolA, poolB] = await Promise.all([readPoolBalance(poolAAddress), readPoolBalance(poolBAddress)]);',
+    '  if (poolA === null || poolB === null) {',
+    '    throw new Error("Failed to parse pool balances from move_view payload");',
+    '  }',
+    '  log("INFO", "[LISTEN] Pool A balance: " + poolA.toString());',
+    '  log("INFO", "[LISTEN] Pool B balance: " + poolB.toString());',
     '  return { poolA, poolB };',
     '}',
     '',
@@ -564,7 +453,7 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '  const [sentiment] = await Promise.all([',
     '    safeMcp("lunarcrush", "get_coin_details", { coin: "INIT", symbol: "INIT" }),',
     '  ]);',
-    '  const { poolA, poolB } = await fetchPrices();',
+    '  const { poolA, poolB } = await fetchPrices(poolAAddress, poolBAddress);',
     '  const spread = poolA > poolB ? poolA - poolB : poolB - poolA;',
     '',
     '  const score = extractScore(sentiment);',
@@ -641,342 +530,13 @@ function buildSafeInitiaSentimentIndexTs(): string {
   ].join("\n");
 }
 
-function buildSafeSolanaSentimentIndexTs(): string {
-  return [
-    'import { Connection, Keypair } from "@solana/web3.js";',
-    'import bs58 from "bs58";',
-    'import * as configModule from "./config.js";',
-    'import { callMcpTool } from "./mcp_bridge.js";',
-    '',
-    'const config = ((configModule as Record<string, unknown>).config ?? (configModule as Record<string, unknown>).CONFIG ?? {}) as Record<string, unknown>;',
-    '',
-    'const POLL_MS = 15000;',
-    'const SENTIMENT_BUY_THRESHOLD = 70;',
-    'const SENTIMENT_SELL_THRESHOLD = 30;',
-    'const RISK_SAFE_THRESHOLD = 20;',
-    'const SOL_MINT = "So11111111111111111111111111111111111111112";',
-    'const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";',
-    'const SIMULATION_MODE = String(process.env.SIMULATION_MODE ?? config.SIMULATION_MODE ?? "false").toLowerCase() === "true";',
-    'const MOCK_SENTIMENT = process.env.TEST_SENTIMENT_SCORE ? Number(process.env.TEST_SENTIMENT_SCORE) : null;',
-    'const MOCK_RISK = process.env.TEST_RISK_SCORE ? Number(process.env.TEST_RISK_SCORE) : null;',
-    'const MOCK_SOL_PRICE = process.env.TEST_SOL_PRICE ? Number(process.env.TEST_SOL_PRICE) : null;',
-    'let inFlight = false;',
-    'let cycleCount = 0;',
-    '',
-    'function log(level: string, message: string): void {',
-    '  const ts = new Date().toISOString();',
-    '  console.log("[" + ts + "] [" + level + "] " + message);',
-    '}',
-    '',
-    'function safeStringify(value: unknown): string {',
-    '  try {',
-    '    return JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item));',
-    '  } catch {',
-    '    return String(value);',
-    '  }',
-    '}',
-    '',
-    'function toFiniteNumber(value: unknown): number | null {',
-    '  if (typeof value === "number") return Number.isFinite(value) ? value : null;',
-    '  if (typeof value === "string") {',
-    '    const parsed = Number(value);',
-    '    return Number.isFinite(parsed) ? parsed : null;',
-    '  }',
-    '  return null;',
-    '}',
-    '',
-    'function firstNumberByKeys(value: unknown, keys: Set<string>, depth = 0): number | null {',
-    '  if (depth > 6 || value == null) return null;',
-    '  const direct = toFiniteNumber(value);',
-    '  if (direct !== null && depth > 0) return direct;',
-    '  if (Array.isArray(value)) {',
-    '    for (const item of value) {',
-    '      const found = firstNumberByKeys(item, keys, depth + 1);',
-    '      if (found !== null) return found;',
-    '    }',
-    '    return null;',
-    '  }',
-    '  if (typeof value === "object") {',
-    '    const obj = value as Record<string, unknown>;',
-    '    for (const [key, raw] of Object.entries(obj)) {',
-    '      if (keys.has(key.toLowerCase())) {',
-    '        const found = toFiniteNumber(raw);',
-    '        if (found !== null) return found;',
-    '      }',
-    '    }',
-    '    for (const raw of Object.values(obj)) {',
-    '      const found = firstNumberByKeys(raw, keys, depth + 1);',
-    '      if (found !== null) return found;',
-    '    }',
-    '  }',
-    '  return null;',
-    '}',
-    '',
-    'function parseMaybeJson(value: unknown): unknown {',
-    '  if (typeof value !== "string") return value;',
-    '  const trimmed = value.trim();',
-    '  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return value;',
-    '  try {',
-    '    return JSON.parse(trimmed);',
-    '  } catch {',
-    '    return value;',
-    '  }',
-    '}',
-    '',
-    'function unwrapMcpPayload(payload: unknown): unknown {',
-    '  if (!payload || typeof payload !== "object") return payload;',
-    '  const root = payload as Record<string, unknown>;',
-    '  const result = (root.result && typeof root.result === "object") ? (root.result as Record<string, unknown>) : null;',
-    '  if (!result) return payload;',
-    '  const content = result.content;',
-    '  if (!Array.isArray(content)) return result;',
-    '  const normalized = content.map((item) => {',
-    '    if (!item || typeof item !== "object") return item;',
-    '    const text = (item as Record<string, unknown>).text;',
-    '    return parseMaybeJson(text);',
-    '  });',
-    '  return normalized.length === 1 ? normalized[0] : normalized;',
-    '}',
-    '',
-    'function extractSentimentScore(payload: unknown): number | null {',
-    '  const normalized = unwrapMcpPayload(payload);',
-    '  return firstNumberByKeys(normalized, new Set(["sentiment", "sentiment_score", "score", "bullish_score", "market_sentiment"]));',
-    '}',
-    '',
-    'function extractRiskScore(payload: unknown): number | null {',
-    '  const normalized = unwrapMcpPayload(payload);',
-    '  return firstNumberByKeys(normalized, new Set(["risk", "risk_score", "score", "overall_risk", "threat_score"]));',
-    '}',
-    '',
-    'function extractSolPrice(payload: unknown): number | null {',
-    '  if (!payload || typeof payload !== "object") return null;',
-    '  const root = payload as Record<string, unknown>;',
-    '  const jupData = root.data;',
-    '  if (jupData && typeof jupData === "object") {',
-    '    const dataRecord = jupData as Record<string, unknown>;',
-    '    const sol = dataRecord.SOL;',
-    '    if (sol && typeof sol === "object") {',
-    '      const price = toFiniteNumber((sol as Record<string, unknown>).price);',
-    '      if (price !== null) return price;',
-    '    }',
-    '  }',
-    '  const cg = root.solana;',
-    '  if (cg && typeof cg === "object") {',
-    '    const usd = toFiniteNumber((cg as Record<string, unknown>).usd);',
-    '    if (usd !== null) return usd;',
-    '  }',
-    '  return firstNumberByKeys(root, new Set(["price", "usd", "value"]));',
-    '}',
-    '',
-    'function loadKeypair(): Keypair {',
-    '  const rawKey = String(process.env.SOLANA_PRIVATE_KEY ?? config.SOLANA_PRIVATE_KEY ?? config.PRIVATE_KEY ?? "").trim();',
-    '  if (SIMULATION_MODE) {',
-    '    log("INFO", "Simulation mode active. Using ephemeral keypair.");',
-    '    return Keypair.generate();',
-    '  }',
-    '',
-    '  if (!rawKey) {',
-    '    throw new Error("SOLANA_PRIVATE_KEY is required when SIMULATION_MODE=false");',
-    '  }',
-    '',
-    '  try {',
-    '    const secret = rawKey.startsWith("[") ? Uint8Array.from(JSON.parse(rawKey)) : bs58.decode(rawKey.replace(/^0x/, ""));',
-    '    return Keypair.fromSecretKey(secret);',
-    '  } catch {',
-    '    throw new Error("Invalid SOLANA_PRIVATE_KEY format");',
-    '  }',
-    '}',
-    '',
-    'async function safeFetchJson(url: string, label: string): Promise<unknown | null> {',
-    '  try {',
-    '    const response = await fetch(url);',
-    '    if (!response.ok) throw new Error("HTTP " + response.status);',
-    '    return await response.json();',
-    '  } catch (error) {',
-    '    const msg = error instanceof Error ? error.message : String(error);',
-    '    log("WARN", label + " unavailable: " + msg);',
-    '    return null;',
-    '  }',
-    '}',
-    '',
-    'async function safeMcp(server: string, tool: string, args: Record<string, unknown>): Promise<unknown | null> {',
-    '  try {',
-    '    return await callMcpTool(server, tool, args);',
-    '  } catch (error) {',
-    '    const msg = error instanceof Error ? error.message : String(error);',
-    '    log("WARN", "MCP " + server + "/" + tool + " unavailable: " + msg);',
-    '    return null;',
-    '  }',
-    '}',
-    '',
-    'async function executeJupiterTrade(side: "buy" | "sell"): Promise<unknown | null> {',
-    '  const inputMint = side === "buy" ? USDC_MINT : SOL_MINT;',
-    '  const outputMint = side === "buy" ? SOL_MINT : USDC_MINT;',
-    '  const amount = side === "buy" ? "1000000" : "50000";',
-    '  const wallet = keypair.publicKey.toBase58();',
-    '',
-    '  const quote = await safeMcp("jupiter", "getQuote", {',
-    '    inputMint,',
-    '    outputMint,',
-    '    amount,',
-    '    slippageBps: 100,',
-    '  });',
-    '',
-    '  if (!quote) {',
-    '    log("WARN", "Trade skipped: Jupiter quote unavailable.");',
-    '    return null;',
-    '  }',
-    '',
-    '  const swapCandidates: Array<{ tool: string; args: Record<string, unknown> }> = [',
-    '    { tool: "getSwapData", args: { quoteResponse: quote, userPublicKey: wallet, wrapAndUnwrapSol: true } },',
-    '    { tool: "getSwap", args: { quoteResponse: quote, userPublicKey: wallet, wrapAndUnwrapSol: true } },',
-    '    { tool: "buildSwapTransaction", args: { quoteResponse: quote, userPublicKey: wallet, wrapAndUnwrapSol: true } },',
-    '  ];',
-    '',
-    '  for (const candidate of swapCandidates) {',
-    '    const swap = await safeMcp("jupiter", candidate.tool, candidate.args);',
-    '    if (swap) {',
-    '      return { signature: "pending", inputAmount: amount, outputAmount: "unknown", quote, swap, tool: candidate.tool };',
-    '    }',
-    '  }',
-    '',
-    '  log("WARN", "Quote received but swap payload build failed across known Jupiter tools.");',
-    '  return { signature: "quote_only", inputAmount: amount, outputAmount: "unknown", quote };',
-    '}',
-    '',
-    'const keypair = loadKeypair();',
-    'const rpcUrl = String(process.env.SOLANA_RPC_URL ?? config.SOLANA_RPC_URL ?? "https://api.mainnet-beta.solana.com");',
-    'const connection = new Connection(rpcUrl, "confirmed");',
-    '',
-    'async function runCycle(): Promise<void> {',
-    '  cycleCount += 1;',
-    '  log("INFO", "=== CYCLE #" + cycleCount + " START ===");',
-    '  log("INFO", "Wallet: " + keypair.publicKey.toBase58());',
-    '',
-    '  const [sentiment, risk, jupPrice] = await Promise.all([',
-    '    safeMcp("lunarcrush", "get_coin_details", { coin: "SOL", symbol: "SOL", apiKey: String(process.env.LUNARCRUSH_API_KEY ?? config.LUNARCRUSH_API_KEY ?? "") }),',
-    '    safeMcp("webacy", "get_token_risk", { address: keypair.publicKey.toBase58(), chain: "solana", metrics_date: new Date().toISOString() }),',
-    '    safeFetchJson("https://price.jup.ag/v6/price?ids=SOL", "priceData"),',
-    '  ]);',
-    '',
-    '  const pricePayload = jupPrice ?? await safeFetchJson("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd", "coingecko");',
-    '  const sentimentScore = Number.isFinite(MOCK_SENTIMENT) ? Number(MOCK_SENTIMENT) : extractSentimentScore(sentiment);',
-    '  const riskScore = Number.isFinite(MOCK_RISK) ? Number(MOCK_RISK) : extractRiskScore(risk);',
-    '  const solPrice = Number.isFinite(MOCK_SOL_PRICE) ? Number(MOCK_SOL_PRICE) : extractSolPrice(pricePayload);',
-    '',
-    '  if (solPrice !== null) {',
-    '    log("INFO", "SOL Price: $" + solPrice.toFixed(2));',
-    '    if (Number.isFinite(MOCK_SOL_PRICE)) log("INFO", "Price source: TEST_SOL_PRICE override");',
-    '  } else {',
-    '    log("WARN", "SOL price unavailable");',
-    '  }',
-    '  if (sentimentScore !== null) {',
-    '    log("INFO", "Sentiment: " + safeStringify(sentiment));',
-    '    if (Number.isFinite(MOCK_SENTIMENT)) log("INFO", "Sentiment source: TEST_SENTIMENT_SCORE override");',
-    '  } else {',
-    '    log("WARN", "Sentiment unavailable");',
-    '  }',
-    '  if (riskScore !== null) {',
-    '    log("INFO", "Risk Score: " + safeStringify(risk));',
-    '    if (Number.isFinite(MOCK_RISK)) log("INFO", "Risk source: TEST_RISK_SCORE override");',
-    '  } else {',
-    '    log("WARN", "Risk score unavailable");',
-    '  }',
-    '',
-    '  const available = [solPrice !== null, sentimentScore !== null, riskScore !== null].filter(Boolean).length;',
-    '  log("INFO", "Data sources available: " + available + "/3 (price, sentiment, risk)");',
-    '',
-    '  if (sentimentScore !== null && sentimentScore > SENTIMENT_BUY_THRESHOLD && riskScore !== null && riskScore < RISK_SAFE_THRESHOLD) {',
-    '    log("INFO", "Bullish sentiment detected (" + sentimentScore + " > " + SENTIMENT_BUY_THRESHOLD + "). Risk score (" + riskScore + ") is safe. Proceeding to trade.");',
-    '    if (SIMULATION_MODE) {',
-    '      log("INFO", "Simulation mode active. Trade skipped.");',
-    '    } else {',
-    '      const trade = await executeJupiterTrade("buy");',
-    '      if (trade) {',
-    '        log("INFO", "Trade executed: " + safeStringify(trade));',
-    '      } else {',
-    '        log("WARN", "Trade attempt failed: no executable swap payload.");',
-    '      }',
-    '    }',
-    '  } else if (sentimentScore !== null && sentimentScore < SENTIMENT_SELL_THRESHOLD) {',
-    '    log("INFO", "Bearish sentiment detected (" + sentimentScore + " < " + SENTIMENT_SELL_THRESHOLD + "). Proceeding to exit position.");',
-    '    if (SIMULATION_MODE) {',
-    '      log("INFO", "Simulation mode active. Trade skipped.");',
-    '    } else {',
-    '      const trade = await executeJupiterTrade("sell");',
-    '      if (trade) {',
-    '        log("INFO", "Trade executed: " + safeStringify(trade));',
-    '      } else {',
-    '        log("WARN", "Trade attempt failed: no executable swap payload.");',
-    '      }',
-    '    }',
-    '  } else if (sentimentScore !== null) {',
-    '    log("INFO", "Sentiment is neutral (" + sentimentScore + "). No actionable triggers met. Holding position.");',
-    '  } else {',
-    '    log("WARN", "Sentiment unavailable, skipping directional trade decision this cycle.");',
-    '  }',
-    '',
-    '  if (available < 3) {',
-    '    log("WARN", "Failed to fetch remote data. Continuing in degraded mode.");',
-    '    log("INFO", "Cycle continues with partial/no data until providers recover.");',
-    '  }',
-    '',
-    '  log("INFO", "=== CYCLE #" + cycleCount + " COMPLETE ===");',
-    '  log("INFO", "cycle_ok wallet=" + keypair.publicKey.toBase58() + " rpc=" + connection.rpcEndpoint);',
-    '}',
-    '',
-    'let pollTimer: ReturnType<typeof setTimeout> | null = null;',
-    'let backoffMs = POLL_MS;',
-    '',
-    'function scheduleNextCycle(delayMs: number): void {',
-    '  if (pollTimer) clearTimeout(pollTimer);',
-    '  pollTimer = setTimeout(() => { void tick(); }, delayMs);',
-    '}',
-    '',
-    'const tick = async (): Promise<void> => {',
-    '  if (inFlight) return;',
-    '  inFlight = true;',
-    '  try {',
-    '    await runCycle();',
-    '    backoffMs = POLL_MS;',
-    '  } catch (error) {',
-    '    const msg = error instanceof Error ? error.message : String(error);',
-    '    log("ERROR", msg);',
-    '    backoffMs = Math.min(POLL_MS * 8, Math.max(POLL_MS, backoffMs * 2));',
-    '  } finally {',
-    '    inFlight = false;',
-    '    scheduleNextCycle(backoffMs);',
-    '  }',
-    '};',
-    '',
-    'void tick();',
-    '',
-    'function stopPolling(): void {',
-    '  if (pollTimer) clearTimeout(pollTimer);',
-    '  pollTimer = null;',
-    '}',
-    '',
-    'process.on("SIGINT", () => {',
-    '  stopPolling();',
-    '  log("INFO", "Shutting down bot");',
-    '  process.exit(0);',
-    '});',
-    '',
-    'process.on("SIGTERM", () => {',
-    '  stopPolling();',
-    '  log("INFO", "Shutting down bot");',
-    '  process.exit(0);',
-    '});',
-  ].join("\n");
-}
-
 function buildMcpBridgeTs(): string {
   return [
     'const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp";',
     'const MCP_GATEWAY_UPSTREAM_URL = process.env.MCP_GATEWAY_UPSTREAM_URL ?? "";',
     '',
     'function isProxyGateway(value: string): boolean {',
-    '  return /\/api\/mcp-proxy\/?$/i.test(String(value || ""));',
+    '  return /\\/api\\/mcp-proxy\\/?$/i.test(String(value || ""));',
     '}',
     '',
     'function normalizeGatewayBase(raw: string): string {',
@@ -1033,53 +593,31 @@ function buildMcpBridgeTs(): string {
     '  const body = await response.text().catch(() => "");',
     '  const parsed = parseMcpJsonResponse(body);',
     '  if (parsed !== null) return parsed;',
-    '  const snippet = body.replace(/\s+/g, " ").slice(0, 200);',
+    '  const snippet = body.replace(/\\s+/g, " ").slice(0, 200);',
     '  throw new Error(`MCP ${server}/${tool} invalid JSON body: ${snippet}`);',
     '}',
     '',
   ].join("\n");
 }
 
-function normalizeRuntimeVarNames(files: GeneratedFile[], intent: Record<string, unknown>): GeneratedFile[] {
-  const chain = String(intent.chain ?? "").toLowerCase();
-
+function normalizeRuntimeVarNames(files: GeneratedFile[]): GeneratedFile[] {
   return files.map((file) => {
     if (typeof file.content !== "string") return file;
 
-    if (chain.includes("initia")) {
-      const patchedInitia = file.content
-        .replace(/\bEVM_RPC_URL\b/g, "INITIA_RPC_URL")
-        .replace(/\bRPC_PROVIDER_URL\b/g, "INITIA_RPC_URL")
-        .replace(/\bSOLANA_RPC_URL\b/g, "INITIA_RPC_URL")
-        .replace(/\bEVM_PRIVATE_KEY\b/g, "INITIA_KEY")
-        .replace(/\bWALLET_PRIVATE_KEY\b/g, "INITIA_KEY")
-        .replace(/\bSOLANA_PRIVATE_KEY\b/g, "INITIA_KEY");
-      return { ...file, content: patchedInitia };
-    }
+    const patched = file.content
+      .replace(/\bRPC_PROVIDER_URL\b/g, "INITIA_RPC_URL")
+      .replace(/\bRPC_URL\b/g, "INITIA_RPC_URL")
+      .replace(/\bWALLET_PRIVATE_KEY\b/g, "INITIA_KEY")
+      .replace(/\bPRIVATE_KEY\b/g, "INITIA_KEY");
 
-    // Normalize only whole-variable names to avoid rewriting inside EVM_RPC_URL.
-    let patched = file.content
-      .replace(/\bEVM_EVM_RPC_URL\b/g, "EVM_RPC_URL")
-      .replace(/\bETHEREUM_RPC_URL\b/g, "EVM_RPC_URL")
-      .replace(/\bETH_RPC_URL\b/g, "EVM_RPC_URL")
-      .replace(/\bRPC_PROVIDER_URL\b/g, "EVM_RPC_URL")
-      .replace(/(^|[^A-Z0-9_])RPC_URL\b/g, "$1EVM_RPC_URL");
-    
-    // Also normalize private key references
-    patched = patched
-      .replace(/\bEVM_EVM_PRIVATE_KEY\b/g, "EVM_PRIVATE_KEY")
-      .replace(/\bETHEREUM_PRIVATE_KEY\b/g, "EVM_PRIVATE_KEY")
-      .replace(/\bETH_PRIVATE_KEY\b/g, "EVM_PRIVATE_KEY");
-    
     return { ...file, content: patched };
   });
 }
 
 function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, unknown>) {
-  const solanaSentiment = isSolanaSentimentIntent(intent);
   const initiaSentiment = isInitiaSentimentIntent(intent);
 
-  if (!solanaSentiment && !initiaSentiment) {
+  if (!initiaSentiment) {
     return files;
   }
 
@@ -1094,10 +632,7 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
   const patched = files.map((file) => {
     const cleanPath = file.filepath.replace(/^[./]+/, "");
     if (cleanPath === "src/index.ts") {
-      if (initiaSentiment) {
-        return { ...file, content: buildSafeInitiaSentimentIndexTs() };
-      }
-      return { ...file, content: buildSafeSolanaSentimentIndexTs() };
+      return { ...file, content: buildSafeInitiaSentimentIndexTs() };
     }
 
     if (cleanPath === "src/mcp_bridge.ts") {
@@ -1117,16 +652,10 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
           scripts?: Record<string, string>;
         };
 
-        const dependencies = initiaSentiment
-          ? {
-              ...(parsed.dependencies ?? {}),
-              dotenv: "^16.4.0",
-            }
-          : {
-              ...(parsed.dependencies ?? {}),
-              "@solana/web3.js": "^1.98.0",
-              bs58: "^6.0.0",
-            };
+        const dependencies = {
+          ...(parsed.dependencies ?? {}),
+          dotenv: "^16.4.0",
+        };
 
         const scripts = {
           ...(parsed.scripts ?? {}),
@@ -1136,10 +665,8 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
 
         const nextPkg = {
           ...parsed,
-          name: initiaSentiment ? "initia-sentiment-bot" : "solana-sentiment-bot",
-          description: initiaSentiment
-            ? "Initia sentiment bot using lunarcrush + initia MCP"
-            : "Solana sentiment trading bot using LunarCrush + Webacy + Jupiter",
+          name: "initia-sentiment-bot",
+          description: "Initia sentiment bot using lunarcrush + initia MCP",
           dependencies,
           scripts,
         };
@@ -1170,50 +697,161 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
   }
 
   const fallbackSentimentPackage = JSON.stringify(
-    initiaSentiment
-      ? {
-          name: "initia-sentiment-bot",
-          version: "1.0.0",
-          type: "module",
-          description: "Initia sentiment bot using lunarcrush + initia MCP",
-          scripts: {
-            start: "tsx src/index.ts",
-            dev: "tsx src/index.ts",
-          },
-          dependencies: {
-            dotenv: "^16.4.0",
-          },
-          devDependencies: {
-            typescript: "^5.4.0",
-            "@types/node": "^20.0.0",
-            tsx: "^4.7.0",
-          },
-        }
-      : {
-          name: "solana-sentiment-bot",
-          version: "1.0.0",
-          type: "module",
-          description: "Solana sentiment trading bot using LunarCrush + Webacy + Jupiter",
-          scripts: {
-            start: "tsx src/index.ts",
-            dev: "tsx src/index.ts",
-          },
-          dependencies: {
-            "@solana/web3.js": "^1.98.0",
-            bs58: "^6.0.0",
-            dotenv: "^16.4.0",
-          },
-          devDependencies: {
-            typescript: "^5.4.0",
-            "@types/node": "^20.0.0",
-            tsx: "^4.7.0",
-          },
-        },
+    {
+      name: "initia-sentiment-bot",
+      version: "1.0.0",
+      type: "module",
+      description: "Initia sentiment bot using lunarcrush + initia MCP",
+      scripts: {
+        start: "tsx src/index.ts",
+        dev: "tsx src/index.ts",
+      },
+      dependencies: {
+        dotenv: "^16.4.0",
+      },
+      devDependencies: {
+        typescript: "^5.4.0",
+        "@types/node": "^20.0.0",
+        tsx: "^4.7.0",
+      },
+    },
     null,
     2,
   );
 
   return [...ensuredMcpBridge, { filepath: "package.json", content: fallbackSentimentPackage, language: "json" }];
+}
+
+function buildSafeInitiaYieldConfigTs(): string {
+  return [
+    'export const config = {',
+    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
+    '  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",',
+    '  INITIA_BRIDGE_ADDRESS: process.env.INITIA_BRIDGE_ADDRESS ?? "",',
+    '  SWEEP_THRESHOLD_UUSDC: BigInt(process.env.SWEEP_THRESHOLD_UUSDC ?? "1000000"),',
+    '  POLL_MS: Number(process.env.POLL_MS ?? "15000"),',
+    '};',
+    '',
+    'export const CONFIG = config;',
+  ].join("\n");
+}
+
+function buildSafeInitiaSpreadConfigTs(): string {
+  return [
+    'export const config = {',
+    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
+    '  INITIA_POOL_A_ADDRESS: process.env.INITIA_POOL_A_ADDRESS ?? "",',
+    '  INITIA_POOL_B_ADDRESS: process.env.INITIA_POOL_B_ADDRESS ?? "",',
+    '  ESTIMATED_BRIDGE_FEE_USDC: BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? "5000"),',
+    '  POLL_MS: Number(process.env.POLL_MS ?? "15000"),',
+    '};',
+    '',
+    'export const CONFIG = config;',
+  ].join("\n");
+}
+
+function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
+  const strategy = String(intent.strategy ?? "").toLowerCase();
+  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
+  return strategy === "yield" || strategy === "yield_sweeper" || /sweep|yield/.test(botType);
+}
+
+function isInitiaSpreadScannerIntent(intent: Record<string, unknown>): boolean {
+  const strategy = String(intent.strategy ?? "").toLowerCase();
+  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
+  return strategy === "arbitrage" || /spread scanner|market intelligence/.test(botType);
+}
+
+function isInitiaSentimentIntent(intent: Record<string, unknown>): boolean {
+  const strategy = String(intent.strategy ?? "").toLowerCase();
+  return strategy === "sentiment";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function deriveFallbackIntent(prompt: string): Record<string, unknown> {
+  const lowered = String(prompt ?? "").toLowerCase();
+  const isYield = /(yield sweeper|auto-consolidator|sweep_to_l1|bridge back to l1|sweep)/.test(lowered);
+  const isSentiment = /(sentiment|lunarcrush|social)/.test(lowered);
+  const isCustomUtility = /(custom utility|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(lowered);
+
+  if (isCustomUtility) {
+    return {
+      chain: "initia",
+      network: "initia-testnet",
+      execution_model: "polling",
+      strategy: "custom_utility",
+      bot_type: "Custom Utility Initia Bot",
+      mcps: ["initia"],
+      required_mcps: ["initia"],
+      requires_openai_key: false,
+    };
+  }
+
+  if (isSentiment) {
+    return {
+      chain: "initia",
+      network: "initia-testnet",
+      execution_model: "agentic",
+      strategy: "sentiment",
+      bot_type: "Initia Sentiment Bot",
+      mcps: ["initia", "lunarcrush"],
+      required_mcps: ["initia", "lunarcrush"],
+      requires_openai_key: true,
+    };
+  }
+
+  if (isYield) {
+    return {
+      chain: "initia",
+      network: "initia-testnet",
+      execution_model: "polling",
+      strategy: "yield",
+      bot_type: "Cross-Rollup Yield Sweeper",
+      mcps: ["initia"],
+      required_mcps: ["initia"],
+      requires_openai_key: false,
+    };
+  }
+
+  return {
+    chain: "initia",
+    network: "initia-testnet",
+    execution_model: "polling",
+    strategy: "arbitrage",
+    bot_type: "Cross-Rollup Spread Scanner",
+    mcps: ["initia"],
+    required_mcps: ["initia"],
+    requires_openai_key: false,
+  };
+}
+
+function pickPublicGateway(preferred: string, fallback: string): string {
+  const value = String(preferred ?? "").trim();
+  if (value) return value;
+  return fallback;
+}
+
+function loadAgentEnvDefaults(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const candidates = [
+    path.resolve(process.cwd(), "../agents/.env"),
+    path.resolve(process.cwd(), "../agents/.env.local"),
+  ];
+
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const parsed = parseEnvText(fs.readFileSync(file, "utf8"));
+      Object.assign(out, parsed);
+    } catch {
+      // ignore missing/unreadable defaults
+    }
+  }
+
+  return out;
 }
 
 export async function POST(req: NextRequest) {
@@ -1408,17 +1046,21 @@ export async function POST(req: NextRequest) {
     const botName: string = (intent.bot_name as string) || (intent.bot_type as string) || "Universal DeFi Bot";
 
     // Extract files safely from varying model response shapes
-    const filesList = output.files || (metaData as any).files || [];
+    const fallbackFiles = metaData && typeof metaData === "object" && "files" in metaData
+      ? (metaData as unknown as { files?: unknown }).files
+      : [];
+    const filesList = output.files || fallbackFiles || [];
     const normalizedFiles: GeneratedFile[] = (Array.isArray(filesList) ? filesList : [])
-      .map((raw: any, idx: number) => {
+      .map((raw: unknown, idx: number) => {
+        const candidate = raw as Record<string, unknown>;
         const filepath =
-          (typeof raw?.filepath === "string" && raw.filepath.trim()) ||
-          (typeof raw?.path === "string" && raw.path.trim()) ||
-          (typeof raw?.filename === "string" && raw.filename.trim()) ||
+          (typeof candidate?.filepath === "string" && candidate.filepath.trim()) ||
+          (typeof candidate?.path === "string" && candidate.path.trim()) ||
+          (typeof candidate?.filename === "string" && candidate.filename.trim()) ||
           `generated_${idx + 1}.txt`;
 
-        const content = raw?.content ?? raw?.code ?? raw?.text ?? "";
-        const language = typeof raw?.language === "string" ? raw.language : undefined;
+        const content = candidate?.content ?? candidate?.code ?? candidate?.text ?? "";
+        const language = typeof candidate?.language === "string" ? candidate.language : undefined;
 
         return language ? { filepath, content, language } : { filepath, content };
       })
@@ -1427,7 +1069,7 @@ export async function POST(req: NextRequest) {
     let files = normalizedFiles;
     files = patchInitiaStrategyBotFiles(files, intent, `${originalPrompt}\n${expandedPrompt}`);
     files = patchSentimentBotFiles(files, intent);
-    files = normalizeRuntimeVarNames(files, intent);
+    files = normalizeRuntimeVarNames(files);
 
     console.log(`[generate-bot] [${requestId}] Generated files:`, files.map((f: { filepath: string }) => f.filepath).join(", "));
 

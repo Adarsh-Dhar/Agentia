@@ -47,7 +47,7 @@ class MultiMCPClient:
         Connect to a single MCP server via stdio and register it by name.
 
         Args:
-            name:       Logical server name, e.g. "one_inch", "webacy", "goat_evm"
+            name:       Logical server name, e.g. "initia", "lunarcrush", "pyth"
             command:    Executable to launch, e.g. "npx"
             args:       CLI arguments list
             custom_env: Extra environment variables to inject (API keys, RPC URLs, etc.)
@@ -130,8 +130,8 @@ class MultiMCPClient:
         Call a tool on a named MCP server and return the raw text response.
 
         Args:
-            server: Registered server name, e.g. "one_inch"
-            tool:   Tool name, e.g. "get_quote"
+            server: Registered server name, e.g. "initia"
+            tool:   Tool name, e.g. "move_view"
             args:   Arguments dict
 
         Returns:

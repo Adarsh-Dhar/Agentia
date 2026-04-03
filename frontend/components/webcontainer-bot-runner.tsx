@@ -52,14 +52,12 @@ function strategyBadge(intent?: BotIntent | null) {
 }
 
 function chainBadge(intent?: BotIntent | null): string {
-  if (!intent) return "EVM";
-  if (intent.chain === "solana") return "◎ Solana";
+  if (!intent) return "◇ Initia";
   const nets: Record<string, string> = {
-    "base-sepolia": "⬡ Base Sepolia",
-    "base-mainnet": "⬡ Base",
-    "arbitrum":     "🔴 Arbitrum",
+    "initia-testnet": "◇ Initia Testnet",
+    "initia-mainnet": "◇ Initia Mainnet",
   };
-  return nets[intent.network ?? ""] ?? "⬡ EVM";
+  return nets[intent.network ?? ""] ?? "◇ Initia";
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────

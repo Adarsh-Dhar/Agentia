@@ -21,8 +21,8 @@ export function EnvConfigModal({ envConfig, onChange, onLaunch, isDryRun }: EnvC
         </div>
         <div className="p-5 space-y-3">
           {([
-            { key: "EVM_RPC_URL",    label: "EVM RPC URL (Arbitrum)",    type: "text",     placeholder: "https://arb1.arbitrum.io/rpc" },
-            { key: "EVM_PRIVATE_KEY", label: "EVM Private Key",          type: "password", placeholder: "0x... (leave blank for DRY RUN)" },
+            { key: "INITIA_RPC_URL", label: "Initia RPC URL",            type: "text",     placeholder: "https://rpc.testnet.initia.xyz/" },
+            { key: "INITIA_KEY",     label: "Initia Private Key",        type: "password", placeholder: "0x... (leave blank for DRY RUN)" },
             { key: "CONTRACT_ADDRESS", label: "Contract Address (Deployed)", type: "text", placeholder: "0xff75b696928640096181ba78e3b0e1188bf57393" },
             { key: "MAX_LOAN_USD",    label: "Max Flash Loan (USD)",     type: "number",   placeholder: "10000" },
             { key: "MIN_PROFIT_USD",  label: "Min Profit Target (USD)",  type: "number",   placeholder: "50" },

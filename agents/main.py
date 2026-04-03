@@ -72,14 +72,14 @@ async def mcp_tool(server: str, tool: str, body: dict):
 
     # LunarCrush compatibility
     if server_l == "lunarcrush" and tool_l in {"getsentiment", "get_sentiment", "get_coin_details"}:
-        coin = str(body.get("coin") or body.get("symbol") or "SOL").upper()
+        coin = str(body.get("coin") or body.get("symbol") or "INIT").upper()
         # Lightweight best-effort market proxy data.
         coingecko = _safe_json_get(
-            f"https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
+            f"https://api.coingecko.com/api/v3/simple/price?ids=initia&vs_currencies=usd"
         )
         usd = None
         try:
-            usd = float((coingecko or {}).get("solana", {}).get("usd"))
+            usd = float((coingecko or {}).get("initia", {}).get("usd"))
         except (TypeError, ValueError):
             usd = None
 

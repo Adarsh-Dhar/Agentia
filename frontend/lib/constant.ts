@@ -13,8 +13,8 @@ export const ACTION_LOG_TYPE_MAP: Record<string, string> = {
 };
 
 export const DEFAULT_ENV_CONFIG: EnvConfig = {
-  EVM_RPC_URL:     "https://sepolia-rollup.arbitrum.io/rpc",
-  EVM_PRIVATE_KEY: "",
+  INITIA_RPC_URL:  "https://rpc.testnet.initia.xyz/",
+  INITIA_KEY:      "",
   CONTRACT_ADDRESS: "",
   MAX_LOAN_USD:    "10000",
   MIN_PROFIT_USD:  "50",
@@ -41,12 +41,11 @@ export const ENTRY_POINTS = [
 ];
 
 export const TOKEN_ADDRESSES = {
-  WETH_ADDRESS: "0x980B62Da83eFf3D4576C647993b0c1D7faf17c73",
-  USDC_ADDRESS: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+  WETH_ADDRESS: "uinit",
+  USDC_ADDRESS: "uusdc",
 };
 
 export const SUPPORTED_NETWORKS = [
-  { id: 'arbitrum', name: 'Arbitrum',  icon: '🔴' },
-  { id: 'ethereum', name: 'Ethereum',  icon: '⟠' },
-  { id: 'polygon',  name: 'Polygon',   icon: '🟣' },
+  { id: 'initia-testnet', name: 'Initia Testnet', icon: '◇' },
+  { id: 'initia-mainnet', name: 'Initia Mainnet', icon: '◇' },
 ]
