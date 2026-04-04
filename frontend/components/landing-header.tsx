@@ -8,12 +8,14 @@ import { useInterwovenKit } from '@initia/interwovenkit-react'
 
 export function LandingHeader() {
   const router = useRouter()
-  const { address, initiaAddress, openConnect } = useInterwovenKit()
+  const { address, initiaAddress, username, openConnect } = useInterwovenKit()
 
   const connected = !!(address || initiaAddress)
-  const shortAddr = (initiaAddress ?? address)
-    ? `${(initiaAddress ?? address)!.slice(0, 8)}...`
+  const activeAddress = initiaAddress ?? address
+  const shortAddr = activeAddress
+    ? `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`
     : null
+  const displayName = username ? (username.endsWith(".init") ? username : `${username}.init`) : shortAddr
 
   const handleConnect = async () => {
     if (connected) {
@@ -53,7 +55,7 @@ export function LandingHeader() {
         {connected ? (
           <div className="flex items-center gap-3">
             <span className="hidden sm:block text-xs font-mono text-muted-foreground bg-muted/30 px-3 py-1.5 rounded-full border border-border/50">
-              {shortAddr}
+              {displayName}
             </span>
             <Button
               onClick={() => router.push('/dashboard')}

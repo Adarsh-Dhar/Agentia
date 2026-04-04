@@ -1,10 +1,18 @@
 "use client";
 import { Check, Lock, AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { useInterwovenKit } from "@initia/interwovenkit-react";
+import { MsgGrant } from "cosmjs-types/cosmos/authz/v1beta1/tx.js";
+import { GenericAuthorization, Grant } from "cosmjs-types/cosmos/authz/v1beta1/authz.js";
+import { Timestamp } from "cosmjs-types/google/protobuf/timestamp.js";
+import { Any } from "cosmjs-types/google/protobuf/any.js";
 import { Button } from "./button";
 
 interface SessionKeyConfirmModalProps {
   isOpen: boolean;
   isEnabled: boolean;
+  botAddress: string;
+  userAddress: string;
   onConfirm: () => void;
   onCancel: () => void;
   isDryRun?: boolean;
@@ -13,10 +21,65 @@ interface SessionKeyConfirmModalProps {
 export function SessionKeyConfirmModal({
   isOpen,
   isEnabled,
+  botAddress,
+  userAddress,
   onConfirm,
   onCancel,
   isDryRun = false,
 }: SessionKeyConfirmModalProps) {
+  const { requestTxBlock } = useInterwovenKit();
+  const [isGranting, setIsGranting] = useState(false);
+  const [grantError, setGrantError] = useState<string | null>(null);
+
+  const handleGrantPermission = async () => {
+    if (!userAddress || !botAddress) {
+      setGrantError("Missing user or bot wallet address.");
+      return;
+    }
+
+    setGrantError(null);
+    setIsGranting(true);
+    try {
+      const expiration = new Date();
+      expiration.setDate(expiration.getDate() + 30);
+
+      const authorization = Any.fromPartial({
+        typeUrl: GenericAuthorization.typeUrl,
+        value: GenericAuthorization.encode(
+          GenericAuthorization.fromPartial({
+            msg: "/initia.move.v1.MsgExecute",
+          }),
+        ).finish(),
+      });
+
+      const expirationSeconds = Math.floor(expiration.getTime() / 1000);
+      const expirationNanos = (expiration.getTime() % 1000) * 1_000_000;
+
+      const grantMsg = {
+        typeUrl: MsgGrant.typeUrl,
+        value: MsgGrant.fromPartial({
+          granter: userAddress,
+          grantee: botAddress,
+          grant: Grant.fromPartial({
+            authorization,
+            expiration: Timestamp.fromPartial({
+              seconds: BigInt(expirationSeconds),
+              nanos: expirationNanos,
+            }),
+          }),
+        }),
+      };
+
+      await requestTxBlock({ messages: [grantMsg] });
+      onConfirm();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setGrantError(message || "Failed to submit MsgGrant transaction.");
+    } finally {
+      setIsGranting(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   if (isEnabled) {
@@ -48,12 +111,27 @@ export function SessionKeyConfirmModal({
               <div className="flex items-start gap-3 p-3 bg-slate-950 rounded-lg border border-slate-800">
                 <Check size={16} className="text-green-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1 text-xs text-slate-300">
-                  <p className="font-medium mb-1">Bot can start</p>
+                  <p className="font-medium mb-1">Grant bot execution rights</p>
                   <p className="text-slate-400">
-                    No need to paste your private key. Transactions will be signed via your approved session.
+                    Launch requires on-chain authz: your wallet grants Move execution permission to this bot wallet.
                   </p>
                 </div>
               </div>
+
+              <div className="flex items-start gap-3 p-3 bg-slate-950 rounded-lg border border-slate-800">
+                <Lock size={16} className="text-cyan-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 text-xs text-slate-300 break-all">
+                  <p className="font-medium mb-1">Bot wallet grantee</p>
+                  <p className="text-slate-400">{botAddress || "Unavailable"}</p>
+                </div>
+              </div>
+
+              {grantError && (
+                <div className="flex items-start gap-3 p-3 bg-red-500/10 rounded-lg border border-red-500/30">
+                  <AlertCircle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 text-xs text-red-200">{grantError}</div>
+                </div>
+              )}
 
               {!isDryRun && (
                 <div className="flex items-start gap-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/30">
@@ -73,6 +151,7 @@ export function SessionKeyConfirmModal({
             <Button
               variant="outline"
               size="sm"
+              disabled={isGranting}
               onClick={onCancel}
               className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600"
             >
@@ -80,10 +159,11 @@ export function SessionKeyConfirmModal({
             </Button>
             <Button
               size="sm"
-              onClick={onConfirm}
+              disabled={isGranting || !botAddress || !userAddress}
+              onClick={() => { void handleGrantPermission(); }}
               className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white"
             >
-              Launch Bot
+              {isGranting ? "Granting..." : "Grant & Launch"}
             </Button>
           </div>
         </div>

@@ -116,6 +116,7 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
   const [selectedFile,   setSelectedFile]   = useState<string | null>(null);
   const [agentId,        setAgentId]        = useState<string | null>(null);
   const [botName,        setBotName]        = useState<string>("ArbitrageBot");
+  const [botWalletAddress, setBotWalletAddress] = useState<string>("");
   const [intent,         setIntent]         = useState<BotIntent | null>(null);
 
   const generateFiles = async (specificAgentId?: string) => {
@@ -137,6 +138,7 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
           agentId:  string;
           name:     string;
           files:    BotFile[];
+          walletAddress?: string;
           config?:  Record<string, unknown>;
         } = await dbRes.json();
 
@@ -153,6 +155,7 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
 
           if (data.agentId) setAgentId(data.agentId);
           if (data.name)    setBotName(data.name);
+          setBotWalletAddress(String(data.walletAddress ?? "").trim());
 
           // ── Extract intent ───────────────────────────────────────────
           const detectedIntent = extractIntent(data.config ?? null);
@@ -216,6 +219,7 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
       setGeneratedFiles(data.files);
       setSelectedFile("src/index.ts");
       if (data.agentId) setAgentId(data.agentId);
+      setBotWalletAddress("");
 
       // Demo bot is always Initia
       const demoIntent: BotIntent = {
@@ -246,6 +250,7 @@ export function useBotCodeGen(termRef: MutableRefObject<Terminal | null>) {
     setSelectedFile,
     agentId,
     botName,
+    botWalletAddress,
     intent,
   };
 }

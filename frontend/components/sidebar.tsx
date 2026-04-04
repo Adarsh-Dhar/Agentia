@@ -24,13 +24,14 @@ export function Sidebar() {
   const router   = useRouter()
   const [isOpen, setIsOpen] = useState(false)
 
-  const { address, initiaAddress, disconnect, autoSign } = useInterwovenKit()
+  const { address, initiaAddress, username, disconnect, autoSign } = useInterwovenKit()
 
   const connected  = !!(address || initiaAddress)
   const displayAddr = initiaAddress ?? address
   const shortAddr  = displayAddr
     ? `${displayAddr.slice(0, 8)}...${displayAddr.slice(-4)}`
     : null
+  const displayName = username ? (username.endsWith('.init') ? username : `${username}.init`) : shortAddr
 
   const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
   const autosignExpiry  = autoSign?.expiredAtByChain?.[TESTNET.defaultChainId]
@@ -124,10 +125,10 @@ export function Sidebar() {
 
         {/* Footer */}
         <div className="p-4 border-t border-sidebar-border space-y-3">
-          {connected && shortAddr && (
+          {connected && displayName && (
             <div className="px-3 py-2.5 rounded-lg bg-muted/20 border border-border/50">
-              <p className="text-xs text-muted-foreground mb-0.5">Connected Wallet</p>
-              <p className="text-sm font-mono text-foreground truncate">{shortAddr}</p>
+              <p className="text-xs text-muted-foreground mb-0.5">Connected Identity</p>
+              <p className="text-sm font-mono text-foreground truncate">{displayName}</p>
             </div>
           )}
 

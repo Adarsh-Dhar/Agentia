@@ -90,6 +90,7 @@ export const AgentScalarFieldEnum = {
   name: 'name',
   status: 'status',
   userId: 'userId',
+  walletAddress: 'walletAddress',
   configuration: 'configuration',
   envConfig: 'envConfig',
   sessionKeyPriv: 'sessionKeyPriv',

@@ -51,6 +51,7 @@ model Agent {
   status           AgentStatus  @default(STOPPED)
   userId           String
   user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletAddress    String       @default("")
   configuration    Json?
   envConfig        String?      @db.Text // Encrypted .env (AES-256-GCM)
   sessionKeyPriv   String?      

@@ -72,11 +72,11 @@ export function WebContainerBotRunner() {
   const [showSessionKeyModal, setShowSessionKeyModal] = useState(false);
   const didAutoLaunchRef = useRef(false);
   const shouldAutoLaunchRef = useRef(false);
-  const { autoSign } = useInterwovenKit();
+  const { autoSign, initiaAddress, address } = useInterwovenKit();
 
   const { terminalRef, termRef } = useTerminal();
 
-  const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
+  const { generateFiles, generatedFiles, selectedFile, setSelectedFile, botWalletAddress } = useBotCodeGen(termRef);
 
   const isDryRun = envConfig.SIMULATION_MODE === "true";
 
@@ -91,6 +91,7 @@ export function WebContainerBotRunner() {
   const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false;
   const sessionKey = String((autoSign as { wallet?: { privateKey?: unknown } } | undefined)?.wallet?.privateKey ?? "").trim();
   const sessionKeyActive = autosignEnabled && sessionKey.length > 0;
+  const userWalletAddress = String(initiaAddress ?? address ?? "").trim();
 
   // On mount: load files + env + intent from DB
   useEffect(() => {
@@ -181,6 +182,14 @@ export function WebContainerBotRunner() {
   const isRunning = phase === "running";
 
   const handleLaunch = useCallback(() => {
+    if (!botWalletAddress) {
+      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Bot wallet not found. Regenerate or redeploy this bot.");
+      return;
+    }
+    if (!userWalletAddress) {
+      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Connect wallet before launching the bot.");
+      return;
+    }
     if (!autosignEnabled) {
       setShowSessionKeyModal(true);
       return;
@@ -190,7 +199,7 @@ export function WebContainerBotRunner() {
       return;
     }
     setShowSessionKeyModal(true);
-  }, [autosignEnabled, sessionKey, termRef]);
+  }, [autosignEnabled, botWalletAddress, sessionKey, termRef, userWalletAddress]);
 
   const handleSessionKeyConfirm = useCallback(() => {
     setShowSessionKeyModal(false);
@@ -379,6 +388,8 @@ export function WebContainerBotRunner() {
       <SessionKeyConfirmModal
         isOpen={showSessionKeyModal}
         isEnabled={autosignEnabled}
+        botAddress={botWalletAddress}
+        userAddress={userWalletAddress}
         onConfirm={handleSessionKeyConfirm}
         onCancel={handleSessionKeyCancel}
         isDryRun={isDryRun}

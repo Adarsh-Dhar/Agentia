@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { encryptEnvConfig } from "@/lib/crypto-env";
+import { RawKey } from "@initia/initia.js";
+import { randomBytes } from "node:crypto";
+
+function createBotWallet(): { walletAddress: string; encryptedPrivateKey: string } {
+  const key = new RawKey(randomBytes(32));
+  return {
+    walletAddress: key.accAddress,
+    encryptedPrivateKey: encryptEnvConfig(key.privateKey.toString("hex")),
+  };
+}
 
 // ─── GET: List all agents for a user ─────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -69,13 +80,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { walletAddress, encryptedPrivateKey } = createBotWallet();
+
     const agent = await prisma.agent.create({
       data: {
         userId,
         name,
         status: "STOPPED",
+        walletAddress,
         configuration: configuration ?? null,
-        sessionKeyPriv: sessionKeyPriv ?? null,
+        sessionKeyPriv: sessionKeyPriv ? encryptEnvConfig(String(sessionKeyPriv)) : encryptedPrivateKey,
       },
     });
 

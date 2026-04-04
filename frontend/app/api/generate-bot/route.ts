@@ -4,6 +4,8 @@ import { encryptEnvConfig } from "@/lib/crypto-env";
 import { assembleBotFiles, assembleInitiaBotFiles } from "../get-bot-code/bot-files";
 import { sanitizeIntentMcpLists, shouldUseInitiaDeterministicFallback } from "@/lib/intent/mcp-sanitizer";
 import type { Prisma } from "@/lib/generated/prisma/client.ts";
+import { RawKey } from "@initia/initia.js";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -986,6 +988,15 @@ function loadAgentEnvDefaults(): Record<string, string> {
   return out;
 }
 
+function createBotWallet(): { walletAddress: string; encryptedPrivateKey: string } {
+  const key = new RawKey(randomBytes(32));
+  const privateKeyHex = key.privateKey.toString("hex");
+  return {
+    walletAddress: key.accAddress,
+    encryptedPrivateKey: encryptEnvConfig(privateKeyHex),
+  };
+}
+
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID().slice(0, 8);
   const requestStartedAt = Date.now();
@@ -1245,14 +1256,18 @@ export async function POST(req: NextRequest) {
       originalPrompt, // Keep original for display
     };
 
+    const { walletAddress, encryptedPrivateKey } = createBotWallet();
+
     console.log(`[generate-bot] [${requestId}] Persisting fallback/meta-agent output to DB`);
     const agent = await prisma.agent.create({
       data: {
         name:          botName,
         userId,
         status:        "STOPPED",
+        walletAddress,
         configuration: configRecord,
         envConfig:     encryptedEnv,
+        sessionKeyPriv: encryptedPrivateKey,
         files: {
           create: files.map((f: GeneratedFile) => ({
             filepath: typeof f.filepath === "string" && f.filepath.trim()

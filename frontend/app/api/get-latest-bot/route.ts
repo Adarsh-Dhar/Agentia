@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { decryptEnvConfig } from "@/lib/crypto-env"; // <-- 1. Add this import
+import { decryptEnvConfig, encryptEnvConfig } from "@/lib/crypto-env";
+import { RawKey } from "@initia/initia.js";
+import { randomBytes } from "node:crypto";
 
 export async function GET(req: NextRequest) {
   try {
@@ -24,6 +26,18 @@ export async function GET(req: NextRequest) {
 
     if (!agent) {
       return NextResponse.json({ error: "No bot found." }, { status: 404 });
+    }
+
+    if (!(agent as { walletAddress?: string }).walletAddress) {
+      const key = new RawKey(randomBytes(32));
+      agent = await prisma.agent.update({
+        where: { id: agent.id },
+        data: {
+          walletAddress: key.accAddress,
+          sessionKeyPriv: (agent as { sessionKeyPriv?: string | null }).sessionKeyPriv ?? encryptEnvConfig(key.privateKey.toString("hex")),
+        },
+        include: { files: { orderBy: { createdAt: "asc" } } },
+      });
     }
 
     const config = agent.configuration as Record<string, unknown> | null;
@@ -53,6 +67,7 @@ export async function GET(req: NextRequest) {
       agentId:   agent.id,
       name:      agent.name,
       status:    agent.status,
+      walletAddress: (agent as { walletAddress?: string }).walletAddress ?? "",
       config:    config ?? {},
       createdAt: agent.createdAt,
       files:     mappedFiles, // <-- 4. This now safely contains the .env file
