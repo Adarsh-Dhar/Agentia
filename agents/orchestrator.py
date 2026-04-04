@@ -316,7 +316,7 @@ CORE CONSTRAINTS:
 INITIA RULES:
 - Chain is always Initia.
 - All reads must use callMcpTool('initia', 'move_view', {...}).
-- All writes must use callMcpTool('initia', 'move_execute', {...}).
+  - All writes must use callMcpTool('initia', 'move_execute', {network, address, module, function, type_args, args}).
 - Do not use external chain SDK signing flows for Initia.
 - Do not reference wrapper SDK/plugin layers in code, prose, or dependencies.
 - Always forward INITIA_KEY as header x-session-key when present.
@@ -353,9 +353,13 @@ STRATEGY TEMPLATES:
 
 5. Flash-bridge spatial arbitrageur (strategy: cross_chain_arbitrage):
   - Read comparable prices on two Minitias simultaneously via Promise.allSettled.
-  - Compute spread as BigInt and subtract estimated bridge fees before acting.
-  - Only trade when net spread is positive and above threshold.
+  - Use TRADE_CAPITAL_USDC = 1000000n as the base amount for all pricing.
+  - Quote Pool A with move_view get_amount_out using TRADE_CAPITAL_USDC to get expected_token_output.
+  - Quote Pool B with move_view get_amount_out using expected_token_output to get final_usdc_output.
+  - Compute net profit as final_usdc_output - TRADE_CAPITAL_USDC - estimated bridge fee.
+  - Only trade when net profit is positive and above threshold.
   - Route via L1 using opinit_bridge::initiate_token_deposit for L1 -> Minitia hops and interwoven_bridge::sweep_to_l1 for Minitia -> L1 hops.
+  - If net profit is positive, execute three separate move_execute calls in order: swap USDC -> token, bridge token, swap token -> USDC.
   - Never invent module names.
 
 6. Omni-chain auto-compounder / yield nomad (strategy: cross_chain_sweep):
@@ -677,7 +681,7 @@ class MetaAgent:
             '    address: "0x1",\n'
             '    module: "coin",\n'
             '    function: "balance",\n'
-            '    type_args: ["uusdc"],\n'
+            '    type_args: ["0x1::coin::uusdc"],\n'
             '    args: [String(CONFIG.USER_WALLET_ADDRESS ?? "")],\n'
             '  });\n'
             '  console.log(JSON.stringify(payload));\n'
@@ -712,9 +716,11 @@ class MetaAgent:
 
         initia_mcp_hints = ""
         if "initia" in mcps:
-            initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {transaction: {calls: [{address, module, function, type_args, args}, ...]}})"
-            initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, type_args, args})"
-            initia_mcp_hints += "\nRule: include type_args explicitly for every move_view call (use [] when none)."
+          initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {network, address, module, function, type_args, args})"
+          initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {network, address, module, function, type_args, args})"
+          initia_mcp_hints += "\nRule: include network explicitly on every Initia MCP call."
+          initia_mcp_hints += "\nRule: include type_args explicitly for every move_view call (use [] when none)."
+          initia_mcp_hints += "\nRule: never wrap move_execute in a custom transaction object; issue one move_execute call per on-chain action."
         if is_yield_sweeper or is_cross_chain:
             initia_mcp_hints += """
 \nInterwoven Bridge schema (use these EXACT values — do not invent module names):
@@ -767,7 +773,7 @@ Initia read pattern:
   - For custom utility workflows, follow the exact user prompt and keep the runtime deterministic.
 
 Initia write pattern:
-  - Build one atomic move_execute payload with sequential calls inside transaction.calls when execution is required.
+  - Do not wrap multiple actions inside a custom transaction.calls object. Execute each on-chain action with its own move_execute call in order.
   - No callback contracts, no calldata encoding, no manual signing.
   - MCP signs and submits using x-session-key when provided by INITIA_KEY.
   - INITIA_KEY may be injected at runtime when SESSION_KEY_MODE=true; do not fail process startup if missing.

@@ -240,7 +240,7 @@ async function runCycle(): Promise<void> {
     address: "0x1",
     module: "coin",
     function: "balance",
-    type_args: ["uusdc"],
+    type_args: ["0x1::coin::uusdc"],
     args: [wallet],
   });
 
