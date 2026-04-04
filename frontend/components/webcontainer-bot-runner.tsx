@@ -31,6 +31,14 @@ function isLocalOrProxyGateway(value?: string | null): boolean {
   return /(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(normalized) || /\/api\/mcp-proxy\/?$/i.test(normalized);
 }
 
+function pickReachableGateway(...candidates: Array<string | null | undefined>): string {
+  const cleaned = candidates
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+  const publicGateway = cleaned.find((v) => !isLocalOrProxyGateway(v));
+  return publicGateway || cleaned[0] || "";
+}
+
 // ─── Strategy display helpers ─────────────────────────────────────────────────
 
 function strategyBadge(intent?: BotIntent | null) {
@@ -110,9 +118,12 @@ export function WebContainerBotRunner() {
           ...prev,
           ...result.loadedEnvConfig,
           // Always ensure MCP_GATEWAY_URL is present
-          MCP_GATEWAY_URL: isLocalOrProxyGateway(loadedGateway)
-            ? (sharedGateway || prev.MCP_GATEWAY_URL || DEFAULT_BOT_ENV_CONFIG.MCP_GATEWAY_URL)
-            : (loadedGateway || prev.MCP_GATEWAY_URL || sharedGateway || DEFAULT_BOT_ENV_CONFIG.MCP_GATEWAY_URL),
+          MCP_GATEWAY_URL: pickReachableGateway(
+            loadedGateway,
+            sharedGateway,
+            prev.MCP_GATEWAY_URL,
+            DEFAULT_BOT_ENV_CONFIG.MCP_GATEWAY_URL,
+          ),
         }));
       }
       // Mark env hydration complete even when no .env exists,

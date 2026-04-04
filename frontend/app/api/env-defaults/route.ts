@@ -33,9 +33,40 @@ function parseEnvText(text: string): Record<string, string> {
 
 export async function GET() {
   try {
-    const envPath = path.resolve(process.cwd(), "../agents/.env");
-    const envText = fs.readFileSync(envPath, "utf8");
-    const values = parseEnvText(envText);
+    const values: Record<string, string> = {};
+    const candidates = [
+      path.resolve(process.cwd(), "../agents/.env"),
+      path.resolve(process.cwd(), "../agents/.env.local"),
+    ];
+
+    for (const file of candidates) {
+      try {
+        if (!fs.existsSync(file)) continue;
+        const envText = fs.readFileSync(file, "utf8");
+        Object.assign(values, parseEnvText(envText));
+      } catch {
+        // ignore unreadable files
+      }
+    }
+
+    const mcpCandidates = [
+      values["MCP_GATEWAY_URL"],
+      process.env["MCP_GATEWAY_URL"],
+      process.env["NEXT_PUBLIC_MCP_GATEWAY_URL"],
+    ].map((v) => String(v ?? "").trim()).filter(Boolean);
+
+    const isLocal = (url: string): boolean => {
+      const normalized = String(url || "").trim().toLowerCase();
+      return (
+        normalized.includes("localhost") ||
+        normalized.includes("127.0.0.1") ||
+        normalized.includes("0.0.0.0") ||
+        normalized.includes("192.168.")
+      );
+    };
+
+    const publicMcp = mcpCandidates.find((url) => !isLocal(url));
+    if (publicMcp) values["MCP_GATEWAY_URL"] = publicMcp;
     
     // Ensure Initia RPC URL aliases are always present for discovery
     if (!values["RPC_PROVIDER_URL"] && values["INITIA_RPC_URL"]) {

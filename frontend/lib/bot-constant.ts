@@ -35,7 +35,6 @@ export interface BotEnvConfig {
   INITIA_FLASH_POOL_ADDRESS: string;
   INITIA_SWAP_ROUTER_ADDRESS: string;
   OPENAI_API_KEY: string;
-  LUNARCRUSH_API_KEY: string;
   POLL_INTERVAL: string;
   [key: string]: string;
 }
@@ -60,7 +59,6 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   INITIA_FLASH_POOL_ADDRESS: "",
   INITIA_SWAP_ROUTER_ADDRESS: "",
   OPENAI_API_KEY: "",
-  LUNARCRUSH_API_KEY: "",
   POLL_INTERVAL: "15",
 };
 
@@ -229,15 +227,6 @@ export function getRequiredEnvFields(
     );
   }
 
-  if (mcps.includes("lunarcrush") || strategy.includes("sentiment")) {
-    fields.push({
-      key: "LUNARCRUSH_API_KEY",
-      label: "LunarCrush API Key",
-      type: "password",
-      required: false,
-      placeholder: "your-lunarcrush-api-key",
-    });
-  }
 
   if (intent?.requires_openai ?? intent?.requires_openai_key) {
     fields.push({

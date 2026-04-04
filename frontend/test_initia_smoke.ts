@@ -10,7 +10,7 @@ const INITIA_PROMPT =
   process.env.TEST_INITIA_PROMPT ??
   "Write a Cross-Rollup Yield Sweeper bot in TypeScript: every 15s read 0x1::coin::balance for USER_WALLET_ADDRESS and call interwoven_bridge::sweep_to_l1 when balance > 1000000n";
 
-const INITIA_ALLOWED_MCPS = new Set(["initia", "lunarcrush", "pyth"]);
+const INITIA_ALLOWED_MCPS = new Set(["initia"]);
 
 function assert(condition: boolean, message: string): void {
   if (!condition) {

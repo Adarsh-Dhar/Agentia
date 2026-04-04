@@ -41,7 +41,9 @@ def _log(level: str, message: str, trace_id: str | None = None) -> None:
 # ─── MCP Bridge Template (always the same — hardcoded, not generated) ────────
 
 MCP_BRIDGE_CONTENT = '''\
-import { CONFIG } from "./config.js";
+import * as configModule from "./config.js";
+
+const CONFIG = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,7 +57,15 @@ export async function callMcpTool(
   if (server === "initia" && tool === "move_execute" && !CONFIG.INITIA_KEY) {
     throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");
   }
-  const gatewayBase = CONFIG.MCP_GATEWAY_URL.replace(/\\/+$/, "");
+  const rawGateway = String(
+    CONFIG.MCP_GATEWAY_URL ??
+    process.env.MCP_GATEWAY_URL ??
+    "",
+  ).trim();
+  if (!rawGateway) {
+    throw new Error("MCP_GATEWAY_URL is missing in config/environment");
+  }
+  const gatewayBase = rawGateway.replace(/\\/+$/, "");
   const url = `${gatewayBase}/${server}/${tool}`;
   const attempts = 3;
   let lastError = "unknown error";
@@ -201,13 +211,13 @@ Rules:
 - flash-bridge arbitrage / cross-chain arb / spatial arbitrage -> strategy:"cross_chain_arbitrage", mcps:["initia"]
 - omni-chain yield / yield nomad / auto-compounder -> strategy:"cross_chain_sweep", mcps:["initia"]
 - If prompt asks for a custom utility bot, classify as strategy:"custom_utility" and do not fall back to arbitrage.
-- sentiment / social / lunarcrush -> mcps include "lunarcrush", requires_openai:true
+- sentiment / social -> mcps remain initia-only, requires_openai:true
 - yield sweeper / auto-consolidator / sweep idle funds -> strategy:"yield", mcps:["initia"], requires_openai:false
 - custom utility / custom bot / custom workflow -> strategy:"custom_utility", mcps:["initia"], requires_openai:false
 - spread scanner / read-only arbitrage / no execution -> strategy:"arbitrage", mcps:["initia"], requires_openai:false
 - arbitrage / flash loan / hot potato -> strategy:"arbitrage", mcps:["initia"]
 - for initia arbitrage and yield workflows, do NOT auto-add pyth
-- for initia bots, allowed MCPs are: initia (required), lunarcrush (optional), pyth (optional)
+- for initia bots, allowed MCPs are: initia (required)
 - default network: initia-testnet
 """
 
@@ -512,12 +522,12 @@ class MetaAgent:
         intent["strategy"] = strategy
         bot_name = str(intent.get("bot_name", "")).strip().lower()
 
-        allowed = {"initia", "lunarcrush", "pyth"}
+        allowed = {"initia"}
         cleaned = [m for m in mcps if m in allowed]
         if strategy in {"yield", "arbitrage", "custom_utility", "cross_chain_liquidation", "cross_chain_arbitrage", "cross_chain_sweep"} or "sweep" in bot_name or ("spread" in bot_name and "scanner" in bot_name):
           cleaned = [m for m in cleaned if m == "initia"]
-        elif strategy == "sentiment" and "lunarcrush" not in cleaned:
-          cleaned.append("lunarcrush")
+        elif strategy == "sentiment" and "initia" not in cleaned:
+          cleaned.append("initia")
         if "initia" not in cleaned:
           cleaned.insert(0, "initia")
         intent["mcps"] = list(dict.fromkeys(cleaned))
@@ -564,12 +574,12 @@ class MetaAgent:
       if network not in {"initia-mainnet", "initia-testnet"}:
         network = "initia-testnet"
         intent["network"] = network
-      allowed = {"initia", "lunarcrush", "pyth"}
+      allowed = {"initia"}
       mcps = [m for m in mcps if m in allowed]
-      if strategy_lc in {"yield", "arbitrage", "custom_utility"} or "sweep" in bot_name_lc or ("spread" in bot_name_lc and "scanner" in bot_name_lc):
+      if strategy_lc in {"yield", "arbitrage", "custom_utility", "cross_chain_liquidation", "cross_chain_arbitrage", "cross_chain_sweep"} or "sweep" in bot_name_lc or ("spread" in bot_name_lc and "scanner" in bot_name_lc):
         mcps = [m for m in mcps if m == "initia"]
-      elif strategy_lc == "sentiment" and "lunarcrush" not in mcps:
-        mcps.append("lunarcrush")
+      elif strategy_lc == "sentiment" and "initia" not in mcps:
+        mcps.append("initia")
       if "initia" not in mcps:
         mcps.insert(0, "initia")
       intent["mcps"] = list(dict.fromkeys(mcps))
@@ -643,7 +653,7 @@ class MetaAgent:
           "filepath": "src/config.ts",
           "content": (
             'import "dotenv/config";\n\n'
-            'export const CONFIG = {\n'
+            'export const config = {\n'
             '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp",\n'
             '  INITIA_KEY: process.env.INITIA_KEY ?? "",\n'
             '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",\n'
@@ -651,6 +661,8 @@ class MetaAgent:
             '  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",\n'
             '  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),\n'
             '} as const;\n'
+            '\n'
+            'export const CONFIG = config;\n'
           ),
         })
       if "src/index.ts" not in current_paths:
@@ -703,8 +715,6 @@ class MetaAgent:
             initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {transaction: {calls: [{address, module, function, type_args, args}, ...]}})"
             initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, type_args, args})"
             initia_mcp_hints += "\nRule: include type_args explicitly for every move_view call (use [] when none)."
-        if "lunarcrush" in mcps:
-            initia_mcp_hints += "\nLunarCrush: callMcpTool('lunarcrush', 'get_coin_details', {coin:'INIT'})"
         if is_yield_sweeper or is_cross_chain:
             initia_mcp_hints += """
 \nInterwoven Bridge schema (use these EXACT values — do not invent module names):

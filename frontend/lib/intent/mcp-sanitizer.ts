@@ -1,4 +1,4 @@
-const INITIA_ALLOWED_MCPS = new Set(["initia", "lunarcrush", "pyth"]);
+const INITIA_ALLOWED_MCPS = new Set(["initia"]);
 const INITIA_NETWORKS = new Set(["initia-mainnet", "initia-testnet"]);
 
 function defaultInitiaNetwork(): string {
@@ -59,9 +59,6 @@ export function sanitizeIntentMcpLists(intent: Record<string, unknown>): Record<
   }
 
   if (!nextMcps.includes("initia")) nextMcps.unshift("initia");
-  if (strategy === "sentiment" && !nextMcps.includes("lunarcrush")) {
-    nextMcps.push("lunarcrush");
-  }
 
   return {
     ...intent,

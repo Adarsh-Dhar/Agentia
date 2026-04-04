@@ -7,11 +7,14 @@ FRONTEND_DIR="$ROOT_DIR/frontend"
 
 AGENT_PORT="${AGENT_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+MCP_PORT="${MCP_PORT:-8001}"
 AUTO_KILL_PORTS="${AUTO_KILL_PORTS:-true}"
 
 AGENT_PID=""
+MCP_PID=""
 FRONTEND_PID=""
 SERVICES_STARTED=0
+MCP_READY=0
 FRONTEND_READY=0
 
 wait_for_http() {
@@ -86,14 +89,22 @@ cleanup() {
   log "Shutting down services..."
 
   if [[ "$SERVICES_STARTED" -eq 1 ]]; then
+    kill_process_tree "$MCP_PID"
     kill_process_tree "$AGENT_PID"
     kill_process_tree "$FRONTEND_PID"
     sleep 2
+    force_kill_process_tree "$MCP_PID"
     force_kill_process_tree "$AGENT_PID"
     force_kill_process_tree "$FRONTEND_PID"
   fi
 
   local pid
+  pid="$(find_listener_pid "$MCP_PORT")"
+  if [[ -n "$pid" ]]; then
+    log "Killing lingering process on port $MCP_PORT (PID $pid)..."
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+
   pid="$(find_listener_pid "$AGENT_PORT")"
   if [[ -n "$pid" ]]; then
     log "Killing lingering process on port $AGENT_PORT (PID $pid)..."
@@ -169,6 +180,13 @@ if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
 fi
 
 if [[ "$AUTO_KILL_PORTS" == "true" ]]; then
+  pid="$(find_listener_pid "$MCP_PORT")"
+  if [[ -n "$pid" ]]; then
+    log "Port $MCP_PORT is busy (PID $pid). Stopping existing process..."
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 1
+  fi
+
   pid="$(find_listener_pid "$AGENT_PORT")"
   if [[ -n "$pid" ]]; then
     log "Port $AGENT_PORT is busy (PID $pid). Stopping existing process..."
@@ -182,6 +200,36 @@ if [[ "$AUTO_KILL_PORTS" == "true" ]]; then
     kill -TERM "$pid" 2>/dev/null || true
     sleep 1
   fi
+fi
+
+# Check and install MCP server dependencies
+log "Checking MCP server dependencies..."
+if [[ ! -d "$AGENTS_DIR/initia-mcp-server/node_modules" ]]; then
+  log "Installing MCP server dependencies with npm..."
+  (
+    cd "$AGENTS_DIR/initia-mcp-server"
+    npm install 2>&1 | head -20
+  ) || {
+    error "Failed to install MCP server dependencies"
+    exit 1
+  }
+fi
+
+log "Starting native Initia MCP server on port $MCP_PORT..."
+(
+  cd "$AGENTS_DIR/initia-mcp-server"
+  exec npm run dev 2>&1
+) &
+MCP_PID="$!"
+
+log "Waiting for MCP server to be ready..."
+if wait_for_http "http://127.0.0.1:$MCP_PORT/health" "http://localhost:$MCP_PORT/health" 15; then
+  MCP_READY=1
+  success "MCP server is ready!"
+else
+  error "MCP server failed to start (health check timed out after 15s)"
+  kill "$MCP_PID" 2>/dev/null || true
+  exit 1
 fi
 
 log "Starting Meta-Agent on port $AGENT_PORT..."
@@ -228,9 +276,10 @@ if [[ "$FRONTEND_READY" -ne 1 ]]; then
 fi
 
 success "All services started successfully!"
-log "Frontend: http://127.0.0.1:$FRONTEND_PORT"
+log "MCP Server: http://127.0.0.1:$MCP_PORT"
 log "Meta-Agent: http://127.0.0.1:$AGENT_PORT"
-log "Press Ctrl+C to stop both cleanly."
+log "Frontend: http://127.0.0.1:$FRONTEND_PORT"
+log "Press Ctrl+C to stop all cleanly."
 
 while true; do
   if ! kill -0 "$AGENT_PID" 2>/dev/null; then

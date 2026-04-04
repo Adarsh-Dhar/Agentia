@@ -70,30 +70,6 @@ async def mcp_tool(server: str, tool: str, body: dict, request: Request):
     server_l = server.strip().lower()
     tool_l = tool.strip().lower()
 
-    # LunarCrush compatibility
-    if server_l == "lunarcrush" and tool_l in {"getsentiment", "get_sentiment", "get_coin_details"}:
-        coin = str(body.get("coin") or body.get("symbol") or "INIT").upper()
-        # Lightweight best-effort market proxy data.
-        coingecko = _safe_json_get(
-            f"https://api.coingecko.com/api/v3/simple/price?ids=initia&vs_currencies=usd"
-        )
-        usd = None
-        try:
-            usd = float((coingecko or {}).get("initia", {}).get("usd"))
-        except (TypeError, ValueError):
-            usd = None
-
-        sentiment = {
-            "coin": coin,
-            "sentiment": 55,
-            "galaxy_score": 52,
-            "available": True,
-            "source": "mcp-http-compat",
-            "price_usd": usd,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        return _mcp_ok(sentiment)
-
     # Webacy / GoPlus-style risk compatibility
     if server_l in {"webacy", "goplus"} and tool_l in {"getrisk", "get_token_risk", "token_risk"}:
         address = str(body.get("address") or "")

@@ -75,7 +75,7 @@ POLL_INTERVAL=15
 
 const INITIA_CONFIG_TS = `import "dotenv/config";
 
-export const CONFIG = {
+export const config = {
   MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),
   INITIA_KEY: process.env.INITIA_KEY ?? "",
   SESSION_KEY_MODE: process.env.SESSION_KEY_MODE ?? "false",
@@ -93,12 +93,16 @@ export const CONFIG = {
   SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",
   POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),
 } as const;
+
+export const CONFIG = config;
 `;
 
-const INITIA_MCP_BRIDGE_TS = `import { CONFIG } from "./config.js";
+const INITIA_MCP_BRIDGE_TS = `import * as configModule from "./config.js";
+
+const CONFIG = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;
 
 function normalizeGatewayBase(raw: string): string {
-  const value = String(raw || "").trim().replace(/\\/+$/, "");
+  const value = String(raw || "").trim().replace(/\/+$/, "");
   return /\\/mcp$/i.test(value) ? value : value + "/mcp";
 }
 

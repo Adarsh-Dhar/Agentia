@@ -47,7 +47,7 @@ class MultiMCPClient:
         Connect to a single MCP server via stdio and register it by name.
 
         Args:
-            name:       Logical server name, e.g. "initia", "lunarcrush", "pyth"
+            name:       Logical server name, e.g. "initia"
             command:    Executable to launch, e.g. "npx"
             args:       CLI arguments list
             custom_env: Extra environment variables to inject (API keys, RPC URLs, etc.)

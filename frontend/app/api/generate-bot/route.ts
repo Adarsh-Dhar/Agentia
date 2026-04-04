@@ -379,6 +379,12 @@ function patchInitiaStrategyBotFiles(
         content: isYieldSweeper ? buildSafeInitiaYieldConfigTs() : buildSafeInitiaSpreadConfigTs(),
       };
     }
+    if (cleanPath === "src/ons_resolver.ts") {
+      return {
+        ...file,
+        content: buildSafeInitiaOnsResolverTs(),
+      };
+    }
     return file;
   });
 }
@@ -482,11 +488,14 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '  const poolBAddress = requireConfiguredAddress("INITIA_POOL_B_ADDRESS", process.env.INITIA_POOL_B_ADDRESS ?? "");',
     '  const flashPoolAddress = requireConfiguredAddress("INITIA_FLASH_POOL_ADDRESS", process.env.INITIA_FLASH_POOL_ADDRESS ?? "");',
     '  const swapRouterAddress = requireConfiguredAddress("INITIA_SWAP_ROUTER_ADDRESS", process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "");',
-    '  const [sentiment] = await Promise.all([',
-    '    safeMcp("lunarcrush", "get_coin_details", { coin: "INIT", symbol: "INIT" }),',
-    '  ]);',
     '  const { poolA, poolB } = await fetchPrices(poolAAddress, poolBAddress);',
     '  const spread = poolA > poolB ? poolA - poolB : poolB - poolA;',
+    '  const signedDelta = poolB > poolA ? poolB - poolA : -(poolA - poolB);',
+    '  const sentiment = {',
+    '    result: {',
+    '      content: [{ text: JSON.stringify({ sentiment: Math.max(0, Math.min(100, 50 + Number(signedDelta / 100000n))) }) }],',
+    '    },',
+    '  };',
     '',
     '  const score = extractScore(sentiment);',
     '  log("INFO", "Sentiment score=" + score);',
@@ -703,7 +712,7 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
         const nextPkg = {
           ...parsed,
           name: "initia-sentiment-bot",
-          description: "Initia sentiment bot using lunarcrush + initia MCP",
+          description: "Initia sentiment bot using initia MCP",
           dependencies,
           scripts,
         };
@@ -738,7 +747,7 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
       name: "initia-sentiment-bot",
       version: "1.0.0",
       type: "module",
-      description: "Initia sentiment bot using lunarcrush + initia MCP",
+      description: "Initia sentiment bot using initia MCP",
       scripts: {
         start: "tsx src/index.ts",
         dev: "tsx src/index.ts",
@@ -777,6 +786,8 @@ function buildSafeInitiaYieldConfigTs(): string {
 function buildSafeInitiaSpreadConfigTs(): string {
   return [
     'export const config = {',
+    '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "",',
+    '  INITIA_KEY: process.env.INITIA_KEY ?? "",',
     '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
     '  INITIA_POOL_A_ADDRESS: process.env.INITIA_POOL_A_ADDRESS ?? "",',
     '  INITIA_POOL_B_ADDRESS: process.env.INITIA_POOL_B_ADDRESS ?? "",',
@@ -790,7 +801,8 @@ function buildSafeInitiaSpreadConfigTs(): string {
     '};',
     '',
     'export const CONFIG = config;',
- 
+  ].join("\n");
+}
 
 function buildSafeInitiaOnsResolverTs(): string {
   return [
@@ -863,8 +875,6 @@ function buildSafeInitiaOnsResolverTs(): string {
     '',
   ].join("\n");
 }
- ].join("\n");
-}
 
 function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
   const strategy = String(intent.strategy ?? "").toLowerCase();
@@ -894,7 +904,7 @@ function deriveFallbackIntent(prompt: string): Record<string, unknown> {
   const isCrossChainArbitrage = /(flash[-. ]bridge|spatial arb|cross[-. ]chain arb)/.test(lowered);
   const isCrossChainSweep = /(yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(lowered);
   const isYield = /(yield sweeper|auto-consolidator|sweep_to_l1|bridge back to l1|sweep)/.test(lowered);
-  const isSentiment = /(sentiment|lunarcrush|social)/.test(lowered);
+  const isSentiment = /(sentiment|social)/.test(lowered);
   const isCustomUtility = /(custom utility|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(lowered);
 
   if (isCrossChainLiquidation) {
@@ -959,8 +969,8 @@ function deriveFallbackIntent(prompt: string): Record<string, unknown> {
       execution_model: "agentic",
       strategy: "sentiment",
       bot_type: "Initia Sentiment Bot",
-      mcps: ["initia", "lunarcrush"],
-      required_mcps: ["initia", "lunarcrush"],
+      mcps: ["initia"],
+      required_mcps: ["initia"],
       requires_openai_key: true,
     };
   }
@@ -992,8 +1002,22 @@ function deriveFallbackIntent(prompt: string): Record<string, unknown> {
 
 function pickPublicGateway(preferred: string, fallback: string): string {
   const value = String(preferred ?? "").trim();
+  const backup = String(fallback ?? "").trim();
+
+  const isLocal = (url: string): boolean => {
+    const normalized = String(url || "").trim().toLowerCase();
+    return (
+      normalized.includes("localhost") ||
+      normalized.includes("127.0.0.1") ||
+      normalized.includes("0.0.0.0") ||
+      normalized.includes("192.168.")
+    );
+  };
+
+  if (value && !isLocal(value)) return value;
+  if (backup && !isLocal(backup)) return backup;
   if (value) return value;
-  return fallback;
+  return backup;
 }
 
 function loadAgentEnvDefaults(): Record<string, string> {

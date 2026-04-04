@@ -21,7 +21,7 @@ Cover ALL of the following in your expansion:
    - Graceful shutdown, SIGINT/SIGTERM handling
 
 3. **Required Data Sources & APIs**:
-  - List every MCP server or REST API needed (for example Initia MCP for Move reads/writes, LunarCrush for sentiment, and any analytics APIs required by the strategy)
+  - List every MCP server or REST API needed for Initia-native reads/writes and any on-chain data sources required by the strategy
    - For each: what data it provides, what endpoint/tool to call, what fields to parse
 
 4. **Step-by-Step Trading Logic**:
@@ -67,7 +67,7 @@ Required schema:
   "network": "initia-mainnet" | "initia-testnet",
   "execution_model": "polling" | "websocket" | "agentic",
   "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "yield_sweeper" | "cross_chain_liquidation" | "cross_chain_arbitrage" | "cross_chain_sweep" | "custom_utility" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
-  "required_mcps": ["initia","lunarcrush","pyth"],
+  "required_mcps": ["initia"],
   "bot_type": "human-readable bot name",
   "requires_openai_key": true | false
 }
@@ -79,12 +79,12 @@ Classification rules (first match wins):
 - flash-bridge arbitrage / cross-chain arb / spatial arbitrage → strategy:"cross_chain_arbitrage", required_mcps:["initia"]
 - omni-chain yield / yield nomad / auto-compounder → strategy:"cross_chain_sweep", required_mcps:["initia"]
 - if request asks for a custom utility bot, classify as strategy:"custom_utility" with required_mcps:["initia"] and bot_type:"Custom Utility Initia Bot".
-- sentiment | social | LunarCrush → execution_model:"agentic", strategy:"sentiment", required_mcps:["initia","lunarcrush"], requires_openai_key:true
+- sentiment | social → execution_model:"agentic", strategy:"sentiment", required_mcps:["initia"], requires_openai_key:true
 - yield sweeper | auto-consolidator | consolidate idle funds → execution_model:"polling", strategy:"yield", required_mcps:["initia"]
 - spread scanner | read-only arbitrage | market intelligence scanner → execution_model:"polling", strategy:"arbitrage", required_mcps:["initia"]
 - flash loan | arbitrage | hot potato → execution_model:"polling", strategy:"arbitrage", required_mcps:["initia"]
 - otherwise default execution_model:"polling", strategy:"unknown", required_mcps:["initia"]
-- if chain is initia, allow only these MCPs: initia (required), lunarcrush (optional), pyth (optional)
+- if chain is initia, allow only these MCPs: initia (required)
 - for initia yield sweeper flows, do NOT include pyth and do NOT imply amm_oracle usage
 - default network if unspecified → "initia-testnet"`;
 
@@ -95,7 +95,7 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
   const isCrossChainArbitrage = /(flash[-. ]bridge|spatial arb|cross[-. ]chain arb)/.test(mergedPrompt);
   const isCrossChainSweep = /(yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(mergedPrompt);
   const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(mergedPrompt);
-  const isSentiment = /(sentiment|lunarcrush|social)/.test(mergedPrompt);
+  const isSentiment = /(sentiment|social)/.test(mergedPrompt);
   const isCustomUtility = /(custom utility|custom bot|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(mergedPrompt);
 
   const normalized: Record<string, unknown> = {
@@ -179,8 +179,8 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
   if (isSentiment) {
     normalized.execution_model = "agentic";
     normalized.strategy = "sentiment";
-    normalized.required_mcps = ["initia", "lunarcrush"];
-    normalized.mcps = ["initia", "lunarcrush"];
+    normalized.required_mcps = ["initia"];
+    normalized.mcps = ["initia"];
     normalized.requires_openai_key = true;
     normalized.requires_openai = true;
     return normalized;
@@ -357,7 +357,7 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
   const isCrossChainSweep = /(yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(lower);
   const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|sweep|consolidate|sweep_to_l1|bridge back to l1|consolidate idle funds)/.test(lower);
   const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(lower);
-  const isInitiaSentiment = lower.includes("sentiment") || lower.includes("lunarcrush") || lower.includes("social");
+  const isInitiaSentiment = lower.includes("sentiment") || lower.includes("social");
   const isCustomUtility = /(custom utility|custom bot|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(lower);
   const initiaNetwork = lower.includes("mainnet") ? "initia-mainnet" : "initia-testnet";
   let strategy = "unknown";
@@ -390,7 +390,7 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
     execution_model: isInitiaSentiment ? "agentic" : "polling",
     strategy,
     required_mcps: ["initia"],
-    mcps: ["initia", ...(isInitiaSentiment ? ["lunarcrush"] : [])],
+    mcps: ["initia"],
     bot_type: botName,
     bot_name: botName,
     requires_openai: isInitiaSentiment,
