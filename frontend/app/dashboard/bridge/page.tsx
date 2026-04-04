@@ -6,32 +6,385 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowRight, Zap, Shield, ExternalLink } from 'lucide-react'
-import { useInterwovenKit } from '@initia/interwovenkit-react'
-import { SUPPORTED_NETWORKS } from '@/lib/constant'
+import { TESTNET, useInterwovenKit } from '@initia/interwovenkit-react'
+
+type BridgeNotice = {
+  kind: 'success' | 'error'
+  message: string
+}
+
+const BRIDGE_NETWORKS = [
+  { id: TESTNET.defaultChainId, name: 'Initia Testnet', icon: '◇' },
+]
+
+type EnvValues = Record<string, string>
+
+type SpreadSnapshot = {
+  poolA: number | null
+  poolB: number | null
+  spreadAbs: number | null
+  spreadPct: number | null
+}
+
+type SpreadImpact = {
+  before: SpreadSnapshot
+  after: SpreadSnapshot
+  deltaAbs: number | null
+  deltaPct: number | null
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function extractQuoteValue(payload: unknown): number | null {
+  if (payload && typeof payload === 'object') {
+    const root = payload as Record<string, unknown>
+    const direct = toFiniteNumber(root.balance ?? root.amount ?? root.value ?? root.coin_amount)
+    if (direct !== null) return direct
+
+    const result = root.result
+    if (result && typeof result === 'object') {
+      const nested = result as Record<string, unknown>
+      const nestedDirect = toFiniteNumber(nested.balance ?? nested.amount ?? nested.value ?? nested.coin_amount)
+      if (nestedDirect !== null) return nestedDirect
+
+      const content = nested.content
+      if (Array.isArray(content)) {
+        for (const item of content) {
+          if (!item || typeof item !== 'object') continue
+          const text = (item as Record<string, unknown>).text
+          if (typeof text !== 'string') continue
+          const digits = text.replace(/[^0-9.]/g, '')
+          const parsed = toFiniteNumber(digits)
+          if (parsed !== null) return parsed
+        }
+      }
+    }
+  }
+
+  if (typeof payload === 'string') {
+    const match = payload.match(/[0-9]+(?:\.[0-9]+)?/)
+    if (!match) return null
+    return toFiniteNumber(match[0])
+  }
+
+  return null
+}
+
+function buildPriceViewArgs(template: string, endpointAddress: string): string[] {
+  return template
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (part === '$endpoint' ? endpointAddress : part))
+}
+
+function normalizeInitiaObjectAddress(value: string): string {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('init1')) return trimmed
+
+  let hex = trimmed
+  if (trimmed.startsWith('move/')) {
+    hex = trimmed.slice(5)
+  }
+
+  hex = hex.replace(/^0x/i, '').toLowerCase()
+
+  if (!hex) return ''
+  if (hex.length < 64) {
+    hex = hex.padStart(64, '0')
+  }
+
+  return `0x${hex}`
+}
+
+function normalizeInitiaModuleAddress(value: string): string {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('move/')) {
+    return `0x${trimmed.slice(5).replace(/^0x/i, '').toLowerCase()}`
+  }
+  if (trimmed.startsWith('0x') || trimmed.startsWith('init1')) {
+    return trimmed
+  }
+  return `0x${trimmed.replace(/^0x/i, '').toLowerCase()}`
+}
+
+function computeSnapshot(poolA: number | null, poolB: number | null): SpreadSnapshot {
+  if (poolA === null || poolB === null) {
+    return { poolA, poolB, spreadAbs: null, spreadPct: null }
+  }
+
+  const spreadAbs = Math.abs(poolA - poolB)
+  const base = Math.min(poolA, poolB)
+  const spreadPct = base > 0 ? (spreadAbs / base) * 100 : null
+  return { poolA, poolB, spreadAbs, spreadPct }
+}
+
+function fmt(value: number | null, digits = 2): string {
+  if (value === null || !Number.isFinite(value)) return 'n/a'
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}
+
+function extractMcpErrorText(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return ''
+
+  const root = payload as Record<string, unknown>
+  const result = root.result
+  if (!result || typeof result !== 'object') return ''
+
+  const content = (result as Record<string, unknown>).content
+  if (!Array.isArray(content)) return ''
+
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue
+    const text = (item as Record<string, unknown>).text
+    if (typeof text === 'string' && text.trim()) return text
+  }
+
+  return ''
+}
 
 export default function BridgePage() {
-  const { address, initiaAddress } = useInterwovenKit()
+  const { address, initiaAddress, openConnect, openDeposit, openBridge } = useInterwovenKit()
   const connected = !!(address || initiaAddress)
 
-  const [fromNetwork, setFromNetwork] = useState('')
+  const [fromNetwork, setFromNetwork] = useState(TESTNET.defaultChainId)
   const [amount,      setAmount]      = useState('')
   const [isBridging,  setIsBridging]  = useState(false)
-  const [success,     setSuccess]     = useState(false)
+  const [bridgeNotice, setBridgeNotice] = useState<BridgeNotice | null>(null)
+  const [fatPool, setFatPool] = useState('A')
+  const [fatAmount, setFatAmount] = useState('50000')
+  const [fatDirection, setFatDirection] = useState<'buy' | 'sell'>('buy')
+  const [isFatSwapping, setIsFatSwapping] = useState(false)
+  const [fatResult, setFatResult] = useState<string | null>(null)
+  const [spreadImpact, setSpreadImpact] = useState<SpreadImpact | null>(null)
 
   const bridgeFee    = 0.5
   const receiveAmt   = amount && parseFloat(amount) > 0
     ? Math.max(0, parseFloat(amount) - bridgeFee).toFixed(2)
     : '0.00'
-  const isFormValid  = connected && fromNetwork && amount && parseFloat(amount) > 0
+  const isFormValid  = !!(fromNetwork && amount && parseFloat(amount) > 0)
 
-  const handleBridge = () => {
-    if (!isFormValid) return
+  const handleBridge = async () => {
     setIsBridging(true)
-    setTimeout(() => {
+    setBridgeNotice(null)
+
+    try {
+      if (!connected) {
+        openConnect()
+        setBridgeNotice({
+          kind: 'error',
+          message: 'Connect your wallet first.',
+        })
+        return
+      }
+
+      openDeposit()
+      setBridgeNotice({
+        kind: 'success',
+        message: 'Bridge modal opened.',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setBridgeNotice({
+        kind: 'error',
+        message: `Unable to open bridge modal: ${message}`,
+      })
+    } finally {
       setIsBridging(false)
-      setSuccess(true)
-      setTimeout(() => { setSuccess(false); setAmount(''); setFromNetwork('') }, 3500)
-    }, 2000)
+    }
+  }
+
+  const callMcpTool = async (
+    tool: 'move_view' | 'move_execute',
+    body: Record<string, unknown>,
+    mcpGatewayUrl: string,
+  ): Promise<unknown> => {
+    const res = await fetch(`/api/mcp-proxy/initia/${tool}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mcp-upstream-url': mcpGatewayUrl,
+      },
+      body: JSON.stringify(body),
+    })
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const rich = extractMcpErrorText(data)
+      throw new Error(rich || JSON.stringify(data).slice(0, 1200))
+    }
+
+    const embeddedError = extractMcpErrorText(data)
+    if (embeddedError) {
+      throw new Error(embeddedError)
+    }
+
+    return data
+  }
+
+  const sampleSpread = async (values: EnvValues): Promise<SpreadSnapshot | null> => {
+    const mcpGateway = values['MCP_GATEWAY_URL'] || 'http://localhost:8000/mcp'
+    const network = values['INITIA_NETWORK'] || 'initia-testnet'
+    const poolAAddress = normalizeInitiaObjectAddress(values['INITIA_POOL_A_ADDRESS'] || '')
+    const poolBAddress = normalizeInitiaObjectAddress(values['INITIA_POOL_B_ADDRESS'] || '')
+    const viewAddress = normalizeInitiaModuleAddress(values['INITIA_PRICE_VIEW_ADDRESS'] || '')
+    const viewModule = values['INITIA_PRICE_VIEW_MODULE'] || ''
+    const viewFunction = values['INITIA_PRICE_VIEW_FUNCTION'] || ''
+    const typeArgsRaw = values['INITIA_PRICE_VIEW_TYPE_ARGS'] || '0x1::coin::uinit,0x1::coin::uusdc'
+    const viewArgsTemplate = values['INITIA_PRICE_VIEW_ARGS'] || '$endpoint'
+
+    if (!poolAAddress || !poolBAddress || !viewAddress || !viewModule || !viewFunction) {
+      return null
+    }
+
+    const typeArgs = typeArgsRaw.split(',').map((part) => part.trim()).filter(Boolean)
+
+    const [poolAResult, poolBResult] = await Promise.allSettled([
+      callMcpTool('move_view', {
+        network,
+        address: viewAddress,
+        module: viewModule,
+        function: viewFunction,
+        type_args: typeArgs,
+        args: buildPriceViewArgs(viewArgsTemplate, poolAAddress),
+      }, mcpGateway),
+      callMcpTool('move_view', {
+        network,
+        address: viewAddress,
+        module: viewModule,
+        function: viewFunction,
+        type_args: typeArgs,
+        args: buildPriceViewArgs(viewArgsTemplate, poolBAddress),
+      }, mcpGateway),
+    ])
+
+    const poolAQuote = poolAResult.status === 'fulfilled' ? extractQuoteValue(poolAResult.value) : null
+    const poolBQuote = poolBResult.status === 'fulfilled' ? extractQuoteValue(poolBResult.value) : null
+    return computeSnapshot(poolAQuote, poolBQuote)
+  }
+
+  const handleFatFinger = async () => {
+    setIsFatSwapping(true)
+    setFatResult(null)
+    setSpreadImpact(null)
+
+    try {
+      const envRes = await fetch('/api/env-defaults')
+      const envData = await envRes.json().catch(() => ({}))
+      const values = (envData?.values ?? {}) as EnvValues
+
+      const poolAAddress = normalizeInitiaObjectAddress(values['INITIA_POOL_A_ADDRESS'] || '')
+      const poolBAddress = normalizeInitiaObjectAddress(values['INITIA_POOL_B_ADDRESS'] || '')
+      const poolAddress = fatPool === 'A' ? poolAAddress : poolBAddress
+      const mcpGateway = values['MCP_GATEWAY_URL'] || 'http://localhost:8000/mcp'
+      const network = values['INITIA_NETWORK'] || 'initia-testnet'
+
+      if (!poolAAddress || !poolBAddress) {
+        setFatResult('Error: Set INITIA_POOL_A_ADDRESS and INITIA_POOL_B_ADDRESS in agents/.env first.')
+        return
+      }
+
+      if (!poolAddress) {
+        setFatResult('Error: Pool address is empty.')
+        return
+      }
+
+      const amountValue = Number(fatAmount)
+      if (!Number.isFinite(amountValue) || amountValue <= 0) {
+        setFatResult('Error: Enter a valid swap amount greater than 0.')
+        return
+      }
+
+      const amountMicro = String(Math.floor(amountValue * 1_000_000))
+      const typeArgsRaw = values['INITIA_PRICE_VIEW_TYPE_ARGS'] || '0x1::coin::uinit,0x1::coin::uusdc'
+      const baseTypeArgs = typeArgsRaw.split(',').map((part) => part.trim()).filter(Boolean)
+      const usdcMetadataAddress = normalizeInitiaObjectAddress(values['INITIA_USDC_METADATA_ADDRESS'] || '')
+      const initMetadataAddress = normalizeInitiaObjectAddress(values['INITIA_INIT_METADATA_ADDRESS'] || '')
+
+      if (baseTypeArgs.length < 2) {
+        setFatResult('Error: INITIA_PRICE_VIEW_TYPE_ARGS must contain two comma-separated coin types.')
+        return
+      }
+
+      if (!usdcMetadataAddress || !initMetadataAddress) {
+        setFatResult('Error: Set INITIA_USDC_METADATA_ADDRESS and INITIA_INIT_METADATA_ADDRESS in agents/.env first.')
+        return
+      }
+
+      const spreadBefore = await sampleSpread(values)
+
+      const offerMetadata = fatDirection === 'buy' ? usdcMetadataAddress : initMetadataAddress
+      const returnMetadata = fatDirection === 'buy' ? initMetadataAddress : usdcMetadataAddress
+
+      await callMcpTool('move_execute', {
+        network,
+        address: '0x1',
+        module: 'dex',
+        function: 'swap_script',
+        type_args: [],
+        args: [
+          poolAddress,
+          offerMetadata,
+          returnMetadata,
+          amountMicro,
+        ],
+      }, mcpGateway)
+
+      const spreadAfter = await sampleSpread(values)
+      if (spreadBefore && spreadAfter) {
+        setSpreadImpact({
+          before: spreadBefore,
+          after: spreadAfter,
+          deltaAbs:
+            spreadBefore.spreadAbs !== null && spreadAfter.spreadAbs !== null
+              ? spreadAfter.spreadAbs - spreadBefore.spreadAbs
+              : null,
+          deltaPct:
+            spreadBefore.spreadPct !== null && spreadAfter.spreadPct !== null
+              ? spreadAfter.spreadPct - spreadBefore.spreadPct
+              : null,
+        })
+      }
+
+      setFatResult(
+        `Done! Swapped ${fatAmount} ${fatDirection === 'buy' ? 'USDC→INIT' : 'INIT→USDC'} on Pool ${fatPool}. Your bot should fire within the next poll cycle.`,
+      )
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      if (/invalid address/i.test(message)) {
+        setFatResult(
+          'Error: One of the pool or metadata addresses is not a valid Initia object address. Use 0x... or move/... values from Initiascan.',
+        )
+        return
+      }
+      if (/TYPE_RESOLUTION_FAILURE/i.test(message)) {
+        setFatResult(
+          'Error: TYPE_RESOLUTION_FAILURE. INITIA_USDC_METADATA_ADDRESS and INITIA_INIT_METADATA_ADDRESS must be valid Object<Metadata> addresses for this network.',
+        )
+      } else if (/FAILED_TO_DESERIALIZE_ARGUMENT/i.test(message) && /object does not hold the type/i.test(message)) {
+        setFatResult(
+          'Error: Pool address is not the expected LP metadata object for this swap module. Verify INITIA_POOL_A_ADDRESS / INITIA_POOL_B_ADDRESS are the correct pool object addresses for this network.',
+        )
+      } else {
+        setFatResult(`Error: ${message}`)
+      }
+    } finally {
+      setIsFatSwapping(false)
+    }
   }
 
   return (
@@ -54,9 +407,14 @@ export default function BridgePage() {
                 </div>
               )}
 
-              {success && (
-                <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm font-medium">
-                  ✓ Successfully bridged {amount} USDC from {SUPPORTED_NETWORKS.find(n => n.id === fromNetwork)?.name}!
+              {bridgeNotice && (
+                <div className={`mb-6 p-4 rounded-lg text-sm font-medium border ${
+                  bridgeNotice.kind === 'success'
+                    ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                    : 'bg-destructive/10 border-destructive/30 text-destructive'
+                }`}>
+                  {bridgeNotice.kind === 'success' ? '✓ ' : ''}
+                  {bridgeNotice.message}
                 </div>
               )}
 
@@ -68,7 +426,7 @@ export default function BridgePage() {
                       <SelectValue placeholder="Select source network…" />
                     </SelectTrigger>
                     <SelectContent>
-                      {SUPPORTED_NETWORKS.map(n => (
+                      {BRIDGE_NETWORKS.map(n => (
                         <SelectItem key={n.id} value={n.id}>
                           {n.icon} {n.name}
                         </SelectItem>
@@ -125,7 +483,7 @@ export default function BridgePage() {
                   {isBridging ? (
                     <><div className="animate-spin mr-2 w-4 h-4 border-2 border-transparent border-t-primary-foreground rounded-full" />Bridging…</>
                   ) : (
-                    <><Zap size={20} className="mr-2" />Bridge & Deposit Instantly</>
+                    <><Zap size={20} className="mr-2" />Open Bridge Modal</>
                   )}
                 </Button>
 
@@ -190,6 +548,113 @@ export default function BridgePage() {
                   Initia&apos;s 100ms block times mean deposits arrive almost instantly after bridge confirmation.
                 </p>
               </div>
+            </div>
+
+            {/* Fat Finger Trade Panel */}
+            <div className="lg:col-span-3 bg-card border border-border rounded-lg p-6 mt-2">
+              <div className="flex items-center gap-2 mb-4">
+                <Zap size={18} className="text-yellow-400" />
+                <h3 className="font-semibold text-foreground">Fat Finger Trade (Testnet)</h3>
+                <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">
+                  Imbalances a pool to trigger your spread scanner bot
+                </span>
+              </div>
+
+              <p className="text-sm text-muted-foreground mb-4">
+                Executes a massive one-sided swap on the selected pool to create an artificial price spread.
+                Your running spread scanner bot will detect it and fire.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <Label className="mb-2 block text-xs">Pool to imbalance</Label>
+                  <Select value={fatPool} onValueChange={setFatPool}>
+                    <SelectTrigger className="bg-background border-border h-10">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="A">Pool A (Minitia A)</SelectItem>
+                      <SelectItem value="B">Pool B (Minitia B)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="mb-2 block text-xs">Direction</Label>
+                  <Select value={fatDirection} onValueChange={(v) => setFatDirection(v as 'buy' | 'sell')}>
+                    <SelectTrigger className="bg-background border-border h-10">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="buy">Buy INIT with USDC (raises INIT price)</SelectItem>
+                      <SelectItem value="sell">Sell INIT for USDC (lowers INIT price)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="mb-2 block text-xs">Swap amount (USDC)</Label>
+                  <Input
+                    type="number"
+                    value={fatAmount}
+                    onChange={(e) => setFatAmount(e.target.value)}
+                    className="bg-background border-border h-10"
+                    placeholder="50000"
+                  />
+                </div>
+              </div>
+
+              <Button
+                onClick={handleFatFinger}
+                disabled={isFatSwapping || !connected}
+                className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20 w-full sm:w-auto"
+                variant="outline"
+              >
+                {isFatSwapping ? (
+                  <><div className="animate-spin mr-2 w-4 h-4 border-2 border-transparent border-t-yellow-400 rounded-full" />Executing swap...</>
+                ) : (
+                  <><Zap size={16} className="mr-2" />Execute Fat Finger Swap</>
+                )}
+              </Button>
+
+              {spreadImpact && (
+                <div className="mt-4 p-4 rounded-lg text-sm border bg-primary/5 border-primary/20">
+                  <p className="text-muted-foreground mb-2">Spread Impact</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-md bg-background/70 border border-border p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Before</p>
+                      <p className="font-medium">A: {fmt(spreadImpact.before.poolA, 0)}</p>
+                      <p className="font-medium">B: {fmt(spreadImpact.before.poolB, 0)}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Spread: {fmt(spreadImpact.before.spreadAbs, 0)} ({fmt(spreadImpact.before.spreadPct)}%)
+                      </p>
+                    </div>
+                    <div className="rounded-md bg-background/70 border border-border p-3">
+                      <p className="text-xs text-muted-foreground mb-1">After</p>
+                      <p className="font-medium">A: {fmt(spreadImpact.after.poolA, 0)}</p>
+                      <p className="font-medium">B: {fmt(spreadImpact.after.poolB, 0)}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Spread: {fmt(spreadImpact.after.spreadAbs, 0)} ({fmt(spreadImpact.after.spreadPct)}%)
+                      </p>
+                    </div>
+                    <div className="rounded-md bg-background/70 border border-border p-3">
+                      <p className="text-xs text-muted-foreground mb-1">Delta</p>
+                      <p className="font-medium">Abs: {fmt(spreadImpact.deltaAbs, 0)}</p>
+                      <p className="font-medium">Pct: {fmt(spreadImpact.deltaPct)}%</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {fatResult && (
+                <div className={`mt-4 p-3 rounded-lg text-sm border ${
+                  fatResult.startsWith('Error')
+                    ? 'bg-destructive/10 border-destructive/30 text-destructive'
+                    : 'bg-green-500/10 border-green-500/30 text-green-400'
+                }`}>
+                  {fatResult}
+                </div>
+              )}
             </div>
           </div>
         </div>

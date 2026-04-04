@@ -232,7 +232,7 @@ Rules:
 - sentiment / social -> mcps remain initia-only, requires_openai:true
 - yield sweeper / auto-consolidator / sweep idle funds -> strategy:"yield", mcps:["initia"], requires_openai:false
 - custom utility / custom bot / custom workflow -> strategy:"custom_utility", mcps:["initia"], requires_openai:false
-- spread scanner / read-only arbitrage / no execution -> strategy:"arbitrage", mcps:["initia"], requires_openai:false
+  - spread scanner / arbitrage / profitable spread bots -> strategy:"arbitrage", mcps:["initia"], requires_openai:false
 - arbitrage / flash loan / hot potato -> strategy:"arbitrage", mcps:["initia"]
 - for initia arbitrage and yield workflows, do NOT auto-add pyth
 - for initia bots, allowed MCPs are: initia (required)
@@ -383,10 +383,9 @@ STRATEGY TEMPLATES:
   - FOR DEX QUOTES (move_view): MUST use address: '0x1', module: 'dex', function: 'get_amount_out'.
   - For Pool A quote: type_args: ['0x1::coin::uusdc', '0x1::coin::uinit'], args: [CONFIG.INITIA_POOL_A_ADDRESS, "1000000"].
   - For Pool B quote: type_args: ['0x1::coin::uinit', '0x1::coin::uusdc'], args: [CONFIG.INITIA_POOL_B_ADDRESS, expected_token_output].
-  - Compute net profit. If > 0, execute 3 separate move_execute calls in order:
-    1) Swap on A: address: '0x1', module: 'dex', function: 'swap_exact_in', type_args: ['0x1::coin::uusdc', '0x1::coin::uinit'], args: [CONFIG.INITIA_POOL_A_ADDRESS, "1000000"]
-    2) Bridge: address: CONFIG.INITIA_BRIDGE_ADDRESS, module: 'interwoven_bridge', function: 'send_to_rollup', type_args: [], args: ['minitia-b', poolAOutput.toString()]
-    3) Swap on B: address: '0x1', module: 'dex', function: 'swap_exact_in', type_args: ['0x1::coin::uinit', '0x1::coin::uusdc'], args: [CONFIG.INITIA_POOL_B_ADDRESS, poolAOutput.toString()]
+  - Compute net profit. If > 0, execute the configured router with move_execute using CONFIG.INITIA_SWAP_ROUTER_ADDRESS, CONFIG.INITIA_SWAP_ROUTER_MODULE, CONFIG.INITIA_SWAP_ROUTER_FUNCTION, CONFIG.INITIA_SWAP_ROUTER_TYPE_ARGS, and CONFIG.INITIA_SWAP_ROUTER_ARGS.
+  - The generated bot must not stop at logging when net profit is positive.
+  - Use a configurable execution amount via CONFIG.INITIA_EXECUTION_AMOUNT_USDC and pass the buy/sell endpoint addresses into the router args template.
   - ALL type_args MUST be fully qualified (e.g. 0x1::coin::uusdc), NEVER just "uusdc" or "uinit".
   - CRITICAL: move_view returns an object. To get the price, you MUST extract it like this: BigInt((quote as any).result.amount). Never cast the raw result object to BigInt.
 
@@ -789,6 +788,11 @@ Required config values:
   INITIA_POOL_B_ADDRESS
   INITIA_FLASH_POOL_ADDRESS
   INITIA_SWAP_ROUTER_ADDRESS
+  INITIA_SWAP_ROUTER_MODULE
+  INITIA_SWAP_ROUTER_FUNCTION
+  INITIA_SWAP_ROUTER_TYPE_ARGS
+  INITIA_SWAP_ROUTER_ARGS
+  INITIA_EXECUTION_AMOUNT_USDC
   USER_WALLET_ADDRESS
   INITIA_BRIDGE_ADDRESS
 
@@ -823,13 +827,13 @@ Yield sweeper pattern (if strategy is yield):
   - Execute with module interwoven_bridge/function sweep_to_l1 and args [balance.toString()].
   - Handle endpoint errors per-cycle without crashing.
 
-Spread scanner pattern (if strategy is read-only arbitrage scanner):
-  - Read-only operation with move_view only.
+Spread scanner pattern (if strategy is arbitrage / spread scanner):
+  - Read quotes with move_view, compute spread, and execute when net profit is positive.
   - Never treat raw wallet balances as market price; use a verified DEX/oracle view function for quote/price data.
   - Configure INITIA_PRICE_VIEW_TYPE_ARGS with required Move type tags for the quote function (comma-separated string in env/config).
   - Do not issue quote move_view calls with empty type_args when the function expects generic coin types.
-  - Query comparable prices across endpoints, compute spread, subtract bridge fee, log net opportunity.
-  - Never call move_execute in scanner mode.
+  - Query comparable prices across endpoints, compute spread, subtract bridge fee, and if net opportunity > 0 call move_execute against the configured router.
+  - If no verified router configuration is present, log a warning and skip execution rather than inventing a contract.
 
 Custom utility pattern (if strategy is custom_utility):
   - Do exactly what the user asked, no arbitrage framing.

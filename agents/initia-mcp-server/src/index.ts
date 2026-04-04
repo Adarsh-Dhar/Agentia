@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { MsgExecute, RESTClient, Wallet, RawKey } from '@initia/initia.js';
+import { MsgExecuteJSON, RESTClient, Wallet, RawKey } from '@initia/initia.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../../.env') });
@@ -237,14 +237,15 @@ app.post('/initia/move_execute', async (req, res) => {
 
     const typeArgsArray = parseStringArray(type_args);
     const parsedArgs = parseStringArray(args);
+    const jsonArgs = parsedArgs.map(toMoveJsonArg);
 
-    const msg = new MsgExecute(
+    const msg = new MsgExecuteJSON(
       wallet.key.accAddress,
       address,
       module,
       funcName,
       typeArgsArray,
-      parsedArgs,
+      jsonArgs,
     );
 
     const tx = await wallet.createAndSignTx({ msgs: [msg] });

@@ -1,8 +1,13 @@
 {
-  "servers": {
-    "initia-docs": {
-      "type": "http",
-      "url": "https://docs.initia.xyz/mcp"
-    }
-  }
+	"servers": {
+		"initia-docs": {
+			"type": "http",
+			"url": "https://docs.initia.xyz/mcp"
+		},
+		"Initia Docs": {
+			"url": "https://docs.initia.xyz/mcp",
+			"type": "http"
+		}
+	},
+	"inputs": []
 }

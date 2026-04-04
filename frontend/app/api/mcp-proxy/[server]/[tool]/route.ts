@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 
 function normalizeGatewayBase(raw: string): string {
-  let base = String(raw || "").trim().replace(/\/+$/, "");
-  if (!base) return "";
-  if (!/\/mcp$/i.test(base)) base += "/mcp";
-  return base;
+  return String(raw || "").trim().replace(/\/+$/, "");
+}
+
+function buildUpstreamCandidates(gateway: string, server: string, tool: string): string[] {
+  const base = normalizeGatewayBase(gateway);
+  if (!base) return [];
+
+  const withMcp = /\/mcp$/i.test(base) ? base : `${base}/mcp`;
+  const withoutMcp = base.replace(/\/mcp$/i, "");
+
+  const candidates = [
+    `${withMcp}/${server}/${tool}`,
+    `${withoutMcp}/${server}/${tool}`,
+  ];
+
+  return Array.from(new Set(candidates));
 }
 
 export async function POST(
@@ -29,7 +41,7 @@ export async function POST(
     );
   }
 
-  const upstreamUrl = `${gateway}/${server}/${tool}`;
+  const upstreamCandidates = buildUpstreamCandidates(gateway, server, tool);
 
   let payload: unknown;
   try {
@@ -39,24 +51,44 @@ export async function POST(
   }
 
   try {
-    const upstream = await fetch(upstreamUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true",
-        "Bypass-Tunnel-Reminder": "true",
-      },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
+    let lastBodyText = "";
+    let lastStatus = 502;
+    let lastContentType = "application/json";
+    let lastUrl = upstreamCandidates[0] || "";
 
-    const contentType = upstream.headers.get("content-type") || "application/json";
-    const bodyText = await upstream.text();
+    for (const upstreamUrl of upstreamCandidates) {
+      lastUrl = upstreamUrl;
+      const upstream = await fetch(upstreamUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          "Bypass-Tunnel-Reminder": "true",
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
 
-    return new NextResponse(bodyText, {
-      status: upstream.status,
+      lastStatus = upstream.status;
+      lastContentType = upstream.headers.get("content-type") || "application/json";
+      lastBodyText = await upstream.text();
+
+      // Retry on obvious path mismatch. Return immediately for all other statuses.
+      if (upstream.status !== 404) {
+        return new NextResponse(lastBodyText, {
+          status: lastStatus,
+          headers: {
+            "Content-Type": lastContentType,
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+    }
+
+    return new NextResponse(lastBodyText, {
+      status: lastStatus,
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": lastContentType,
         "Cache-Control": "no-store",
       },
     });
@@ -65,7 +97,7 @@ export async function POST(
     return NextResponse.json(
       {
         error: "Upstream MCP request failed",
-        upstreamUrl,
+        upstreamUrl: upstreamCandidates[0] || "",
         details: message,
       },
       { status: 502 },
