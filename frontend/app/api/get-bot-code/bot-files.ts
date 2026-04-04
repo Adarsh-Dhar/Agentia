@@ -102,31 +102,49 @@ const INITIA_MCP_BRIDGE_TS = `import * as configModule from "./config.js";
 const CONFIG = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;
 
 function normalizeGatewayBase(raw: string): string {
-  const value = String(raw || "").trim().replace(/\/+$/, "");
-  return /\\/mcp$/i.test(value) ? value : value + "/mcp";
+  return String(raw || "").trim().replace(/\\/+$/, "");
+}
+
+function buildCandidateUrls(base: string, server: string, tool: string): string[] {
+  const withMcp = /\\/mcp$/i.test(base) ? base : base + "/mcp";
+  const withoutMcp = withMcp.replace(/\\/mcp$/i, "");
+  return [
+    withMcp + "/" + server + "/" + tool,
+    withoutMcp + "/" + server + "/" + tool,
+  ];
 }
 
 export async function callMcpTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
-  if (server === "initia" && tool === "move_execute" && !CONFIG.INITIA_KEY) {
+  const initiaKey = String(CONFIG.INITIA_KEY ?? "").trim();
+  if (server === "initia" && tool === "move_execute" && !initiaKey) {
     throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");
   }
-  const base = normalizeGatewayBase(CONFIG.MCP_GATEWAY_URL);
-  const url = base + "/" + server + "/" + tool;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(CONFIG.INITIA_KEY ? { "x-session-key": CONFIG.INITIA_KEY } : {}),
-      "ngrok-skip-browser-warning": "true",
-      "Bypass-Tunnel-Reminder": "true",
-    },
-    body: JSON.stringify(args ?? {}),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error("MCP call failed: " + res.status + " " + body);
+  const base = normalizeGatewayBase(String(CONFIG.MCP_GATEWAY_URL ?? ""));
+  const urls = buildCandidateUrls(base, server, tool);
+
+  let lastError = "unknown error";
+  for (const url of urls) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(initiaKey ? { "x-session-key": initiaKey } : {}),
+        "ngrok-skip-browser-warning": "true",
+        "Bypass-Tunnel-Reminder": "true",
+      },
+      body: JSON.stringify(args ?? {}),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      lastError = "MCP call failed: " + res.status + " " + body;
+      if (res.status === 404) {
+        continue;
+      }
+      throw new Error(lastError);
+    }
+    return res.json();
   }
-  return res.json();
+  throw new Error(lastError);
 }
 `;
 

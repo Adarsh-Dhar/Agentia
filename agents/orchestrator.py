@@ -49,24 +49,37 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizeGatewayBase(raw: string): string {
+  return String(raw || "").trim().replace(/\\/+$/, "");
+}
+
+function buildCandidateUrls(base: string, server: string, tool: string): string[] {
+  const withMcp = /\/mcp$/i.test(base) ? base : base + "/mcp";
+  const withoutMcp = withMcp.replace(/\/mcp$/i, "");
+  return [
+    `${withMcp}/${server}/${tool}`,
+    `${withoutMcp}/${server}/${tool}`,
+  ];
+}
+
 export async function callMcpTool(
   server: string,
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  if (server === "initia" && tool === "move_execute" && !CONFIG.INITIA_KEY) {
+  const initiaKey = String(CONFIG.INITIA_KEY ?? "").trim();
+  if (server === "initia" && tool === "move_execute" && !initiaKey) {
     throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");
   }
-  const rawGateway = String(
+  const rawGateway = normalizeGatewayBase(String(
     CONFIG.MCP_GATEWAY_URL ??
     process.env.MCP_GATEWAY_URL ??
-    "",
-  ).trim();
+    ""
+  ));
   if (!rawGateway) {
     throw new Error("MCP_GATEWAY_URL is missing in config/environment");
   }
-  const gatewayBase = rawGateway.replace(/\\/+$/, "");
-  const url = `${gatewayBase}/${server}/${tool}`;
+  const urls = buildCandidateUrls(rawGateway, server, tool);
   const attempts = 3;
   let lastError = "unknown error";
 
@@ -74,28 +87,33 @@ export async function callMcpTool(
   console.log(`[MCP] Request args: ${JSON.stringify(args)}`);
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      console.log(`[MCP] URL: ${url} (attempt ${attempt}/${attempts})`);
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(CONFIG.INITIA_KEY ? { "x-session-key": CONFIG.INITIA_KEY } : {}),
-          "ngrok-skip-browser-warning": "true",
-          "Bypass-Tunnel-Reminder": "true",
-        },
-        body: JSON.stringify(args),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+    for (const url of urls) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      try {
+        console.log(`[MCP] URL: ${url} (attempt ${attempt}/${attempts})`);
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(initiaKey ? { "x-session-key": initiaKey } : {}),
+            "ngrok-skip-browser-warning": "true",
+            "Bypass-Tunnel-Reminder": "true",
+          },
+          body: JSON.stringify(args),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
 
-      if (!response.ok) {
-        const errText = await response.text();
-        lastError = `MCP ${server}/${tool} failed: ${response.status} — ${errText}`;
-        console.error(`[MCP] ✗ Response status: ${response.status}`);
-      } else {
+        if (!response.ok) {
+          const errText = await response.text();
+          lastError = `MCP ${server}/${tool} failed: ${response.status} — ${errText}`;
+          console.error(`[MCP] ✗ Response status: ${response.status}`);
+          if (response.status === 404) {
+            continue;
+          }
+          break;
+        }
         const data = await response.json();
         console.log(`[MCP] ✓ Response received:`, JSON.stringify(data).substring(0, 200));
         const result = (data as { result?: { isError?: boolean; content?: unknown } })?.result;
@@ -107,11 +125,11 @@ export async function callMcpTool(
           throw new Error(`MCP ${server}/${tool} error: ${detail}`);
         }
         return data;
+      } catch (err) {
+        clearTimeout(timeout);
+        lastError = err instanceof Error ? err.message : String(err);
+        console.error(`[MCP] ✗ Error: ${lastError}`);
       }
-    } catch (err) {
-      clearTimeout(timeout);
-      lastError = err instanceof Error ? err.message : String(err);
-      console.error(`[MCP] ✗ Error: ${lastError}`);
     }
     if (attempt < attempts) await sleep(400 * attempt);
   }
@@ -267,6 +285,14 @@ def _normalize_generated_filepath(raw_path: object) -> str:
   return path
 
 
+def _sanitize_mcp_bridge_content(content: object) -> str:
+  text = str(content or "")
+  # Guard against malformed slash regex emitted by broken escaping.
+  text = text.replace('replace(//+$/, "")', 'replace(/\\/+$/, "")')
+  text = text.replace("replace(//+$/, '')", "replace(/\\/+$/, '')")
+  return text
+
+
 # ─── Bot Generator System Prompt ─────────────────────────────────────────────
 
 GENERATOR_SYSTEM = """\
@@ -323,6 +349,7 @@ INITIA RULES:
 - Use the exact MCP server names from the intent's mcps list.
 - Never invent module or function names. Only use names explicitly supported by the prompt context.
 - Never inject mocked balance/price values into production generation paths.
+- CRITICAL: move_view returns a JSON object, not an array. Extract values from payload.result. NEVER use .forEach().
 
 STRATEGY TEMPLATES:
 1. Yield sweeper:
@@ -352,15 +379,16 @@ STRATEGY TEMPLATES:
   - Never invent health factor function names.
 
 5. Flash-bridge spatial arbitrageur (strategy: cross_chain_arbitrage):
-  - Read comparable prices on two Minitias simultaneously via Promise.allSettled.
-  - Use TRADE_CAPITAL_USDC = 1000000n as the base amount for all pricing.
-  - Quote Pool A with move_view get_amount_out using TRADE_CAPITAL_USDC to get expected_token_output.
-  - Quote Pool B with move_view get_amount_out using expected_token_output to get final_usdc_output.
-  - Compute net profit as final_usdc_output - TRADE_CAPITAL_USDC - estimated bridge fee.
-  - Only trade when net profit is positive and above threshold.
-  - Route via L1 using opinit_bridge::initiate_token_deposit for L1 -> Minitia hops and interwoven_bridge::sweep_to_l1 for Minitia -> L1 hops.
-  - If net profit is positive, execute three separate move_execute calls in order: swap USDC -> token, bridge token, swap token -> USDC.
-  - Never invent module names.
+  - Read prices on two endpoints using move_view.
+  - FOR DEX QUOTES (move_view): MUST use address: '0x1', module: 'dex', function: 'get_amount_out'.
+  - For Pool A quote: type_args: ['0x1::coin::uusdc', '0x1::coin::uinit'], args: [CONFIG.INITIA_POOL_A_ADDRESS, "1000000"].
+  - For Pool B quote: type_args: ['0x1::coin::uinit', '0x1::coin::uusdc'], args: [CONFIG.INITIA_POOL_B_ADDRESS, expected_token_output].
+  - Compute net profit. If > 0, execute 3 separate move_execute calls in order:
+    1) Swap on A: address: '0x1', module: 'dex', function: 'swap_exact_in', type_args: ['0x1::coin::uusdc', '0x1::coin::uinit'], args: [CONFIG.INITIA_POOL_A_ADDRESS, "1000000"]
+    2) Bridge: address: CONFIG.INITIA_BRIDGE_ADDRESS, module: 'interwoven_bridge', function: 'send_to_rollup', type_args: [], args: ['minitia-b', poolAOutput.toString()]
+    3) Swap on B: address: '0x1', module: 'dex', function: 'swap_exact_in', type_args: ['0x1::coin::uinit', '0x1::coin::uusdc'], args: [CONFIG.INITIA_POOL_B_ADDRESS, poolAOutput.toString()]
+  - ALL type_args MUST be fully qualified (e.g. 0x1::coin::uusdc), NEVER just "uusdc" or "uinit".
+  - CRITICAL: move_view returns an object. To get the price, you MUST extract it like this: BigInt((quote as any).result.amount). Never cast the raw result object to BigInt.
 
 6. Omni-chain auto-compounder / yield nomad (strategy: cross_chain_sweep):
   - Read APYs from multiple Minitia pools each cycle.
@@ -628,6 +656,10 @@ class MetaAgent:
         })
 
       files = normalized_files
+      for file_entry in files:
+        if str(file_entry.get("filepath", "")) == "src/mcp_bridge.ts":
+          # Always enforce the canonical bridge implementation.
+          file_entry["content"] = MCP_BRIDGE_CONTENT
       existing_paths = {str(f.get("filepath", "")) for f in files}
 
       if "src/mcp_bridge.ts" not in existing_paths:
@@ -681,7 +713,7 @@ class MetaAgent:
             '    address: "0x1",\n'
             '    module: "coin",\n'
             '    function: "balance",\n'
-            '    type_args: ["0x1::coin::uusdc"],\n'
+            '    type_args: ["0x1::coin::uinit"],\n'
             '    args: [String(CONFIG.USER_WALLET_ADDRESS ?? "")],\n'
             '  });\n'
             '  console.log(JSON.stringify(payload));\n'
@@ -716,9 +748,10 @@ class MetaAgent:
 
         initia_mcp_hints = ""
         if "initia" in mcps:
-          initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {network, address, module, function, type_args, args})"
-          initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {network, address, module, function, type_args, args})"
-          initia_mcp_hints += "\nRule: include network explicitly on every Initia MCP call."
+          initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {network: '<network_id>', address, module, function, type_args, args})"
+          initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {network: '<network_id>', address, module, function, type_args, args})"
+          initia_mcp_hints += "\nRule: include type_args explicitly for every move_view call (use [] when none)."
+          initia_mcp_hints += "\nRule: The response from move_view is a JSON Object (e.g. { result: ... }), NEVER an array. Do NOT use .forEach() on the MCP response payload."
           initia_mcp_hints += "\nRule: include type_args explicitly for every move_view call (use [] when none)."
           initia_mcp_hints += "\nRule: never wrap move_execute in a custom transaction object; issue one move_execute call per on-chain action."
         if is_yield_sweeper or is_cross_chain:
@@ -748,8 +781,8 @@ Network IDs:
   initia-testnet: initiation-2
 
 Canonical denoms (denom/module-driven, not universal ERC-20 addresses):
-  INIT: uinit
-  USDC: uusdc (deployment-specific; verify per Minitia)
+  INIT: 0x1::coin::uinit (MUST be fully qualified)
+  USDC: 0x1::coin::uusdc (MUST be fully qualified)
 
 Required config values:
   INITIA_POOL_A_ADDRESS
