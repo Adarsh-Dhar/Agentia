@@ -47,11 +47,12 @@ export function sanitizeIntentMcpLists(intent: Record<string, unknown>): Record<
     .filter((name) => INITIA_ALLOWED_MCPS.has(name))
     .filter((name, index, arr) => arr.indexOf(name) === index);
 
-  const isYieldSweeper = strategy === "yield" || /sweep|consolidator|consolidate/.test(botLabel);
+  const isYieldSweeper = strategy === "yield" || strategy === "cross_chain_sweep" || /sweep|consolidator|consolidate/.test(botLabel);
   const isSpreadScanner = /spread/.test(botLabel) && /scanner/.test(botLabel);
   const isCustomUtility = strategy === "custom_utility" || /custom utility|custom bot|custom workflow/.test(botLabel);
+  const isCrossChain = strategy === "cross_chain_liquidation" || strategy === "cross_chain_arbitrage";
 
-  if (isYieldSweeper || isSpreadScanner || isCustomUtility || strategy === "arbitrage") {
+  if (isYieldSweeper || isSpreadScanner || isCustomUtility || isCrossChain || strategy === "arbitrage") {
     const initiaOnly = nextMcps.filter((name) => name === "initia");
     nextMcps.length = 0;
     nextMcps.push(...initiaOnly);

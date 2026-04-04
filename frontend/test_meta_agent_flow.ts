@@ -6,7 +6,7 @@ const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:3000";
 const META_AGENT_URL = process.env.META_AGENT_URL ?? "http://127.0.0.1:8000";
 const PROMPT =
   process.env.TEST_PROMPT ??
-  "Write a Cross-Rollup Yield Sweeper bot in TypeScript that checks 0x1::coin::balance for USER_WALLET_ADDRESS and executes interwoven_bridge::sweep_to_l1 when balance > 1000000n";
+  "Write a flash-bridge spatial arbitrage bot in TypeScript that compares two Initia Minitia pools, bridges through L1 using opinit_bridge::initiate_token_deposit, and sells the spread once it is profitable";
 const MAX_ATTEMPTS = Number(process.env.TEST_MAX_ATTEMPTS ?? "3");
 const GENERATE_TIMEOUT_MS = Number(process.env.TEST_GENERATE_TIMEOUT_MS ?? "420000");
 
@@ -131,7 +131,7 @@ async function run(): Promise<void> {
       assert(files.length > 0, "files list is empty in success response");
       assert(missing.length === 0, `missing required generated files: ${missing.join(", ")}`);
       assert(chain === "initia", `expected chain=initia but got ${chain || "<empty>"}`);
-      assert(strategy === "yield", `expected strategy=yield but got ${strategy || "<empty>"}`);
+      assert(strategy === "cross_chain_arbitrage", `expected strategy=cross_chain_arbitrage but got ${strategy || "<empty>"}`);
       assert(/"type"\s*:\s*"module"/.test(packageContent), "package.json should use ESM modules");
       assert(/"start"\s*:\s*"tsx src\/index\.ts"/.test(packageContent), "package.json should start with tsx src/index.ts");
       assert(/"dotenv"/.test(packageContent), "package.json should include dotenv");
@@ -145,15 +145,13 @@ async function run(): Promise<void> {
           mcpBridgeContent.includes("Bypass-Tunnel-Reminder"),
         "generated src/mcp_bridge.ts is missing required tunnel bypass headers",
       );
-      assert(/callmcptool\s*\(\s*["']initia["']\s*,\s*["']move_view["']/.test(loweredIndex), "generated index must use initia/move_view");
-      assert(loweredIndex.includes('module: "coin"') || loweredIndex.includes("module: 'coin'"), "generated index must query coin module");
-      assert(loweredIndex.includes('function: "balance"') || loweredIndex.includes("function: 'balance'"), "generated index must query balance function");
-      assert(loweredIndex.includes("user_wallet_address"), "generated index must reference USER_WALLET_ADDRESS");
       assert(/callmcptool\s*\(\s*["']initia["']\s*,\s*["']move_execute["']/.test(loweredIndex), "generated index must use initia/move_execute");
+      assert(loweredIndex.includes('module: "opinit_bridge"') || loweredIndex.includes("module: 'opinit_bridge'"), "generated index must execute opinit_bridge module");
+      assert(loweredIndex.includes('function: "initiate_token_deposit"') || loweredIndex.includes("function: 'initiate_token_deposit'"), "generated index must execute initiate_token_deposit function");
       assert(loweredIndex.includes('module: "interwoven_bridge"') || loweredIndex.includes("module: 'interwoven_bridge'"), "generated index must execute interwoven_bridge module");
       assert(loweredIndex.includes('function: "sweep_to_l1"') || loweredIndex.includes("function: 'sweep_to_l1'"), "generated index must execute sweep_to_l1 function");
       assert(!loweredIndex.includes("amm_oracle"), "generated index must not use amm_oracle");
-      assert(!/callmcptool\s*\(\s*["']pyth["']/.test(loweredIndex), "generated index must not call pyth for yield sweeper");
+      assert(!/callmcptool\s*\(\s*["']pyth["']/.test(loweredIndex), "generated index must not call pyth for cross-chain arbitrage");
       assert(!loweredIndex.includes("0xinitia_pool_a"), "generated index must not include fake pool placeholder addresses");
       assert(!loweredIndex.includes("0xinitia_pool_b"), "generated index must not include fake pool placeholder addresses");
       assert(!loweredIndex.includes("bypassing oracle fetch"), "generated index must not inject fake oracle bypass logic");

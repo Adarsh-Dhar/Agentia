@@ -326,7 +326,8 @@ function patchInitiaStrategyBotFiles(
   }
 
   const normalizedPrompt = String(promptText ?? "").toLowerCase();
-  const promptIsYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|consolidate idle funds|sweep_to_l1|bridge back to l1|sweep)/.test(normalizedPrompt);
+  const promptIsCrossChain = /(liquidation sniper|omni-chain liquidat|cross[-. ]chain liquidat|flash[-. ]bridge|spatial arb|cross[-. ]chain arb|yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(normalizedPrompt);
+  const promptIsYieldSweeper = !promptIsCrossChain && /(yield sweeper|auto-consolidator|auto consolidator|consolidate idle funds|sweep_to_l1|bridge back to l1|sweep)/.test(normalizedPrompt);
   const promptIsSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(normalizedPrompt);
 
   const isYieldSweeper = promptIsYieldSweeper || isInitiaYieldSweeperIntent(intent);
@@ -838,6 +839,7 @@ function buildSafeInitiaOnsResolverTs(): string {
 function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
   const strategy = String(intent.strategy ?? "").toLowerCase();
   const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
+  if (strategy === "cross_chain_sweep") return false;
   return strategy === "yield" || strategy === "yield_sweeper" || /sweep|yield/.test(botType);
 }
 
@@ -858,9 +860,54 @@ function delay(ms: number): Promise<void> {
 
 function deriveFallbackIntent(prompt: string): Record<string, unknown> {
   const lowered = String(prompt ?? "").toLowerCase();
+  const isCrossChainLiquidation = /(liquidation sniper|omni-chain liquidat|cross[-. ]chain liquidat)/.test(lowered);
+  const isCrossChainArbitrage = /(flash[-. ]bridge|spatial arb|cross[-. ]chain arb)/.test(lowered);
+  const isCrossChainSweep = /(yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(lowered);
   const isYield = /(yield sweeper|auto-consolidator|sweep_to_l1|bridge back to l1|sweep)/.test(lowered);
   const isSentiment = /(sentiment|lunarcrush|social)/.test(lowered);
   const isCustomUtility = /(custom utility|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(lowered);
+
+  if (isCrossChainLiquidation) {
+    return {
+      chain: "initia",
+      network: "initia-testnet",
+      execution_model: "polling",
+      strategy: "cross_chain_liquidation",
+      bot_type: "Omni-Chain Liquidation Sniper",
+      bot_name: "Omni-Chain Liquidation Sniper",
+      mcps: ["initia"],
+      required_mcps: ["initia"],
+      requires_openai_key: false,
+    };
+  }
+
+  if (isCrossChainArbitrage) {
+    return {
+      chain: "initia",
+      network: "initia-testnet",
+      execution_model: "polling",
+      strategy: "cross_chain_arbitrage",
+      bot_type: "Flash-Bridge Spatial Arbitrageur",
+      bot_name: "Flash-Bridge Spatial Arbitrageur",
+      mcps: ["initia"],
+      required_mcps: ["initia"],
+      requires_openai_key: false,
+    };
+  }
+
+  if (isCrossChainSweep) {
+    return {
+      chain: "initia",
+      network: "initia-testnet",
+      execution_model: "polling",
+      strategy: "cross_chain_sweep",
+      bot_type: "Omni-Chain Yield Nomad",
+      bot_name: "Omni-Chain Yield Nomad",
+      mcps: ["initia"],
+      required_mcps: ["initia"],
+      requires_openai_key: false,
+    };
+  }
 
   if (isCustomUtility) {
     return {

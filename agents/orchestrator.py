@@ -188,7 +188,7 @@ Schema:
 {
   "chain": "initia",
   "network": "initia-mainnet" | "initia-testnet",
-  "strategy": "arbitrage" | "sentiment" | "sniping" | "dca" | "grid" | "whale_mirror" | "yield" | "yield_sweeper" | "custom_utility" | "perp" | "unknown",
+  "strategy": "arbitrage" | "sentiment" | "sniping" | "dca" | "grid" | "whale_mirror" | "yield" | "yield_sweeper" | "cross_chain_liquidation" | "cross_chain_arbitrage" | "cross_chain_sweep" | "custom_utility" | "perp" | "unknown",
   "mcps": ["list of MCP server names to use"],
   "bot_name": "human-readable name",
   "requires_openai": true | false
@@ -197,6 +197,9 @@ Schema:
 Rules:
 - ALWAYS set chain:"initia"
 - Classification precedence: if prompt includes yield sweeper semantics (yield sweeper, auto-consolidator, consolidate idle funds, sweep_to_l1, bridge back to l1), classify as strategy:"yield" first.
+- cross-chain liquidation / liquidation sniper / omni-chain liquidator -> strategy:"cross_chain_liquidation", mcps:["initia"]
+- flash-bridge arbitrage / cross-chain arb / spatial arbitrage -> strategy:"cross_chain_arbitrage", mcps:["initia"]
+- omni-chain yield / yield nomad / auto-compounder -> strategy:"cross_chain_sweep", mcps:["initia"]
 - If prompt asks for a custom utility bot, classify as strategy:"custom_utility" and do not fall back to arbitrage.
 - sentiment / social / lunarcrush -> mcps include "lunarcrush", requires_openai:true
 - yield sweeper / auto-consolidator / sweep idle funds -> strategy:"yield", mcps:["initia"], requires_openai:false
@@ -213,6 +216,12 @@ def _normalize_strategy(strategy: str) -> str:
   value = str(strategy or "").strip().lower()
   if value in {"yield_sweeper", "yield-sweeper"}:
     return "yield"
+  if value in {"cross_chain_liquidation", "cross-chain-liquidation", "liquidation_sniper", "omni_chain_liquidator", "omni-chain-liquidator"}:
+    return "cross_chain_liquidation"
+  if value in {"cross_chain_arbitrage", "cross-chain-arbitrage", "flash_bridge", "flash-bridge", "spatial_arb", "spatial-arb"}:
+    return "cross_chain_arbitrage"
+  if value in {"cross_chain_sweep", "cross-chain-sweep", "yield_nomad", "yield-nomad", "auto_compounder", "auto-compounder"}:
+    return "cross_chain_sweep"
   if value in {"custom", "custom_utility", "custom-utility", "utility", "custombot", "custom_bot"}:
     return "custom_utility"
   if value in {"spread_scanner", "scanner", "read_only_arbitrage", "read-only-arbitrage"}:
@@ -294,7 +303,27 @@ STRATEGY TEMPLATES:
    - Do not force arbitrage framing, flash-loan language, or external DEX assumptions.
    - Keep the bot Initia-native, minimal, and deterministic.
 
-4. Other Initia workflows:
+4. Cross-chain liquidation sniper (strategy: cross_chain_liquidation):
+  - Poll target Minitia lending positions every 5 seconds.
+  - Read health factor via verified move_view calls only.
+  - When health factor drops below threshold, bridge USDC from L1 to the target Minitia using the exact opinit_bridge schema from chain context.
+  - Execute liquidation, then bridge collateral profits back to L1 with interwoven_bridge::sweep_to_l1.
+  - Never invent health factor function names.
+
+5. Flash-bridge spatial arbitrageur (strategy: cross_chain_arbitrage):
+  - Read comparable prices on two Minitias simultaneously via Promise.allSettled.
+  - Compute spread as BigInt and subtract estimated bridge fees before acting.
+  - Only trade when net spread is positive and above threshold.
+  - Route via L1 using opinit_bridge::initiate_token_deposit for L1 -> Minitia hops and interwoven_bridge::sweep_to_l1 for Minitia -> L1 hops.
+  - Never invent module names.
+
+6. Omni-chain auto-compounder / yield nomad (strategy: cross_chain_sweep):
+  - Read APYs from multiple Minitia pools each cycle.
+  - Compare APYs as BigInt percentages and move only when the spread justifies the bridge cost.
+  - Unstake, bridge back to L1, bridge to the target Minitia, then restake.
+  - Enforce a minimum restake duration to avoid thrashing.
+
+7. Other Initia workflows:
    - If the prompt mentions a verified module or function, use it directly with move_view or move_execute as appropriate.
    - If a contract interface is not verified, do not hallucinate it.
 
@@ -414,10 +443,25 @@ class MetaAgent:
             "consolidate idle funds",
           ]
         )
+        is_cross_chain_liquidation = any(k in prompt_lc for k in ["liquidation sniper", "omni-chain liquidator", "cross-chain liquidation", "cross chain liquidation"])
+        is_cross_chain_arbitrage = any(k in prompt_lc for k in ["flash-bridge", "flash bridge", "spatial arbitrage", "cross-chain arb", "cross chain arb"])
+        is_cross_chain_sweep = any(k in prompt_lc for k in ["yield nomad", "auto-compounder", "auto compounder", "omni-chain yield", "omni chain yield"])
         is_spread_scanner = any(k in prompt_lc for k in ["spread scanner", "read-only scanner", "read only scanner", "read-only", "market intelligence"])
         is_custom_utility = any(k in prompt_lc for k in ["custom utility", "custom bot", "custom workflow", "intent: custom", "strategy: custom"])
 
-        if is_yield_sweeper:
+        if is_cross_chain_liquidation:
+          intent["strategy"] = "cross_chain_liquidation"
+          intent["bot_name"] = "Omni-Chain Liquidation Sniper"
+          intent["requires_openai"] = False
+        elif is_cross_chain_arbitrage:
+          intent["strategy"] = "cross_chain_arbitrage"
+          intent["bot_name"] = "Flash-Bridge Spatial Arbitrageur"
+          intent["requires_openai"] = False
+        elif is_cross_chain_sweep:
+          intent["strategy"] = "cross_chain_sweep"
+          intent["bot_name"] = "Omni-Chain Yield Nomad"
+          intent["requires_openai"] = False
+        elif is_yield_sweeper:
           intent["strategy"] = "yield"
           intent["bot_name"] = "Cross-Rollup Yield Sweeper"
           intent["requires_openai"] = False
@@ -439,7 +483,7 @@ class MetaAgent:
 
         allowed = {"initia", "lunarcrush", "pyth"}
         cleaned = [m for m in mcps if m in allowed]
-        if strategy in {"yield", "arbitrage", "custom_utility"} or "sweep" in bot_name or ("spread" in bot_name and "scanner" in bot_name):
+        if strategy in {"yield", "arbitrage", "custom_utility", "cross_chain_liquidation", "cross_chain_arbitrage", "cross_chain_sweep"} or "sweep" in bot_name or ("spread" in bot_name and "scanner" in bot_name):
           cleaned = [m for m in cleaned if m == "initia"]
         elif strategy == "sentiment" and "lunarcrush" not in cleaned:
           cleaned.append("lunarcrush")
@@ -527,7 +571,7 @@ class MetaAgent:
 
       files = parsed.get("files", [])
       files.insert(1, {"filepath": "src/mcp_bridge.ts", "content": MCP_BRIDGE_CONTENT})
-      if strategy_lc in {"yield", "arbitrage", "sentiment", "custom_utility"}:
+      if strategy_lc in {"yield", "arbitrage", "sentiment", "custom_utility", "cross_chain_liquidation", "cross_chain_arbitrage", "cross_chain_sweep"}:
         files.insert(2, {"filepath": "src/ons_resolver.ts", "content": ONS_RESOLVER_CONTENT})
 
       wanted = {"package.json", "src/config.ts", "src/index.ts"}
@@ -545,18 +589,42 @@ class MetaAgent:
       }
 
     def _chain_context(self, chain: str, network: str, mcps: list, strategy: str) -> str:
-        if chain == "initia":
-            strategy_lc = str(strategy or "").lower()
-            is_yield_sweeper = strategy_lc == "yield"
-            is_spread_scanner = strategy_lc == "arbitrage"
-            is_custom_utility = strategy_lc == "custom_utility"
-            initia_mcp_hints = ""
-            if "initia" in mcps:
-                initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {transaction: {calls: [{address, module, function, type_args, args}, ...]}})"
-                initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, args})"
-            if "lunarcrush" in mcps:
-                initia_mcp_hints += "\nLunarCrush: callMcpTool('lunarcrush', 'get_coin_details', {coin:'INIT'})"
-            return f"""
+        if chain != "initia":
+            return ""
+
+        strategy_lc = str(strategy or "").lower()
+        is_yield_sweeper = strategy_lc == "yield"
+        is_spread_scanner = strategy_lc == "arbitrage"
+        is_custom_utility = strategy_lc == "custom_utility"
+        is_cross_chain = strategy_lc in {"cross_chain_liquidation", "cross_chain_arbitrage", "cross_chain_sweep"}
+
+        initia_mcp_hints = ""
+        if "initia" in mcps:
+            initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {transaction: {calls: [{address, module, function, type_args, args}, ...]}})"
+            initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, args})"
+        if "lunarcrush" in mcps:
+            initia_mcp_hints += "\nLunarCrush: callMcpTool('lunarcrush', 'get_coin_details', {coin:'INIT'})"
+        if is_yield_sweeper or is_cross_chain:
+            initia_mcp_hints += """
+\nInterwoven Bridge schema (use these EXACT values — do not invent module names):
+  Module address: 0x1
+  Module name: opinit_bridge  (for L1 → Minitia) or interwoven_bridge (for Minitia → L1)
+  Function: initiate_token_deposit
+  Args: [destination_chain_id: string, recipient: string, amount: string, denom: string]
+  Example destination_chain_ids:
+    "minimove-1"  → MiniMove Minitia
+    "miniwasm-1"  → MiniWasm Minitia
+    "initiation-2" → L1 Testnet (when bridging back)
+
+  To sweep FROM a Minitia back to L1, use:
+    Module: interwoven_bridge / Function: sweep_to_l1 / Args: [amount: string]
+
+CRITICAL RULE FOR CROSS-CHAIN BOTS: If the user asks you to build a bot that bridges
+funds between Initia L1 and Minitias, your generated TypeScript MUST use the above
+schema in the move_execute payload. Never invent module names. Use destination_chain_id
+to route between L1 and Minitias."""
+
+        return f"""
 CHAIN CONTEXT — INITIA ({network})
 Network IDs:
   initia-mainnet: interwoven-1
@@ -610,4 +678,3 @@ Custom utility pattern (if strategy is custom_utility):
   - Prefer a minimal Initia-native implementation.
   - If the prompt does not verify a module or function, do not invent one.
 """
-        return ""

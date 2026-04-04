@@ -125,6 +125,44 @@ async function testCustomUtilityPromptStaysInitiaOnly(): Promise<void> {
   console.log("[ok] custom utility prompt stays initia-only smoke test passed");
 }
 
+async function testCrossChainIntentClassification(): Promise<void> {
+  const cases = [
+    {
+      prompt: "Build an omni-chain liquidation sniper for Initia Minitias that watches unhealthy lending positions and bridges USDC when health factor drops.",
+      strategy: "cross_chain_liquidation",
+    },
+    {
+      prompt: "Build a flash-bridge spatial arbitrage bot for Initia that bridges between two Minitias and sells into the higher price pool.",
+      strategy: "cross_chain_arbitrage",
+    },
+    {
+      prompt: "Build an omni-chain yield nomad that auto-compounds across Initia Minitias and rebalances when APY gaps justify the bridge cost.",
+      strategy: "cross_chain_sweep",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const response = await fetchJson(
+      `${BASE_URL}/api/classify-intent`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: testCase.prompt }),
+      },
+      60_000,
+    );
+
+    assert(response.status === 200, `cross-chain classify-intent failed (${response.status}): ${response.text.slice(0, 400)}`);
+    const intent = (response.data.intent ?? {}) as Json;
+    assert(String(intent.chain ?? "").toLowerCase() === "initia", "cross-chain prompt should classify to chain=initia");
+    assert(String(intent.strategy ?? "").toLowerCase() === testCase.strategy, `cross-chain prompt should classify to strategy=${testCase.strategy}`);
+    const mcps = asStringArray(intent.mcps);
+    assert(mcps.length === 1 && mcps[0] === "initia", "cross-chain prompt should stay initia-only");
+  }
+
+  console.log("[ok] cross-chain intent classification smoke test passed");
+}
+
 async function testInitiaMoveViewContract(): Promise<void> {
   const wallet = process.env.USER_WALLET_ADDRESS ?? "0xuser_wallet";
   const response = await fetchJson(
@@ -216,6 +254,7 @@ async function run(): Promise<void> {
   await testInitiaIntentAndFallbackSelection();
   await testGenericPromptStillPinsInitia();
   await testCustomUtilityPromptStaysInitiaOnly();
+  await testCrossChainIntentClassification();
   await testInitiaMoveViewContract();
   await testInitiaMoveExecuteContract();
 

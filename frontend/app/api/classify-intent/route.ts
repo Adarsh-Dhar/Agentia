@@ -66,7 +66,7 @@ Required schema:
   "chain": "initia",
   "network": "initia-mainnet" | "initia-testnet",
   "execution_model": "polling" | "websocket" | "agentic",
-  "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "yield_sweeper" | "custom_utility" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
+  "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "yield_sweeper" | "cross_chain_liquidation" | "cross_chain_arbitrage" | "cross_chain_sweep" | "custom_utility" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
   "required_mcps": ["initia","lunarcrush","pyth"],
   "bot_type": "human-readable bot name",
   "requires_openai_key": true | false
@@ -75,6 +75,9 @@ Required schema:
 Classification rules (first match wins):
 - ALWAYS return chain:"initia" for every request.
 - if request includes cross-rollup yield sweeper semantics (yield sweeper, auto-consolidator, consolidate idle funds, bridge back to l1, sweep_to_l1), classify as strategy:"yield" with required_mcps:["initia"] and bot_type:"Cross-Rollup Yield Sweeper".
+- cross-chain liquidation / liquidation sniper / omni-chain liquidator → strategy:"cross_chain_liquidation", required_mcps:["initia"]
+- flash-bridge arbitrage / cross-chain arb / spatial arbitrage → strategy:"cross_chain_arbitrage", required_mcps:["initia"]
+- omni-chain yield / yield nomad / auto-compounder → strategy:"cross_chain_sweep", required_mcps:["initia"]
 - if request asks for a custom utility bot, classify as strategy:"custom_utility" with required_mcps:["initia"] and bot_type:"Custom Utility Initia Bot".
 - sentiment | social | LunarCrush → execution_model:"agentic", strategy:"sentiment", required_mcps:["initia","lunarcrush"], requires_openai_key:true
 - yield sweeper | auto-consolidator | consolidate idle funds → execution_model:"polling", strategy:"yield", required_mcps:["initia"]
@@ -88,6 +91,9 @@ Classification rules (first match wins):
 function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: string): Record<string, unknown> {
   const mergedPrompt = String(prompt ?? "").toLowerCase();
   const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|consolidate idle funds|sweep_to_l1|bridge back to l1|sweep)/.test(mergedPrompt);
+  const isCrossChainLiquidation = /(liquidation sniper|omni-chain liquidat|cross[-. ]chain liquidat)/.test(mergedPrompt);
+  const isCrossChainArbitrage = /(flash[-. ]bridge|spatial arb|cross[-. ]chain arb)/.test(mergedPrompt);
+  const isCrossChainSweep = /(yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(mergedPrompt);
   const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(mergedPrompt);
   const isSentiment = /(sentiment|lunarcrush|social)/.test(mergedPrompt);
   const isCustomUtility = /(custom utility|custom bot|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(mergedPrompt);
@@ -103,6 +109,42 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
     normalized.strategy = "custom_utility";
     normalized.bot_type = "Custom Utility Initia Bot";
     normalized.bot_name = "Custom Utility Initia Bot";
+    normalized.required_mcps = ["initia"];
+    normalized.mcps = ["initia"];
+    normalized.requires_openai_key = false;
+    normalized.requires_openai = false;
+    return normalized;
+  }
+
+  if (isCrossChainLiquidation) {
+    normalized.execution_model = "polling";
+    normalized.strategy = "cross_chain_liquidation";
+    normalized.bot_type = "Omni-Chain Liquidation Sniper";
+    normalized.bot_name = "Omni-Chain Liquidation Sniper";
+    normalized.required_mcps = ["initia"];
+    normalized.mcps = ["initia"];
+    normalized.requires_openai_key = false;
+    normalized.requires_openai = false;
+    return normalized;
+  }
+
+  if (isCrossChainArbitrage) {
+    normalized.execution_model = "polling";
+    normalized.strategy = "cross_chain_arbitrage";
+    normalized.bot_type = "Flash-Bridge Spatial Arbitrageur";
+    normalized.bot_name = "Flash-Bridge Spatial Arbitrageur";
+    normalized.required_mcps = ["initia"];
+    normalized.mcps = ["initia"];
+    normalized.requires_openai_key = false;
+    normalized.requires_openai = false;
+    return normalized;
+  }
+
+  if (isCrossChainSweep) {
+    normalized.execution_model = "polling";
+    normalized.strategy = "cross_chain_sweep";
+    normalized.bot_type = "Omni-Chain Yield Nomad";
+    normalized.bot_name = "Omni-Chain Yield Nomad";
     normalized.required_mcps = ["initia"];
     normalized.mcps = ["initia"];
     normalized.requires_openai_key = false;
@@ -310,21 +352,39 @@ export async function POST(req: NextRequest) {
 
 function deriveDefaultIntent(prompt: string): Record<string, unknown> {
   const lower = prompt.toLowerCase();
+  const isCrossChainLiquidation = /(liquidation sniper|omni-chain liquidat|cross[-. ]chain liquidat)/.test(lower);
+  const isCrossChainArbitrage = /(flash[-. ]bridge|spatial arb|cross[-. ]chain arb)/.test(lower);
+  const isCrossChainSweep = /(yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(lower);
   const isYieldSweeper = /(yield sweeper|auto-consolidator|auto consolidator|sweep|consolidate|sweep_to_l1|bridge back to l1|consolidate idle funds)/.test(lower);
   const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(lower);
   const isInitiaSentiment = lower.includes("sentiment") || lower.includes("lunarcrush") || lower.includes("social");
   const isCustomUtility = /(custom utility|custom bot|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(lower);
   const initiaNetwork = lower.includes("mainnet") ? "initia-mainnet" : "initia-testnet";
-  const strategy = isInitiaSentiment
-    ? "sentiment"
-    : (isYieldSweeper
-      ? "yield"
-      : (isCustomUtility
-        ? "custom_utility"
-        : ((isSpreadScanner || lower.includes("arbitrage") || lower.includes("flash loan")) ? "arbitrage" : "unknown")));
-  const botName = isInitiaSentiment
-    ? "Initia Sentiment Bot"
-    : (isYieldSweeper ? "Cross-Rollup Yield Sweeper" : (isCustomUtility ? "Custom Utility Initia Bot" : (isSpreadScanner ? "Cross-Rollup Spread Scanner" : "Initia Move Bot")));
+  let strategy = "unknown";
+  let botName = "Initia Move Bot";
+
+  if (isInitiaSentiment) {
+    strategy = "sentiment";
+    botName = "Initia Sentiment Bot";
+  } else if (isCrossChainLiquidation) {
+    strategy = "cross_chain_liquidation";
+    botName = "Omni-Chain Liquidation Sniper";
+  } else if (isCrossChainArbitrage) {
+    strategy = "cross_chain_arbitrage";
+    botName = "Flash-Bridge Spatial Arbitrageur";
+  } else if (isCrossChainSweep) {
+    strategy = "cross_chain_sweep";
+    botName = "Omni-Chain Yield Nomad";
+  } else if (isYieldSweeper) {
+    strategy = "yield";
+    botName = "Cross-Rollup Yield Sweeper";
+  } else if (isCustomUtility) {
+    strategy = "custom_utility";
+    botName = "Custom Utility Initia Bot";
+  } else if (isSpreadScanner || lower.includes("arbitrage") || lower.includes("flash loan")) {
+    strategy = "arbitrage";
+    botName = "Cross-Rollup Spread Scanner";
+  }
   return {
     chain: "initia", network: initiaNetwork,
     execution_model: isInitiaSentiment ? "agentic" : "polling",
