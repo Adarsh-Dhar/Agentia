@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
 import { MsgGrant } from "cosmjs-types/cosmos/authz/v1beta1/tx.js";
 import { GenericAuthorization, Grant } from "cosmjs-types/cosmos/authz/v1beta1/authz.js";
-import { Timestamp } from "cosmjs-types/google/protobuf/timestamp.js";
 import { Any } from "cosmjs-types/google/protobuf/any.js";
 import { Button } from "./button";
 
@@ -52,9 +51,6 @@ export function SessionKeyConfirmModal({
         ).finish(),
       });
 
-      const expirationSeconds = Math.floor(expiration.getTime() / 1000);
-      const expirationNanos = (expiration.getTime() % 1000) * 1_000_000;
-
       const grantMsg = {
         typeUrl: MsgGrant.typeUrl,
         value: MsgGrant.fromPartial({
@@ -62,10 +58,7 @@ export function SessionKeyConfirmModal({
           grantee: botAddress,
           grant: Grant.fromPartial({
             authorization,
-            expiration: Timestamp.fromPartial({
-              seconds: BigInt(expirationSeconds),
-              nanos: expirationNanos,
-            }),
+            expiration,
           }),
         }),
       };

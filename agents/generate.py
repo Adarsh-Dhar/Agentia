@@ -96,7 +96,12 @@ RULES:
 2. Only use callMcpTool('initia', 'move_view', ... ) for reads.
 3. Only use callMcpTool('initia', 'move_execute', ... ) for writes.
 4. Keep runtime strictly Initia-native with no external chain SDK/tooling.
-5. For yield sweeper behavior, read 0x1::coin::balance and execute interwoven_bridge::sweep_to_l1 above threshold.
+5. For move_view calls, always include type_args explicitly (use [] when none).
+6. For yield sweeper behavior, read 0x1::coin::balance with type_args ['uusdc'] and args [walletAddress], then execute interwoven_bridge::sweep_to_l1 above threshold.
+7. For spread scanners, do not use wallet balance as price; use a verified DEX/oracle quote view.
+8. For spread scanners, require non-empty INITIA_PRICE_VIEW_TYPE_ARGS (comma-separated Move type tags) and never send empty type_args to generic quote functions.
+9. Never mention wrapper SDK tooling in generated output.
+10. Never add wrapper SDK dependencies; always generate direct MCP payload calls with address/module/function/type_args/args.
 """.strip()
 
 

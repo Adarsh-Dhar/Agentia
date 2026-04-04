@@ -64,9 +64,17 @@ function parseFilesToTree(files: BotFile[]): Record<string, unknown> {
 function detectRunStrategy(files: BotFile[]): { needsInstall: boolean; runCmd: string } {
   const cleanPaths = files.map((f) => f.filepath.replace(/^[./]+/, ""));
   const hasPackageJson = cleanPaths.includes("package.json");
+  const hasTsIndex = cleanPaths.includes("src/index.ts");
+  const hasJsIndex = cleanPaths.includes("src/index.js");
   return {
     needsInstall: hasPackageJson,
-    runCmd: hasPackageJson ? "npm run start" : "node src/index.js",
+    runCmd: hasPackageJson
+      ? "npm run start"
+      : hasTsIndex
+        ? "npx --yes tsx src/index.ts"
+        : hasJsIndex
+          ? "node src/index.js"
+          : "node index.js",
   };
 }
 

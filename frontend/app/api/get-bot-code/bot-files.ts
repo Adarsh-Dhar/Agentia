@@ -184,22 +184,23 @@ export async function resolveAddress(nameOrAddress: string): Promise<string> {
     return cached;
   }
 
-  console.log(`[ONS] Resolving ${normalized}...`);
+  console.log("[ONS] Resolving " + normalized + "...");
 
   const response = await callMcpTool("initia", "move_view", {
     network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),
     address: String(process.env.ONS_REGISTRY_ADDRESS ?? CONFIG.ONS_REGISTRY_ADDRESS ?? "0x1"),
     module: "initia_names",
     function: "resolve",
+    type_args: [],
     args: [normalized],
   });
 
   const resolved = extractAddressFromPayload(response);
   if (!resolved) {
-    throw new Error(`ONS registry returned no address for '${normalized}'`);
+    throw new Error("ONS registry returned no address for '" + normalized + "'");
   }
 
-  console.log(`[ONS] Resolved ${normalized} -> ${resolved}`);
+  console.log("[ONS] Resolved " + normalized + " -> " + resolved);
   _resolvedCache.set(normalized, resolved);
   return resolved;
 }
@@ -235,7 +236,8 @@ async function runCycle(): Promise<void> {
     address: "0x1",
     module: "coin",
     function: "balance",
-    args: [wallet, "uusdc"],
+    type_args: ["uusdc"],
+    args: [wallet],
   });
 
   const payload = view as { result?: { content?: Array<{ text?: string }> }; balance?: string; amount?: string };

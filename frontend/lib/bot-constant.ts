@@ -27,6 +27,11 @@ export interface BotEnvConfig {
   INITIA_BRIDGE_ADDRESS: string;
   INITIA_POOL_A_ADDRESS: string;
   INITIA_POOL_B_ADDRESS: string;
+  INITIA_PRICE_VIEW_ADDRESS: string;
+  INITIA_PRICE_VIEW_MODULE: string;
+  INITIA_PRICE_VIEW_FUNCTION: string;
+  INITIA_PRICE_VIEW_TYPE_ARGS: string;
+  INITIA_PRICE_VIEW_ARGS: string;
   INITIA_FLASH_POOL_ADDRESS: string;
   INITIA_SWAP_ROUTER_ADDRESS: string;
   OPENAI_API_KEY: string;
@@ -47,6 +52,11 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   INITIA_BRIDGE_ADDRESS: "",
   INITIA_POOL_A_ADDRESS: "",
   INITIA_POOL_B_ADDRESS: "",
+  INITIA_PRICE_VIEW_ADDRESS: "",
+  INITIA_PRICE_VIEW_MODULE: "",
+  INITIA_PRICE_VIEW_FUNCTION: "",
+  INITIA_PRICE_VIEW_TYPE_ARGS: "",
+  INITIA_PRICE_VIEW_ARGS: "$endpoint",
   INITIA_FLASH_POOL_ADDRESS: "",
   INITIA_SWAP_ROUTER_ADDRESS: "",
   OPENAI_API_KEY: "",
@@ -135,7 +145,8 @@ export function getRequiredEnvFields(
         key: "USER_WALLET_ADDRESS",
         label: "User Wallet Address",
         type: "text",
-        required: true, or yourname.init",
+        required: true,
+        placeholder: "init1... or yourname.init",
         helpText: "Your Initia wallet address, or a .init name. It will be resolved automatically.",
       },
       {
@@ -144,8 +155,7 @@ export function getRequiredEnvFields(
         type: "text",
         required: false,
         placeholder: "0x1",
-        helpText: "The ONS registry contract address. Defaults to 0x1 on testnet.
-        placeholder: "init1...",
+        helpText: "The ONS registry contract address. Defaults to 0x1 on testnet.",
       },
       {
         key: "INITIA_BRIDGE_ADDRESS",
@@ -170,6 +180,44 @@ export function getRequiredEnvFields(
         label: "Pool B Address",
         type: "text",
         required: true,
+      },
+      {
+        key: "INITIA_PRICE_VIEW_ADDRESS",
+        label: "Price View Address",
+        type: "text",
+        required: true,
+        placeholder: "0x...",
+        helpText: "Contract address exposing the quote/price view function.",
+      },
+      {
+        key: "INITIA_PRICE_VIEW_MODULE",
+        label: "Price View Module",
+        type: "text",
+        required: true,
+        placeholder: "dex",
+      },
+      {
+        key: "INITIA_PRICE_VIEW_FUNCTION",
+        label: "Price View Function",
+        type: "text",
+        required: true,
+        placeholder: "spot_price",
+      },
+      {
+        key: "INITIA_PRICE_VIEW_TYPE_ARGS",
+        label: "Price View Type Args",
+        type: "text",
+        required: true,
+        placeholder: "0x1::coin::uinit,0x1::coin::uusdc",
+        helpText: "Comma-separated Move type args required by your quote view (for example base/quote coin types).",
+      },
+      {
+        key: "INITIA_PRICE_VIEW_ARGS",
+        label: "Price View Args Template",
+        type: "text",
+        required: false,
+        placeholder: "$endpoint",
+        helpText: "Comma-separated args; use $endpoint to inject each endpoint address.",
       },
       {
         key: "POLL_INTERVAL",

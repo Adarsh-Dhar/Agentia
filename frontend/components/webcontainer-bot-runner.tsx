@@ -89,8 +89,9 @@ export function WebContainerBotRunner() {
   const sandbox = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
   const { phase, setPhase, status, stopProcess, bootAndRun } = sandbox;
   const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false;
-  const sessionKey = String((autoSign as { wallet?: { privateKey?: unknown } } | undefined)?.wallet?.privateKey ?? "").trim();
-  const sessionKeyActive = autosignEnabled && sessionKey.length > 0;
+  const autosignWalletKey = String((autoSign as { wallet?: { privateKey?: unknown } } | undefined)?.wallet?.privateKey ?? "").trim();
+  const runtimeSessionKey = String(autosignWalletKey || envConfig.INITIA_KEY || "").trim();
+  const sessionKeyActive = autosignEnabled;
   const userWalletAddress = String(initiaAddress ?? address ?? "").trim();
 
   // On mount: load files + env + intent from DB
@@ -141,6 +142,11 @@ export function WebContainerBotRunner() {
       shouldAutoLaunchRef.current = false;
       return;
     }
+    if (!runtimeSessionKey) {
+      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Reload the bot or regenerate to refresh key material.");
+      shouldAutoLaunchRef.current = false;
+      return;
+    }
 
     didAutoLaunchRef.current = true;
     shouldAutoLaunchRef.current = false;
@@ -148,9 +154,9 @@ export function WebContainerBotRunner() {
     void bootAndRun({
       ...envConfig,
       SESSION_KEY_MODE: "true",
-      INITIA_KEY: sessionKey,
+      INITIA_KEY: runtimeSessionKey,
     });
-  }, [generatedFiles.length, envLoaded, bootAndRun, envConfig, sessionKey, sessionKeyActive, setPhase, termRef]);
+  }, [generatedFiles.length, envLoaded, bootAndRun, envConfig, runtimeSessionKey, sessionKeyActive, setPhase, termRef]);
 
   // Sync .env file edits back to envConfig
   useEffect(() => {
@@ -194,16 +200,16 @@ export function WebContainerBotRunner() {
       setShowSessionKeyModal(true);
       return;
     }
-    if (!sessionKey) {
+    if (!runtimeSessionKey) {
       termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Re-enable AutoSign and retry.");
       return;
     }
     setShowSessionKeyModal(true);
-  }, [autosignEnabled, botWalletAddress, sessionKey, termRef, userWalletAddress]);
+  }, [autosignEnabled, botWalletAddress, runtimeSessionKey, termRef, userWalletAddress]);
 
   const handleSessionKeyConfirm = useCallback(() => {
     setShowSessionKeyModal(false);
-    if (!sessionKey) {
+    if (!runtimeSessionKey) {
       termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Re-enable AutoSign and retry.");
       return;
     }
@@ -211,9 +217,9 @@ export function WebContainerBotRunner() {
     void bootAndRun({
       ...envConfig,
       SESSION_KEY_MODE: "true",
-      INITIA_KEY: sessionKey,
+      INITIA_KEY: runtimeSessionKey,
     });
-  }, [bootAndRun, envConfig, sessionKey, setPhase, termRef]);
+  }, [bootAndRun, envConfig, runtimeSessionKey, setPhase, termRef]);
 
   const handleSessionKeyCancel = useCallback(() => {
     setShowSessionKeyModal(false);

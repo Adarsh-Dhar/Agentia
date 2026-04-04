@@ -4,6 +4,27 @@ import { decryptEnvConfig, encryptEnvConfig } from "@/lib/crypto-env";
 import { RawKey } from "@initia/initia.js";
 import { randomBytes } from "node:crypto";
 
+function parseEnv(content: string): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const idx = line.indexOf("=");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (key) parsed[key] = value;
+  }
+  return parsed;
+}
+
+function stringifyEnv(values: Record<string, string>): string {
+  return Object.entries(values)
+    .filter(([, value]) => value !== "")
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
 export async function GET(req: NextRequest) {
   try {
     const agentId = req.nextUrl.searchParams.get("agentId");
@@ -53,9 +74,21 @@ export async function GET(req: NextRequest) {
     if (agent.envConfig) {
       try {
         const decryptedEnv = decryptEnvConfig(agent.envConfig);
+        const envMap = parseEnv(decryptedEnv);
+        const sessionKeyMode = String(envMap.SESSION_KEY_MODE ?? "").toLowerCase() === "true";
+
+        if (sessionKeyMode && !envMap.INITIA_KEY && agent.sessionKeyPriv) {
+          try {
+            envMap.INITIA_KEY = decryptEnvConfig(agent.sessionKeyPriv);
+          } catch {
+            console.error("Failed to decrypt sessionKeyPriv for agent:", agent.id);
+          }
+        }
+
+        const hydratedEnv = stringifyEnv(envMap);
         mappedFiles.push({
           filepath: ".env",
-          content: decryptedEnv,
+          content: hydratedEnv,
           language: "plaintext"
         });
       } catch {

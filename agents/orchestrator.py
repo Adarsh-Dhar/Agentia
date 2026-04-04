@@ -229,6 +229,34 @@ def _normalize_strategy(strategy: str) -> str:
   return value or "unknown"
 
 
+def _normalize_generated_filepath(raw_path: object) -> str:
+  path = str(raw_path or "").strip().replace("\\", "/")
+  if not path:
+    return ""
+  path = re.sub(r"^[./]+", "", path)
+  if not path:
+    return ""
+
+  lower_path = path.lower()
+  base = lower_path.split("/")[-1]
+
+  alias_map = {
+    "package.json": "package.json",
+    "index.ts": "src/index.ts",
+    "main.ts": "src/index.ts",
+    "config.ts": "src/config.ts",
+    "mcp_bridge.ts": "src/mcp_bridge.ts",
+    "ons_resolver.ts": "src/ons_resolver.ts",
+  }
+
+  if lower_path in alias_map:
+    return alias_map[lower_path]
+  if base in alias_map:
+    return alias_map[base]
+
+  return path
+
+
 # ─── Bot Generator System Prompt ─────────────────────────────────────────────
 
 GENERATOR_SYSTEM = """\
@@ -272,12 +300,15 @@ CORE CONSTRAINTS:
 14. Never use fake placeholder addresses (for example 0xinitia_pool_a/0xinitia_pool_b) or fabricated prices.
 15. Always resolve addresses and runtime inputs from CONFIG/process.env and fail fast when required values are missing.
 16. If USER_WALLET_ADDRESS or any configured address ends in '.init', resolve it before first use and cache the resolved address.
+17. Never mention wrapper SDK tooling in generated code/comments/dependency lists.
+18. Use direct MCP payloads for Initia reads/writes (address/module/function/type_args/args) without middleware abstractions.
 
 INITIA RULES:
 - Chain is always Initia.
 - All reads must use callMcpTool('initia', 'move_view', {...}).
 - All writes must use callMcpTool('initia', 'move_execute', {...}).
 - Do not use external chain SDK signing flows for Initia.
+- Do not reference wrapper SDK/plugin layers in code, prose, or dependencies.
 - Always forward INITIA_KEY as header x-session-key when present.
 - Use the exact MCP server names from the intent's mcps list.
 - Never invent module or function names. Only use names explicitly supported by the prompt context.
@@ -569,13 +600,82 @@ class MetaAgent:
         _log("WARN", f"build_bot: parsed response missing files key. keys={list(parsed.keys())}", trace_id)
         parsed["files"] = []
 
-      files = parsed.get("files", [])
-      files.insert(1, {"filepath": "src/mcp_bridge.ts", "content": MCP_BRIDGE_CONTENT})
-      if strategy_lc in {"yield", "arbitrage", "sentiment", "custom_utility", "cross_chain_liquidation", "cross_chain_arbitrage", "cross_chain_sweep"}:
-        files.insert(2, {"filepath": "src/ons_resolver.ts", "content": ONS_RESOLVER_CONTENT})
+      raw_files = parsed.get("files", [])
+      normalized_files: list[dict] = []
+      for raw_file in raw_files if isinstance(raw_files, list) else []:
+        if not isinstance(raw_file, dict):
+          continue
+        normalized_path = _normalize_generated_filepath(raw_file.get("filepath"))
+        if not normalized_path:
+          continue
+        normalized_files.append({
+          **raw_file,
+          "filepath": normalized_path,
+        })
 
-      wanted = {"package.json", "src/config.ts", "src/index.ts"}
-      final_files = [f for f in files if f.get("filepath") in wanted or f.get("filepath") in {"src/mcp_bridge.ts", "src/ons_resolver.ts"}]
+      files = normalized_files
+      existing_paths = {str(f.get("filepath", "")) for f in files}
+
+      if "src/mcp_bridge.ts" not in existing_paths:
+        files.append({"filepath": "src/mcp_bridge.ts", "content": MCP_BRIDGE_CONTENT})
+      if strategy_lc in {"yield", "arbitrage", "sentiment", "custom_utility", "cross_chain_liquidation", "cross_chain_arbitrage", "cross_chain_sweep"} and "src/ons_resolver.ts" not in existing_paths:
+        files.append({"filepath": "src/ons_resolver.ts", "content": ONS_RESOLVER_CONTENT})
+
+      # Ensure required runtime files always exist even when model path casing/formatting drifts.
+      current_paths = {str(f.get("filepath", "")) for f in files}
+      if "package.json" not in current_paths:
+        files.append({
+          "filepath": "package.json",
+          "content": json.dumps(
+            {
+              "name": "agentia-initia-bot",
+              "version": "1.0.0",
+              "type": "module",
+              "scripts": {"start": "tsx src/index.ts", "dev": "tsx src/index.ts"},
+              "dependencies": {"dotenv": "^16.4.0"},
+              "devDependencies": {"typescript": "^5.4.0", "@types/node": "^20.0.0", "tsx": "^4.7.0"},
+            },
+            indent=2,
+          ),
+        })
+      if "src/config.ts" not in current_paths:
+        files.append({
+          "filepath": "src/config.ts",
+          "content": (
+            'import "dotenv/config";\n\n'
+            'export const CONFIG = {\n'
+            '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp",\n'
+            '  INITIA_KEY: process.env.INITIA_KEY ?? "",\n'
+            '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",\n'
+            '  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",\n'
+            '  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",\n'
+            '  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),\n'
+            '} as const;\n'
+          ),
+        })
+      if "src/index.ts" not in current_paths:
+        files.append({
+          "filepath": "src/index.ts",
+          "content": (
+            'import { CONFIG } from "./config.js";\n'
+            'import { callMcpTool } from "./mcp_bridge.js";\n\n'
+            'async function main(): Promise<void> {\n'
+            '  const payload = await callMcpTool("initia", "move_view", {\n'
+            '    network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),\n'
+            '    address: "0x1",\n'
+            '    module: "coin",\n'
+            '    function: "balance",\n'
+            '    type_args: ["uusdc"],\n'
+            '    args: [String(CONFIG.USER_WALLET_ADDRESS ?? "")],\n'
+            '  });\n'
+            '  console.log(JSON.stringify(payload));\n'
+            '}\n\n'
+            'void main();\n'
+          ),
+        })
+
+      wanted = {"package.json", "src/config.ts", "src/index.ts", "src/mcp_bridge.ts", "src/ons_resolver.ts"}
+      final_files = [f for f in files if str(f.get("filepath", "")) in wanted]
 
       _log("INFO", f"build_bot: final_files={[f.get('filepath') for f in final_files]}", trace_id)
 
@@ -601,7 +701,8 @@ class MetaAgent:
         initia_mcp_hints = ""
         if "initia" in mcps:
             initia_mcp_hints += "\nWrite: callMcpTool('initia', 'move_execute', {transaction: {calls: [{address, module, function, type_args, args}, ...]}})"
-            initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, args})"
+            initia_mcp_hints += "\nRead:  callMcpTool('initia', 'move_view', {address, module, function, type_args, args})"
+            initia_mcp_hints += "\nRule: include type_args explicitly for every move_view call (use [] when none)."
         if "lunarcrush" in mcps:
             initia_mcp_hints += "\nLunarCrush: callMcpTool('lunarcrush', 'get_coin_details', {coin:'INIT'})"
         if is_yield_sweeper or is_cross_chain:
@@ -645,9 +746,14 @@ Required config values:
 MCP tool signatures:
 {initia_mcp_hints}
 
+SDK policy:
+  - MCP transport is the integration boundary for generated bots.
+  - Never add wrapper SDK/plugin dependencies or wrapper examples.
+
 Initia read pattern:
-  - Use callMcpTool('initia', 'move_view', {{address, module, function, args}}) only for verified modules and functions.
-  - For yield sweeper workflows, read 0x1::coin::balance for USER_WALLET_ADDRESS and uusdc.
+  - Use callMcpTool('initia', 'move_view', {{address, module, function, type_args, args}}) only for verified modules and functions.
+  - Always include type_args in move_view payloads (set type_args: [] when no generic args exist).
+  - For yield sweeper workflows, read 0x1::coin::balance with type_args ['uusdc'] and args [USER_WALLET_ADDRESS].
   - For custom utility workflows, follow the exact user prompt and keep the runtime deterministic.
 
 Initia write pattern:
@@ -670,6 +776,9 @@ Yield sweeper pattern (if strategy is yield):
 
 Spread scanner pattern (if strategy is read-only arbitrage scanner):
   - Read-only operation with move_view only.
+  - Never treat raw wallet balances as market price; use a verified DEX/oracle view function for quote/price data.
+  - Configure INITIA_PRICE_VIEW_TYPE_ARGS with required Move type tags for the quote function (comma-separated string in env/config).
+  - Do not issue quote move_view calls with empty type_args when the function expects generic coin types.
   - Query comparable prices across endpoints, compute spread, subtract bridge fee, log net opportunity.
   - Never call move_execute in scanner mode.
 

@@ -124,7 +124,8 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '      address: "0x1",',
     '      module: "coin",',
     '      function: "balance",',
-    '      args: [wallet, "uusdc"],',
+    '      type_args: ["uusdc"],',
+    '      args: [wallet],',
     '    });',
     '  } catch (error) {',
     '    const msg = error instanceof Error ? error.message : String(error);',
@@ -184,6 +185,12 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
     'const POLL_MS = Number(config.POLL_MS ?? 15000);',
     'const ESTIMATED_BRIDGE_FEE_USDC = BigInt(config.ESTIMATED_BRIDGE_FEE_USDC ?? 5000n);',
+    'const PRICE_VIEW_ADDRESS = String(config.INITIA_PRICE_VIEW_ADDRESS ?? "").trim();',
+    'const PRICE_VIEW_MODULE = String(config.INITIA_PRICE_VIEW_MODULE ?? "").trim();',
+    'const PRICE_VIEW_FUNCTION = String(config.INITIA_PRICE_VIEW_FUNCTION ?? "").trim();',
+    'const typeArgsRaw = String(config.INITIA_PRICE_VIEW_TYPE_ARGS || process.env.INITIA_PRICE_VIEW_TYPE_ARGS || "0x1::coin::uinit,0x1::coin::uusdc");',
+    'const PRICE_VIEW_TYPE_ARGS = typeArgsRaw.split(",").map((part) => part.trim()).filter(Boolean);',
+    'const PRICE_VIEW_ARGS_TEMPLATE = String(config.INITIA_PRICE_VIEW_ARGS ?? "$endpoint").trim();',
     '',
     'function requireConfiguredAddress(name: string, value: unknown): string {',
     '  const resolved = String(value ?? "").trim();',
@@ -238,15 +245,29 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '  }',
     '}',
     '',
+    'function buildPriceViewArgs(endpointAddress: string): string[] {',
+    '  if (!PRICE_VIEW_ARGS_TEMPLATE) return [];',
+    '  return PRICE_VIEW_ARGS_TEMPLATE',
+    '    .split(",")',
+    '    .map((part) => part.trim())',
+    '    .filter(Boolean)',
+    '    .map((part) => (part === "$endpoint" ? endpointAddress : part));',
+    '}',
+    '',
     'async function runCycle(): Promise<void> {',
     '  log("INFO", "Spread scan cycle start");',
+    '  if (!PRICE_VIEW_ADDRESS || !PRICE_VIEW_MODULE || !PRICE_VIEW_FUNCTION) {',
+    '    log("WARN", "Set INITIA_PRICE_VIEW_ADDRESS, INITIA_PRICE_VIEW_MODULE, and INITIA_PRICE_VIEW_FUNCTION for spread quotes");',
+    '    return;',
+    '  }',
     '  const quotes = await Promise.allSettled(',
     '    ENDPOINTS.map((endpoint) => safeMcp("initia", "move_view", {',
     '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
-    '      address: "0x1",',
-    '      module: "coin",',
-    '      function: "balance",',
-    '      args: [endpoint.address, "uusdc"],',
+    '      address: PRICE_VIEW_ADDRESS,',
+    '      module: PRICE_VIEW_MODULE,',
+    '      function: PRICE_VIEW_FUNCTION,',
+    '      type_args: PRICE_VIEW_TYPE_ARGS,',
+    '      args: buildPriceViewArgs(endpoint.address),',
     '    }).then((payload) => ({ endpoint, payload })))',
     '  );',
     '',
@@ -439,7 +460,8 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '    address: "0x1",',
     '    module: "coin",',
     '    function: "balance",',
-    '    args: [address, "uusdc"],',
+    '    type_args: ["uusdc"],',
+    '    args: [address],',
     '  });',
     '  return extractBalance(payload);',
     '}',
@@ -758,6 +780,11 @@ function buildSafeInitiaSpreadConfigTs(): string {
     '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
     '  INITIA_POOL_A_ADDRESS: process.env.INITIA_POOL_A_ADDRESS ?? "",',
     '  INITIA_POOL_B_ADDRESS: process.env.INITIA_POOL_B_ADDRESS ?? "",',
+    '  INITIA_PRICE_VIEW_ADDRESS: process.env.INITIA_PRICE_VIEW_ADDRESS ?? "",',
+    '  INITIA_PRICE_VIEW_MODULE: process.env.INITIA_PRICE_VIEW_MODULE ?? "",',
+    '  INITIA_PRICE_VIEW_FUNCTION: process.env.INITIA_PRICE_VIEW_FUNCTION ?? "",',
+    '  INITIA_PRICE_VIEW_TYPE_ARGS: process.env.INITIA_PRICE_VIEW_TYPE_ARGS ?? "",',
+    '  INITIA_PRICE_VIEW_ARGS: process.env.INITIA_PRICE_VIEW_ARGS ?? "$endpoint",',
     '  ESTIMATED_BRIDGE_FEE_USDC: BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? "5000"),',
     '  POLL_MS: Number(process.env.POLL_MS ?? "15000"),',
     '};',
@@ -823,6 +850,7 @@ function buildSafeInitiaOnsResolverTs(): string {
     '    address: String(process.env.ONS_REGISTRY_ADDRESS ?? CONFIG.ONS_REGISTRY_ADDRESS ?? "0x1"),',
     '    module: "initia_names",',
     '    function: "resolve",',
+    '    type_args: [],',
     '    args: [normalized],',
     '  });',
     '  const resolved = extractAddressFromPayload(response);',
@@ -995,6 +1023,13 @@ function createBotWallet(): { walletAddress: string; encryptedPrivateKey: string
     walletAddress: key.accAddress,
     encryptedPrivateKey: encryptEnvConfig(privateKeyHex),
   };
+}
+
+async function ensureAgentWalletAddressColumn(requestId: string): Promise<void> {
+  console.warn(`[generate-bot] [${requestId}] Applying fallback schema fix for Agent.walletAddress`);
+  await prisma.$executeRawUnsafe(
+    'ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "walletAddress" TEXT NOT NULL DEFAULT \'\''
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -1258,39 +1293,51 @@ export async function POST(req: NextRequest) {
 
     const { walletAddress, encryptedPrivateKey } = createBotWallet();
 
-    console.log(`[generate-bot] [${requestId}] Persisting fallback/meta-agent output to DB`);
-    const agent = await prisma.agent.create({
-      data: {
-        name:          botName,
-        userId,
-        status:        "STOPPED",
-        walletAddress,
-        configuration: configRecord,
-        envConfig:     encryptedEnv,
-        sessionKeyPriv: encryptedPrivateKey,
-        files: {
-          create: files.map((f: GeneratedFile) => ({
-            filepath: typeof f.filepath === "string" && f.filepath.trim()
-              ? f.filepath
-              : "generated.txt",
-            content:
-              typeof f.content === "object"
-                ? JSON.stringify(f.content, null, 2)
-                : String(f.content),
-            language: (() => {
-              const fp = typeof f.filepath === "string" ? f.filepath : "";
-              return (
-                f.language ??
-                (fp.endsWith(".ts") ? "typescript"
-                  : fp.endsWith(".py") ? "python"
-                  : fp.endsWith(".json") ? "json"
-                  : "plaintext")
-              );
-            })(),
-          })),
-        },
+    const agentCreateData: Prisma.AgentCreateInput = {
+      name:          botName,
+      userId,
+      status:        "STOPPED" as const,
+      walletAddress,
+      configuration: configRecord,
+      envConfig:     encryptedEnv,
+      sessionKeyPriv: encryptedPrivateKey,
+      files: {
+        create: files.map((f: GeneratedFile) => ({
+          filepath: typeof f.filepath === "string" && f.filepath.trim()
+            ? f.filepath
+            : "generated.txt",
+          content:
+            typeof f.content === "object"
+              ? JSON.stringify(f.content, null, 2)
+              : String(f.content),
+          language: (() => {
+            const fp = typeof f.filepath === "string" ? f.filepath : "";
+            return (
+              f.language ??
+              (fp.endsWith(".ts") ? "typescript"
+                : fp.endsWith(".py") ? "python"
+                : fp.endsWith(".json") ? "json"
+                : "plaintext")
+            );
+          })(),
+        })),
       },
-    });
+    };
+
+    console.log(`[generate-bot] [${requestId}] Persisting fallback/meta-agent output to DB`);
+    let agent: Awaited<ReturnType<typeof prisma.agent.create>>;
+    try {
+      agent = await prisma.agent.create({ data: agentCreateData });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const missingWalletAddressColumn =
+        msg.includes("walletAddress") && msg.includes("does not exist");
+
+      if (!missingWalletAddressColumn) throw err;
+
+      await ensureAgentWalletAddressColumn(requestId);
+      agent = await prisma.agent.create({ data: agentCreateData });
+    }
 
     console.log(`[generate-bot] [${requestId}] Saved agent: ${agent.id} with ${files.length} files in ${Date.now() - requestStartedAt}ms`);
 
