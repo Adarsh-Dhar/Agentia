@@ -68,6 +68,11 @@ INITIA_POOL_A_ADDRESS=
 INITIA_POOL_B_ADDRESS=
 INITIA_FLASH_POOL_ADDRESS=
 INITIA_SWAP_ROUTER_ADDRESS=
+INITIA_SWAP_ROUTER_MODULE=
+INITIA_SWAP_ROUTER_FUNCTION=
+INITIA_SWAP_ROUTER_TYPE_ARGS=
+INITIA_SWAP_ROUTER_ARGS=$buyEndpoint,$sellEndpoint,$amount
+INITIA_USDC_METADATA_ADDRESS=
 ONS_REGISTRY_ADDRESS=0x1
 SIMULATION_MODE=true
 POLL_INTERVAL=15
@@ -90,6 +95,11 @@ export const config = {
   INITIA_POOL_B_ADDRESS: process.env.INITIA_POOL_B_ADDRESS ?? "",
   INITIA_FLASH_POOL_ADDRESS: process.env.INITIA_FLASH_POOL_ADDRESS ?? "",
   INITIA_SWAP_ROUTER_ADDRESS: process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "",
+  INITIA_SWAP_ROUTER_MODULE: process.env.INITIA_SWAP_ROUTER_MODULE ?? process.env.INITIA_SWAP_MODULE ?? "",
+  INITIA_SWAP_ROUTER_FUNCTION: process.env.INITIA_SWAP_ROUTER_FUNCTION ?? process.env.INITIA_SWAP_FUNCTION ?? "",
+  INITIA_SWAP_ROUTER_TYPE_ARGS: process.env.INITIA_SWAP_ROUTER_TYPE_ARGS ?? process.env.INITIA_SWAP_TYPE_ARGS ?? "",
+  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount",
+  INITIA_USDC_METADATA_ADDRESS: process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit",
   SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",
   POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),
 } as const;
@@ -252,13 +262,14 @@ async function runCycle(): Promise<void> {
   if (!wallet || !bridge) {
     throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");
   }
+  const usdcType = String(CONFIG.INITIA_USDC_METADATA_ADDRESS || "0x1::coin::uinit").trim();
 
   const view = await callMcpTool("initia", "move_view", {
     network: CONFIG.INITIA_NETWORK,
     address: "0x1",
     module: "coin",
     function: "balance",
-    type_args: ["0x1::coin::uusdc"],
+    type_args: [usdcType],
     args: [wallet],
   });
 

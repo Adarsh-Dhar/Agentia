@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { MsgExecuteJSON, RESTClient, Wallet, RawKey } from '@initia/initia.js';
+import { MsgExecuteJSON, RESTClient, Wallet, RawKey, AccAddress } from '@initia/initia.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../../.env') });
@@ -105,10 +105,96 @@ function toMoveJsonArg(value: string): string {
     trimmed.startsWith('[') ||
     trimmed === 'true' ||
     trimmed === 'false' ||
-    trimmed === 'null' ||
-    /^-?\d+(\.\d+)?$/.test(trimmed);
+    trimmed === 'null' 
 
   return looksLikeJson ? trimmed : JSON.stringify(trimmed);
+}
+
+function normalizeMoveAddress(value: string): string {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.startsWith('0x')) return trimmed.toLowerCase();
+  if (trimmed.startsWith('init1')) {
+    try {
+      return AccAddress.toHex(trimmed).toLowerCase();
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+
+function toBigInt(value: unknown): bigint | null {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed || !/^[0-9]+$/.test(trimmed)) return null;
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function extractBalanceFromViewResult(payload: unknown): bigint | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+
+  const rawData = root.data;
+  if (typeof rawData === 'string') {
+    const trimmed = rawData.trim();
+    const directData = toBigInt(trimmed);
+    if (directData !== null) return directData;
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (typeof parsed === 'string' || typeof parsed === 'number' || typeof parsed === 'bigint') {
+        const parsedData = toBigInt(parsed);
+        if (parsedData !== null) return parsedData;
+      }
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const first = toBigInt(parsed[0]);
+        if (first !== null) return first;
+      }
+      if (parsed && typeof parsed === 'object') {
+        const obj = parsed as Record<string, unknown>;
+        const nestedData = toBigInt(obj.balance ?? obj.amount ?? obj.value ?? obj.coin_amount);
+        if (nestedData !== null) return nestedData;
+      }
+    } catch {
+      // Best-effort parsing only.
+    }
+  }
+
+  if (Array.isArray(rawData) && rawData.length > 0) {
+    const first = toBigInt(rawData[0]);
+    if (first !== null) return first;
+  }
+
+  const direct = toBigInt(root.balance ?? root.amount ?? root.value ?? root.coin_amount);
+  if (direct !== null) return direct;
+
+  const result = root.result && typeof root.result === 'object' ? (root.result as Record<string, unknown>) : null;
+  if (!result) return null;
+
+  const nested = toBigInt(result.balance ?? result.amount ?? result.value ?? result.coin_amount);
+  if (nested !== null) return nested;
+
+  const content = result.content;
+  if (Array.isArray(content) && content.length > 0) {
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue;
+      const text = (item as Record<string, unknown>).text;
+      if (typeof text !== 'string') continue;
+      const digits = text.replace(/[^0-9]/g, '');
+      const parsed = toBigInt(digits);
+      if (parsed !== null) return parsed;
+    }
+  }
+
+  return null;
 }
 
 // Health check endpoint
@@ -237,6 +323,86 @@ app.post('/initia/move_execute', async (req, res) => {
 
     const typeArgsArray = parseStringArray(type_args);
     const parsedArgs = parseStringArray(args);
+
+    if (address === '0x923edc29f60bb73bec89024e17d3710ae92c0bb5' && module === 'arbitrage_router_fa' && funcName === 'execute_cross_chain_trade') {
+      const configuredInputMetadataAddress = normalizeMoveAddress(String(process.env.INITIA_INIT_METADATA_ADDRESS ?? ''));
+      const argInputMetadataAddress = normalizeMoveAddress(parsedArgs[3] ?? '');
+      const inputMetadataAddress = configuredInputMetadataAddress || argInputMetadataAddress;
+      const requestedAmount = toBigInt(parsedArgs[2]);
+
+      if (!inputMetadataAddress || requestedAmount === null) {
+        return res.status(400).json({
+          result: {
+            isError: true,
+            content: [{ text: 'Arbitrage execution requires pool addresses, amount, and input token metadata address as args[0..3]' }],
+          },
+        });
+      }
+
+      try {
+        const signerMoveAddress = normalizeMoveAddress(wallet.key.accAddress);
+        if (configuredInputMetadataAddress && argInputMetadataAddress && configuredInputMetadataAddress !== argInputMetadataAddress) {
+          log('WARN', 'Router arg metadata differs from INITIA_INIT_METADATA_ADDRESS; using env metadata', {
+            env: configuredInputMetadataAddress,
+            arg: argInputMetadataAddress,
+          });
+        }
+
+        const balanceView = await restClient.move.viewJSON(
+          '0x1',
+          'primary_fungible_store',
+          'balance',
+          ['0x1::fungible_asset::Metadata'],
+          [toMoveJsonArg(signerMoveAddress), toMoveJsonArg(inputMetadataAddress)],
+        );
+        const signerBalance = extractBalanceFromViewResult(balanceView);
+
+        if (signerBalance === null) {
+          log('WARN', 'Unable to parse signer balance from view result', {
+            signer: wallet.key.accAddress,
+            signerMoveAddress,
+            inputMetadataAddress,
+            requestedAmount: requestedAmount.toString(),
+            balanceView,
+          });
+          return res.status(400).json({
+            result: {
+              isError: true,
+              content: [{ text: `Unable to verify input token balance for signer ${wallet.key.accAddress}` }],
+            },
+          });
+        }
+
+        if (signerBalance < requestedAmount) {
+          log('WARN', 'Signer USDC balance insufficient for execution request', {
+            signer: wallet.key.accAddress,
+            signerBalance: signerBalance.toString(),
+            requestedAmount: requestedAmount.toString(),
+            inputMetadataAddress,
+          });
+          return res.status(400).json({
+            result: {
+              isError: true,
+              content: [{
+                text: `Signer ${wallet.key.accAddress} has insufficient input token balance (${signerBalance.toString()}) for requested amount (${requestedAmount.toString()}) using metadata ${inputMetadataAddress}; this would abort in object::address_to_object/primary_fungible_store::withdraw`,
+              }],
+            },
+          });
+        }
+
+        log('INFO', `Preflight balance check passed for signer ${wallet.key.accAddress}: ${signerBalance.toString()} >= ${requestedAmount.toString()}`);
+      } catch (error) {
+        const errMsg = describeError(error);
+        log('ERROR', 'balance preflight failed', errMsg);
+        return res.status(400).json({
+          result: {
+            isError: true,
+            content: [{ text: `Failed to verify signer input token balance before execution: ${errMsg}` }],
+          },
+        });
+      }
+    }
+
     const jsonArgs = parsedArgs.map(toMoveJsonArg);
 
     const msg = new MsgExecuteJSON(

@@ -58,6 +58,7 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
     'const POLL_MS = Number(config.POLL_MS ?? 15000);',
     'const THRESHOLD = BigInt(config.SWEEP_THRESHOLD_UUSDC ?? 1000000n);',
+    'const USDC_COIN_TYPE = String(config.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
     '',
     'function log(level: string, message: string): void {',
     '  console.log("[" + new Date().toISOString() + "] [" + level + "] " + message);',
@@ -124,7 +125,7 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '      address: "0x1",',
     '      module: "coin",',
     '      function: "balance",',
-    '      type_args: ["0x1::coin::uusdc"],',
+    '      type_args: [USDC_COIN_TYPE],',
     '      args: [wallet],',
     '    });',
     '  } catch (error) {',
@@ -189,14 +190,15 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     'const PRICE_VIEW_ADDRESS = String(config.INITIA_PRICE_VIEW_ADDRESS ?? "").trim();',
     'const PRICE_VIEW_MODULE = String(config.INITIA_PRICE_VIEW_MODULE ?? "").trim();',
     'const PRICE_VIEW_FUNCTION = String(config.INITIA_PRICE_VIEW_FUNCTION ?? "").trim();',
-    'const typeArgsRaw = String(config.INITIA_PRICE_VIEW_TYPE_ARGS || process.env.INITIA_PRICE_VIEW_TYPE_ARGS || "0x1::coin::uinit,0x1::coin::uusdc");',
+    'const USDC_COIN_TYPE = String(config.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
+    'const typeArgsRaw = String(config.INITIA_PRICE_VIEW_TYPE_ARGS || process.env.INITIA_PRICE_VIEW_TYPE_ARGS || ("0x1::coin::uinit," + USDC_COIN_TYPE));',
     'const PRICE_VIEW_TYPE_ARGS = typeArgsRaw.split(",").map((part) => part.trim()).filter(Boolean);',
-    'const PRICE_VIEW_ARGS_TEMPLATE = String(config.INITIA_PRICE_VIEW_ARGS ?? "$endpoint").trim();',
+    'const PRICE_VIEW_ARGS_TEMPLATE = String(config.INITIA_PRICE_VIEW_ARGS ?? "$endpoint,$amount").trim();',
     'const ARBITRAGE_ROUTER_ADDRESS = String(config.INITIA_SWAP_ROUTER_ADDRESS ?? "").trim();',
-    'const ARBITRAGE_ROUTER_MODULE = String(config.INITIA_SWAP_ROUTER_MODULE ?? "arbitrage_router").trim();',
-    'const ARBITRAGE_ROUTER_FUNCTION = String(config.INITIA_SWAP_ROUTER_FUNCTION ?? "execute_cross_chain_trade").trim();',
-    'const ARBITRAGE_ROUTER_TYPE_ARGS = String(config.INITIA_SWAP_ROUTER_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
-    'const ARBITRAGE_ROUTER_ARGS_TEMPLATE = String(config.INITIA_SWAP_ROUTER_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount").trim();',
+    'const ARBITRAGE_ROUTER_MODULE = String(config.INITIA_SWAP_ROUTER_MODULE ?? config.INITIA_SWAP_MODULE ?? "").trim();',
+    'const ARBITRAGE_ROUTER_FUNCTION = String(config.INITIA_SWAP_ROUTER_FUNCTION ?? config.INITIA_SWAP_FUNCTION ?? "").trim();',
+    'const ARBITRAGE_ROUTER_TYPE_ARGS = String(config.INITIA_SWAP_ROUTER_TYPE_ARGS ?? config.INITIA_SWAP_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
+    'const ARBITRAGE_ROUTER_ARGS_TEMPLATE = String(config.INITIA_SWAP_ROUTER_ARGS ?? config.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount").trim();',
     '',
     'function requireConfiguredAddress(name: string, value: unknown): string {',
     '  const resolved = String(value ?? "").trim();',
@@ -266,8 +268,12 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '}',
     '',
     'async function executeArbitrage(buyEndpointAddress: string, sellEndpointAddress: string, expectedProfit: bigint): Promise<void> {',
-    '  if (!ARBITRAGE_ROUTER_ADDRESS || !ARBITRAGE_ROUTER_MODULE || !ARBITRAGE_ROUTER_FUNCTION) {',
-    '    log("WARN", "Profitable spread detected but INITIA_SWAP_ROUTER_* config is incomplete; skipping execution");',
+    '  const missing: string[] = [];',
+    '  if (!ARBITRAGE_ROUTER_ADDRESS) missing.push("INITIA_SWAP_ROUTER_ADDRESS");',
+    '  if (!ARBITRAGE_ROUTER_MODULE) missing.push("INITIA_SWAP_ROUTER_MODULE");',
+    '  if (!ARBITRAGE_ROUTER_FUNCTION) missing.push("INITIA_SWAP_ROUTER_FUNCTION");',
+    '  if (missing.length > 0) {',
+    '    log("WARN", "Profitable spread detected but execution config is incomplete (missing: " + missing.join(",") + "); skipping execution");',
     '    return;',
     '  }',
     '  log("INFO", "[EXECUTE] buy=" + buyEndpointAddress + " sell=" + sellEndpointAddress + " amount=" + EXECUTION_AMOUNT_USDC.toString() + " expectedProfit=" + expectedProfit.toString());',
@@ -286,13 +292,31 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '  log("WARN", "[FAILED] Arbitrage execution returned no result");',
     '}',
     '',
-    'function buildPriceViewArgs(endpointAddress: string): string[] {',
-    '  if (!PRICE_VIEW_ARGS_TEMPLATE) return [];',
-    '  return PRICE_VIEW_ARGS_TEMPLATE',
+    'function buildPriceViewArgs(endpointAddress: string, amountIn: bigint): string[] {',
+    '  const amount = amountIn.toString();',
+    '  if (!PRICE_VIEW_ARGS_TEMPLATE) return [endpointAddress, amount];',
+    '  const resolved = PRICE_VIEW_ARGS_TEMPLATE',
     '    .split(",")',
     '    .map((part) => part.trim())',
     '    .filter(Boolean)',
-    '    .map((part) => (part === "$endpoint" ? endpointAddress : part));',
+    '    .map((part) => {',
+    '      if (part === "$endpoint") return endpointAddress;',
+    '      if (part === "$amount") return amount;',
+    '      return part;',
+    '    });',
+    '  if (resolved.length === 0) return [endpointAddress, amount];',
+    '  if (resolved.length === 1) {',
+    '    const only = resolved[0];',
+    '    if (only === endpointAddress || /^0x[0-9a-f]+$/i.test(only) || /^init1[0-9a-z]+$/i.test(only)) {',
+    '      return [only, amount];',
+    '    }',
+    '    return [endpointAddress, only];',
+    '  }',
+    '  if (String(PRICE_VIEW_FUNCTION).toLowerCase() === "get_amount_out") {',
+    '    const candidateAddress = resolved.find((part) => /^0x[0-9a-f]+$/i.test(part) || /^init1[0-9a-z]+$/i.test(part));',
+    '    return [candidateAddress ?? endpointAddress, amount];',
+    '  }',
+    '  return resolved;',
     '}',
     '',
     'async function runCycle(): Promise<void> {',
@@ -301,46 +325,85 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '    log("WARN", "Set INITIA_PRICE_VIEW_ADDRESS, INITIA_PRICE_VIEW_MODULE, and INITIA_PRICE_VIEW_FUNCTION for spread quotes");',
     '    return;',
     '  }',
-    '  const quotes = await Promise.allSettled(',
+    '  const buyQuotes = await Promise.allSettled(',
     '    ENDPOINTS.map((endpoint) => safeMcp("initia", "move_view", {',
     '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
     '      address: PRICE_VIEW_ADDRESS,',
     '      module: PRICE_VIEW_MODULE,',
     '      function: PRICE_VIEW_FUNCTION,',
     '      type_args: PRICE_VIEW_TYPE_ARGS,',
-    '      args: buildPriceViewArgs(endpoint.address),',
+    '      args: buildPriceViewArgs(endpoint.address, EXECUTION_AMOUNT_USDC),',
     '    }).then((payload) => ({ endpoint, payload })))',
     '  );',
     '',
-    '  const prices: Array<{ id: string; price: bigint }> = [];',
-    '  for (const settled of quotes) {',
+    '  const buyLegs: Array<{ id: string; address: string; amountOut: bigint }> = [];',
+    '  for (const settled of buyQuotes) {',
     '    if (settled.status !== "fulfilled") {',
     '      const msg = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);',
-    '      log("WARN", "Endpoint quote failed: " + msg);',
+    '      log("WARN", "Buy quote failed: " + msg);',
     '      continue;',
     '    }',
     '    const { endpoint, payload } = settled.value;',
-    '    const price = extractPrice(payload);',
-    '    if (price === null) {',
-    '      log("WARN", "[SCAN] " + endpoint.id + " returned non-numeric payload");',
+    '    const amountOut = extractPrice(payload);',
+    '    if (amountOut === null) {',
+    '      log("WARN", "[SCAN] buy " + endpoint.id + " returned non-numeric payload");',
     '      continue;',
     '    }',
-    '    prices.push({ id: endpoint.id, price });',
-    '    log("INFO", "[SCAN] " + endpoint.id + " price=" + price.toString());',
+    '    buyLegs.push({ id: endpoint.id, address: endpoint.address, amountOut });',
+    '    log("INFO", "[SCAN] buy " + endpoint.id + " amount_out=" + amountOut.toString());',
     '  }',
     '',
-    '  if (prices.length < 2) {',
-    '    log("WARN", "Insufficient quotes for spread calculation");',
+    '  if (buyLegs.length < 1) {',
+    '    log("WARN", "No valid buy quote returned");',
     '    return;',
     '  }',
     '',
-    '  const low = prices.reduce((best, current) => (current.price < best.price ? current : best), prices[0]);',
-    '  const high = prices.reduce((best, current) => (current.price > best.price ? current : best), prices[0]);',
-    '  const grossSpread = high.price > low.price ? high.price - low.price : 0n;',
+    '  const bestBuy = buyLegs.reduce((best, current) => (current.amountOut > best.amountOut ? current : best), buyLegs[0]);',
+    '  const fallbackSellTypeArgs = PRICE_VIEW_TYPE_ARGS.length >= 2 ? [PRICE_VIEW_TYPE_ARGS[1], PRICE_VIEW_TYPE_ARGS[0]] : PRICE_VIEW_TYPE_ARGS;',
+    '  const sellTypeArgs = String(config.INITIA_SELL_VIEW_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
+    '  const activeSellTypeArgs = sellTypeArgs.length > 0 ? sellTypeArgs : fallbackSellTypeArgs;',
+    '',
+    '  const sellQuotes = await Promise.allSettled(',
+    '    ENDPOINTS',
+    '      .filter((endpoint) => endpoint.address !== bestBuy.address)',
+    '      .map((endpoint) => safeMcp("initia", "move_view", {',
+    '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '      address: PRICE_VIEW_ADDRESS,',
+    '      module: PRICE_VIEW_MODULE,',
+    '      function: PRICE_VIEW_FUNCTION,',
+    '      type_args: activeSellTypeArgs,',
+    '      args: buildPriceViewArgs(endpoint.address, bestBuy.amountOut),',
+    '    }).then((payload) => ({ endpoint, payload })))',
+    '  );',
+    '',
+    '  const sellLegs: Array<{ id: string; address: string; amountOut: bigint }> = [];',
+    '  for (const settled of sellQuotes) {',
+    '    if (settled.status !== "fulfilled") {',
+    '      const msg = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);',
+    '      log("WARN", "Sell quote failed: " + msg);',
+    '      continue;',
+    '    }',
+    '    const { endpoint, payload } = settled.value;',
+    '    const amountOut = extractPrice(payload);',
+    '    if (amountOut === null) {',
+    '      log("WARN", "[SCAN] sell " + endpoint.id + " returned non-numeric payload");',
+    '      continue;',
+    '    }',
+    '    sellLegs.push({ id: endpoint.id, address: endpoint.address, amountOut });',
+    '    log("INFO", "[SCAN] sell " + endpoint.id + " amount_out=" + amountOut.toString());',
+    '  }',
+    '',
+    '  if (sellLegs.length < 1) {',
+    '    log("WARN", "No valid sell quote returned");',
+    '    return;',
+    '  }',
+    '',
+    '  const bestSell = sellLegs.reduce((best, current) => (current.amountOut > best.amountOut ? current : best), sellLegs[0]);',
+    '  const grossSpread = bestSell.amountOut > EXECUTION_AMOUNT_USDC ? bestSell.amountOut - EXECUTION_AMOUNT_USDC : 0n;',
     '  const netOpportunity = grossSpread > ESTIMATED_BRIDGE_FEE_USDC ? grossSpread - ESTIMATED_BRIDGE_FEE_USDC : 0n;',
     '  if (netOpportunity > 0n) {',
     '    log("INFO", "[ACTION] Profitable spread found. Executing trade path...");',
-    '    await executeArbitrage(low.address, high.address, netOpportunity);',
+    '    await executeArbitrage(bestBuy.address, bestSell.address, netOpportunity);',
     '    return;',
     '  }',
     '  log("INFO", "[QUANTIFY] gross=" + grossSpread.toString() + " fee=" + ESTIMATED_BRIDGE_FEE_USDC.toString() + " net=" + netOpportunity.toString() + " (No action taken)");',
@@ -400,29 +463,44 @@ function patchInitiaStrategyBotFiles(
   const promptIsSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(normalizedPrompt);
 
   const isYieldSweeper = promptIsYieldSweeper || isInitiaYieldSweeperIntent(intent);
-  const isSpreadScanner = !isYieldSweeper && (promptIsSpreadScanner || isInitiaSpreadScannerIntent(intent));
+  const isSpreadScanner = !isYieldSweeper && (promptIsSpreadScanner || promptIsCrossChain || isInitiaSpreadScannerIntent(intent));
+  const indexAliases = new Set(["src/index.ts", "index.ts", "src/main.ts", "main.ts"]);
 
-  if (!isYieldSweeper && !isSpreadScanner) {
+  const existingIndex = files.find((file) => indexAliases.has(file.filepath.replace(/^[./]+/, "")));
+  const rawIndexContent = typeof existingIndex?.content === "string" ? existingIndex.content : "";
+  const looksTruncatedIndex =
+    rawIndexContent.length > 0 &&
+    (rawIndexContent.trim() === 'import { CONFIG } from' ||
+      /import\s+\{\s*CONFIG\s*\}\s+from\s*$/.test(rawIndexContent.trim()) ||
+      !rawIndexContent.includes("callMcpTool") ||
+      rawIndexContent.split(/\r?\n/).length < 5);
+
+  const shouldForceSafeTemplate = looksTruncatedIndex;
+
+  if (!isYieldSweeper && !isSpreadScanner && !shouldForceSafeTemplate) {
     return files;
   }
 
-  const hasIndex = files.some((file) => file.filepath.replace(/^[./]+/, "") === "src/index.ts");
-  if (!hasIndex) {
+  const hasIndex = files.some((file) => indexAliases.has(file.filepath.replace(/^[./]+/, "")));
+  if (!hasIndex && !shouldForceSafeTemplate) {
     return files;
   }
 
-  return files.map((file) => {
+  const useYieldTemplate = isYieldSweeper;
+
+  const patched = files.map((file) => {
     const cleanPath = file.filepath.replace(/^[./]+/, "");
-    if (cleanPath === "src/index.ts") {
+    if (indexAliases.has(cleanPath)) {
       return {
         ...file,
-        content: isYieldSweeper ? buildSafeInitiaYieldSweeperIndexTs() : buildSafeInitiaSpreadScannerIndexTs(),
+        filepath: "src/index.ts",
+        content: useYieldTemplate ? buildSafeInitiaYieldSweeperIndexTs() : buildSafeInitiaSpreadScannerIndexTs(),
       };
     }
     if (cleanPath === "src/config.ts") {
       return {
         ...file,
-        content: isYieldSweeper ? buildSafeInitiaYieldConfigTs() : buildSafeInitiaSpreadConfigTs(),
+        content: useYieldTemplate ? buildSafeInitiaYieldConfigTs() : buildSafeInitiaSpreadConfigTs(),
       };
     }
     if (cleanPath === "src/ons_resolver.ts") {
@@ -433,6 +511,18 @@ function patchInitiaStrategyBotFiles(
     }
     return file;
   });
+
+  if (!patched.some((file) => file.filepath.replace(/^[./]+/, "") === "src/index.ts")) {
+    patched.push({ filepath: "src/index.ts", content: useYieldTemplate ? buildSafeInitiaYieldSweeperIndexTs() : buildSafeInitiaSpreadScannerIndexTs(), language: "typescript" });
+  }
+  if (!patched.some((file) => file.filepath.replace(/^[./]+/, "") === "src/config.ts")) {
+    patched.push({ filepath: "src/config.ts", content: useYieldTemplate ? buildSafeInitiaYieldConfigTs() : buildSafeInitiaSpreadConfigTs(), language: "typescript" });
+  }
+  if (!patched.some((file) => file.filepath.replace(/^[./]+/, "") === "src/ons_resolver.ts")) {
+    patched.push({ filepath: "src/ons_resolver.ts", content: buildSafeInitiaOnsResolverTs(), language: "typescript" });
+  }
+
+  return patched;
 }
 
 function buildSafeInitiaSentimentIndexTs(): string {
@@ -445,6 +535,8 @@ function buildSafeInitiaSentimentIndexTs(): string {
     'const SENTIMENT_BUY_THRESHOLD = 70;',
     'const SENTIMENT_SELL_THRESHOLD = 30;',
     'const SIMULATION_MODE = String(process.env.SIMULATION_MODE ?? config.SIMULATION_MODE ?? "true").toLowerCase() !== "false";',
+    'const BASE_COIN_TYPE = String(process.env.INITIA_BASE_COIN_TYPE ?? config.INITIA_BASE_COIN_TYPE ?? "0x1::coin::uinit").trim();',
+    'const USDC_COIN_TYPE = String(process.env.INITIA_USDC_METADATA_ADDRESS ?? config.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
     '',
     'function log(level: string, message: string): void {',
     '  const ts = new Date().toISOString();',
@@ -512,7 +604,7 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '    address: "0x1",',
     '    module: "coin",',
     '    function: "balance",',
-    '    type_args: ["0x1::coin::uusdc"],',
+    '    type_args: [USDC_COIN_TYPE],',
     '    args: [address],',
     '  });',
     '  return extractBalance(payload);',
@@ -560,7 +652,7 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '        address: flashPoolAddress,',
     '        module: "flash_loan",',
     '        function: "borrow",',
-    '        type_args: ["0x1::coin::uinit", "0x1::coin::uusdc"],',
+    '        type_args: [BASE_COIN_TYPE, USDC_COIN_TYPE],',
     '        args: ["1000000"],',
     '      });',
     '      await safeMcp("initia", "move_execute", {',
@@ -568,7 +660,7 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '        address: swapRouterAddress,',
     '        module: "router",',
     '        function: "swap_exact_in",',
-    '        type_args: ["0x1::coin::uinit", "0x1::coin::uusdc"],',
+    '        type_args: [BASE_COIN_TYPE, USDC_COIN_TYPE],',
     '        args: ["1000000", "995000"],',
     '      });',
     '      await safeMcp("initia", "move_execute", {',
@@ -576,7 +668,7 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '        address: flashPoolAddress,',
     '        module: "flash_loan",',
     '        function: "repay",',
-    '        type_args: ["0x1::coin::uinit", "0x1::coin::uusdc"],',
+    '        type_args: [BASE_COIN_TYPE, USDC_COIN_TYPE],',
     '        args: ["1000900"],',
     '      });',
     '    }',
@@ -837,6 +929,7 @@ function buildSafeInitiaYieldConfigTs(): string {
     '  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",',
     '  ONS_REGISTRY_ADDRESS: process.env.ONS_REGISTRY_ADDRESS ?? "0x1",',
     '  INITIA_BRIDGE_ADDRESS: process.env.INITIA_BRIDGE_ADDRESS ?? "",',
+    '  INITIA_USDC_METADATA_ADDRESS: process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit",',
     '  SWEEP_THRESHOLD_UUSDC: BigInt(process.env.SWEEP_THRESHOLD_UUSDC ?? "1000000"),',
     '  POLL_MS: Number(process.env.POLL_MS ?? "15000"),',
     '};',
@@ -857,12 +950,14 @@ function buildSafeInitiaSpreadConfigTs(): string {
     '  INITIA_PRICE_VIEW_MODULE: process.env.INITIA_PRICE_VIEW_MODULE ?? "",',
     '  INITIA_PRICE_VIEW_FUNCTION: process.env.INITIA_PRICE_VIEW_FUNCTION ?? "",',
     '  INITIA_PRICE_VIEW_TYPE_ARGS: process.env.INITIA_PRICE_VIEW_TYPE_ARGS ?? "",',
-    '  INITIA_PRICE_VIEW_ARGS: process.env.INITIA_PRICE_VIEW_ARGS ?? "$endpoint",',
+    '  INITIA_USDC_METADATA_ADDRESS: process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit",',
+    '  INITIA_PRICE_VIEW_ARGS: process.env.INITIA_PRICE_VIEW_ARGS ?? "$endpoint,$amount",',
+    '  INITIA_SELL_VIEW_TYPE_ARGS: process.env.INITIA_SELL_VIEW_TYPE_ARGS ?? "",',
     '  INITIA_SWAP_ROUTER_ADDRESS: process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "",',
-    '  INITIA_SWAP_ROUTER_MODULE: process.env.INITIA_SWAP_ROUTER_MODULE ?? "arbitrage_router",',
-    '  INITIA_SWAP_ROUTER_FUNCTION: process.env.INITIA_SWAP_ROUTER_FUNCTION ?? "execute_cross_chain_trade",',
-    '  INITIA_SWAP_ROUTER_TYPE_ARGS: process.env.INITIA_SWAP_ROUTER_TYPE_ARGS ?? "",',
-    '  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount",',
+    '  INITIA_SWAP_ROUTER_MODULE: process.env.INITIA_SWAP_ROUTER_MODULE ?? process.env.INITIA_SWAP_MODULE ?? "",',
+    '  INITIA_SWAP_ROUTER_FUNCTION: process.env.INITIA_SWAP_ROUTER_FUNCTION ?? process.env.INITIA_SWAP_FUNCTION ?? "",',
+    '  INITIA_SWAP_ROUTER_TYPE_ARGS: process.env.INITIA_SWAP_ROUTER_TYPE_ARGS ?? process.env.INITIA_SWAP_TYPE_ARGS ?? "",',
+    '  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount",',
     '  INITIA_EXECUTION_AMOUNT_USDC: BigInt(process.env.INITIA_EXECUTION_AMOUNT_USDC ?? "1000000"),',
     '  ESTIMATED_BRIDGE_FEE_USDC: BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? "5000"),',
     '  POLL_MS: Number(process.env.POLL_MS ?? "15000"),',
@@ -954,7 +1049,10 @@ function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
 function isInitiaSpreadScannerIntent(intent: Record<string, unknown>): boolean {
   const strategy = String(intent.strategy ?? "").toLowerCase();
   const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
-  return /spread scanner|market intelligence/.test(botType);
+  return (
+    /spread scanner|market intelligence|arbitrage/.test(botType) ||
+    /arbitrage|cross_chain_arbitrage/.test(strategy)
+  );
 }
 
 function isInitiaSentimentIntent(intent: Record<string, unknown>): boolean {

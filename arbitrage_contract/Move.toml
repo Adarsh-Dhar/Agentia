@@ -1,0 +1,9 @@
+[package]
+name = "ArbitrageRouter"
+version = "0.0.0"
+
+[addresses]
+deployer = "_"
+
+[dependencies]
+InitiaStdlib = { git = "https://github.com/initia-labs/move-natives.git", subdir = "initia_stdlib", rev = "v1.2.0" }

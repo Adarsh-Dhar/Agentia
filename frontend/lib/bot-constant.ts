@@ -32,8 +32,15 @@ export interface BotEnvConfig {
   INITIA_PRICE_VIEW_FUNCTION: string;
   INITIA_PRICE_VIEW_TYPE_ARGS: string;
   INITIA_PRICE_VIEW_ARGS: string;
+  INITIA_SELL_VIEW_TYPE_ARGS: string;
   INITIA_FLASH_POOL_ADDRESS: string;
   INITIA_SWAP_ROUTER_ADDRESS: string;
+  INITIA_SWAP_ROUTER_MODULE: string;
+  INITIA_SWAP_ROUTER_FUNCTION: string;
+  INITIA_SWAP_ROUTER_TYPE_ARGS: string;
+  INITIA_SWAP_ROUTER_ARGS: string;
+  INITIA_EXECUTION_AMOUNT_USDC: string;
+  ESTIMATED_BRIDGE_FEE_USDC: string;
   OPENAI_API_KEY: string;
   POLL_INTERVAL: string;
   [key: string]: string;
@@ -55,9 +62,16 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   INITIA_PRICE_VIEW_MODULE: "",
   INITIA_PRICE_VIEW_FUNCTION: "",
   INITIA_PRICE_VIEW_TYPE_ARGS: "",
-  INITIA_PRICE_VIEW_ARGS: "$endpoint",
+  INITIA_PRICE_VIEW_ARGS: "$endpoint,$amount",
+  INITIA_SELL_VIEW_TYPE_ARGS: "",
   INITIA_FLASH_POOL_ADDRESS: "",
   INITIA_SWAP_ROUTER_ADDRESS: "",
+  INITIA_SWAP_ROUTER_MODULE: "",
+  INITIA_SWAP_ROUTER_FUNCTION: "",
+  INITIA_SWAP_ROUTER_TYPE_ARGS: "",
+  INITIA_SWAP_ROUTER_ARGS: "$buyEndpoint,$sellEndpoint,$amount",
+  INITIA_EXECUTION_AMOUNT_USDC: "1000000",
+  ESTIMATED_BRIDGE_FEE_USDC: "5000",
   OPENAI_API_KEY: "",
   POLL_INTERVAL: "15",
 };
@@ -91,6 +105,7 @@ export function getRequiredEnvFields(
 
   const isYield = strategy.includes("yield") || /sweep|consolidator/.test(botName);
   const isSpreadScanner = botName.includes("spread") && botName.includes("scanner");
+  const isArbitrage = strategy.includes("arbitrage") || /arbitrage/.test(botName);
 
   const fields: EnvFieldDef[] = [
     {
@@ -165,7 +180,7 @@ export function getRequiredEnvFields(
     );
   }
 
-  if (isSpreadScanner) {
+  if (isSpreadScanner || isArbitrage) {
     fields.push(
       {
         key: "INITIA_POOL_A_ADDRESS",
@@ -214,8 +229,16 @@ export function getRequiredEnvFields(
         label: "Price View Args Template",
         type: "text",
         required: false,
-        placeholder: "$endpoint",
-        helpText: "Comma-separated args; use $endpoint to inject each endpoint address.",
+        placeholder: "$endpoint,$amount",
+        helpText: "Comma-separated args; use $endpoint for pool address and $amount for input amount.",
+      },
+      {
+        key: "INITIA_SELL_VIEW_TYPE_ARGS",
+        label: "Sell View Type Args (Optional)",
+        type: "text",
+        required: false,
+        placeholder: "",
+        helpText: "Optional comma-separated type args for sell-leg quote. Leave blank to auto-reverse buy type args.",
       },
       {
         key: "POLL_INTERVAL",
@@ -223,6 +246,44 @@ export function getRequiredEnvFields(
         type: "text",
         required: false,
         placeholder: "15",
+      },
+      {
+        key: "INITIA_SWAP_ROUTER_ADDRESS",
+        label: "Execution Address",
+        type: "text",
+        required: isArbitrage,
+        placeholder: "0x...",
+        helpText: "Address of the module that executes the arbitrage transaction.",
+      },
+      {
+        key: "INITIA_SWAP_ROUTER_MODULE",
+        label: "Execution Module",
+        type: "text",
+        required: isArbitrage,
+        placeholder: "arbitrage_router",
+      },
+      {
+        key: "INITIA_SWAP_ROUTER_FUNCTION",
+        label: "Execution Function",
+        type: "text",
+        required: isArbitrage,
+        placeholder: "execute_cross_chain_trade",
+      },
+      {
+        key: "INITIA_SWAP_ROUTER_TYPE_ARGS",
+        label: "Execution Type Args",
+        type: "text",
+        required: false,
+        placeholder: "",
+        helpText: "Optional comma-separated Move type args for execution.",
+      },
+      {
+        key: "INITIA_SWAP_ROUTER_ARGS",
+        label: "Execution Args Template",
+        type: "text",
+        required: false,
+        placeholder: "$buyEndpoint,$sellEndpoint,$amount",
+        helpText: "Use $buyEndpoint, $sellEndpoint, and $amount placeholders.",
       },
     );
   }
