@@ -41,6 +41,16 @@ function getBrowserProxyGateway(): string {
   return `${window.location.origin}/api/mcp-proxy`;
 }
 
+function getRuntimeRelayBase(current?: string | null): string {
+  if (typeof window === "undefined") return String(current || "").trim();
+  const origin = String(window.location.origin || "").trim();
+  // Inside WebContainer, localhost points to the sandbox, not the host app.
+  if (!origin || /(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(origin)) {
+    return String(current || "").trim();
+  }
+  return origin;
+}
+
 function pickReachableGateway(...candidates: Array<string | null | undefined>): string {
   const cleaned = candidates.map((v) => String(v || "").trim()).filter(Boolean);
   const publicGateway = cleaned.find((v) => !isLocalOrProxy(v));
@@ -137,6 +147,7 @@ export function WebContainerBotRunner() {
           ...result.loadedEnvConfig,
           INITIA_KEY: "",
           SESSION_KEY_MODE: "true",
+          SIGNING_RELAY_BASE: getRuntimeRelayBase(prev.SIGNING_RELAY_BASE || ""),
           MCP_GATEWAY_URL: pickReachableGateway(
             loadedGateway,
             sharedGateway,
@@ -175,6 +186,7 @@ export function WebContainerBotRunner() {
       ...envConfig,
       SESSION_KEY_MODE: "true",
       INITIA_KEY: "",
+      SIGNING_RELAY_BASE: getRuntimeRelayBase(envConfig.SIGNING_RELAY_BASE),
     });
   }, [generatedFiles.length, envLoaded, bootAndRun, envConfig, autosignEnabled, setPhase, termRef]);
 
@@ -233,6 +245,7 @@ export function WebContainerBotRunner() {
       ...envConfig,
       SESSION_KEY_MODE: "true",
       INITIA_KEY: "",
+      SIGNING_RELAY_BASE: getRuntimeRelayBase(envConfig.SIGNING_RELAY_BASE),
     });
   }, [userWalletAddress, autosignEnabled, bootAndRun, envConfig, setPhase, termRef]);
 

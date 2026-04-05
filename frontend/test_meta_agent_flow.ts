@@ -121,6 +121,7 @@ async function run(): Promise<void> {
       const indexContent = typeof indexFile?.content === "string" ? indexFile.content : "";
       const packageFile = files.find((f) => f.filepath === "package.json");
       const packageContent = typeof packageFile?.content === "string" ? packageFile.content : "";
+      const bridgeContent = String(mcpBridgeContent ?? "");
       const loweredIndex = indexContent.toLowerCase();
 
       const intent = (generate.data.intent ?? {}) as Json;
@@ -141,10 +142,14 @@ async function run(): Promise<void> {
       assert(!packageContent.includes("web3.js"), "package.json should not include external web3 SDKs for Initia bots");
       assert(!packageContent.includes("bs58"), "package.json should not include bs58 for Initia bots");
       assert(
-        mcpBridgeContent.includes("ngrok-skip-browser-warning") &&
-          mcpBridgeContent.includes("Bypass-Tunnel-Reminder"),
+        bridgeContent.includes("ngrok-skip-browser-warning") &&
+          bridgeContent.includes("Bypass-Tunnel-Reminder"),
         "generated src/mcp_bridge.ts is missing required tunnel bypass headers",
       );
+      assert(bridgeContent.includes("export async function callMcpTool"), "generated src/mcp_bridge.ts must export callMcpTool");
+      assert(bridgeContent.includes("async function callSigningRelay"), "generated src/mcp_bridge.ts must include signing relay support");
+      assert(bridgeContent.includes("async function callGateway"), "generated src/mcp_bridge.ts must include gateway support");
+      assert(!/^if\s*\(/m.test(bridgeContent.trim()), "generated src/mcp_bridge.ts must not start with a stray top-level if");
       assert(/callmcptool\s*\(\s*["']initia["']\s*,\s*["']move_execute["']/.test(loweredIndex), "generated index must use initia/move_execute");
       assert(loweredIndex.includes('module: "opinit_bridge"') || loweredIndex.includes("module: 'opinit_bridge'"), "generated index must execute opinit_bridge module");
       assert(loweredIndex.includes('function: "initiate_token_deposit"') || loweredIndex.includes("function: 'initiate_token_deposit'"), "generated index must execute initiate_token_deposit function");
@@ -160,10 +165,11 @@ async function run(): Promise<void> {
       console.log(`[ok] generate-bot success in ${elapsedSec}s`);
       console.log("agentId:", generate.data.agentId);
       console.log("files:", files.length);
-        assert(!loweredIndex.includes("getwalletprivatekey"), "generated index must not try to extract a private key");
-        assert(!loweredIndex.includes("callsigningrelay"), "generated index must not inline signing relay logic into src/index.ts");
-        assert(!loweredIndex.includes("deriverelaybase"), "generated index must not inline relay base helpers into src/index.ts");
-        assert(!loweredIndex.includes("buildcandidateurls"), "generated index must not inline MCP bridge URL helpers into src/index.ts");
+      assert(!loweredIndex.includes("getwalletprivatekey"), "generated index must not try to extract a private key");
+      assert(!loweredIndex.includes("callsigningrelay"), "generated index must not inline signing relay logic into src/index.ts");
+      assert(!loweredIndex.includes("deriverelaybase"), "generated index must not inline relay base helpers into src/index.ts");
+      assert(!loweredIndex.includes("buildcandidateurls"), "generated index must not inline MCP bridge URL helpers into src/index.ts");
+      assert(!loweredIndex.includes('return /\\/mcp$/i.test(base)'), "generated index must not contain broken MCP bridge fragments");
       return;
     }
 

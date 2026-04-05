@@ -58,6 +58,7 @@ const INITIA_TSCONFIG = JSON.stringify(
 );
 
 const INITIA_ENV_EXAMPLE = `MCP_GATEWAY_URL=http://localhost:8000/mcp
+SIGNING_RELAY_BASE=
 INITIA_RPC_URL=
 INITIA_NETWORK=initia-testnet
 # USER_WALLET_ADDRESS accepts either a raw address (init1...) or a .init name
@@ -82,6 +83,7 @@ const INITIA_CONFIG_TS = `import "dotenv/config";
 export const config = {
   MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),
   MCP_GATEWAY_UPSTREAM_URL: process.env.MCP_GATEWAY_UPSTREAM_URL ?? "",
+  SIGNING_RELAY_BASE: process.env.SIGNING_RELAY_BASE ?? "",
   SESSION_KEY_MODE: process.env.SESSION_KEY_MODE ?? "false",
   INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",
   // ONS: USER_WALLET_ADDRESS may be a .init name (e.g. "adarsh.init")
@@ -109,6 +111,7 @@ export const CONFIG = config;
 const INITIA_MCP_BRIDGE_TS = `import * as configModule from "./config.js";
 
 const CONFIG = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;
+const SIGNING_RELAY_BASE = String(CONFIG.SIGNING_RELAY_BASE ?? process.env.SIGNING_RELAY_BASE ?? "").trim();
 
 function normalizeGatewayBase(raw: string): string {
   const value = String(raw || "").trim().replace(/\/+$/, "");
@@ -121,6 +124,16 @@ function isProxyGateway(value: string): boolean {
 }
 
 function deriveRelayBase(): string {
+  if (SIGNING_RELAY_BASE) {
+    if (isProxyGateway(SIGNING_RELAY_BASE)) return SIGNING_RELAY_BASE.replace(/\/api\/mcp-proxy\/?$/i, "");
+    try {
+      const relayUrl = new URL(SIGNING_RELAY_BASE);
+      return relayUrl.origin;
+    } catch {
+      return SIGNING_RELAY_BASE;
+    }
+  }
+
   const raw = String(CONFIG.MCP_GATEWAY_URL ?? "").trim();
   if (!raw) return "http://localhost:3000";
   if (isProxyGateway(raw)) return raw.replace(/\/api\/mcp-proxy\/?$/i, "");
@@ -171,6 +184,11 @@ async function callGateway(server: string, tool: string, args: Record<string, un
 
 const RELAY_POLL_INTERVAL_MS = 600;
 const RELAY_TIMEOUT_MS = 90_000;
+
+function isRelayUnavailableError(message: string): boolean {
+  const value = String(message || "");
+  return /fetch failed|network|econnrefused|enotfound|Endpoint not found|Signing relay submit failed \(404\)|Signing relay poll failed \(404\)/i.test(value);
+}
 
 async function callSigningRelay(args: Record<string, unknown>): Promise<unknown> {
   const submitUrl = RELAY_BASE + "/api/signing-relay";
@@ -223,7 +241,16 @@ async function callSigningRelay(args: Record<string, unknown>): Promise<unknown>
 
 export async function callMcpTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
   if (server === "initia" && tool === "move_execute") {
-    return callSigningRelay(args);
+    try {
+      return await callSigningRelay(args);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (!isRelayUnavailableError(msg)) {
+        throw error;
+      }
+      // Fallback for local WebContainer runs where browser relay origin is unreachable.
+      return callGateway(server, tool, args);
+    }
   }
   return callGateway(server, tool, args);
 }

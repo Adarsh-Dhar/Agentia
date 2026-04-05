@@ -18,6 +18,7 @@ export interface BotIntent {
 export interface BotEnvConfig {
   SIMULATION_MODE: string;
   MCP_GATEWAY_URL: string;
+  SIGNING_RELAY_BASE: string;
   SESSION_KEY_MODE: string;
   INITIA_KEY: string;
   INITIA_RPC_URL: string;
@@ -49,6 +50,7 @@ export interface BotEnvConfig {
 export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   SIMULATION_MODE: "false",
   MCP_GATEWAY_URL: "http://192.168.1.50:8000/mcp",
+  SIGNING_RELAY_BASE: "",
   SESSION_KEY_MODE: "false",
   INITIA_KEY: "",
   INITIA_RPC_URL: "",
@@ -115,6 +117,14 @@ export function getRequiredEnvFields(
       required: true,
       placeholder: "http://192.168.1.50:8000/mcp",
       helpText: "URL of the running Meta-Agent gateway.",
+    },
+    {
+      key: "SIGNING_RELAY_BASE",
+      label: "Signing Relay Base URL",
+      type: "text",
+      required: false,
+      placeholder: "http://localhost:3000",
+      helpText: "Base URL for /api/signing-relay. Leave blank to auto-use browser origin.",
     },
     {
       key: "SIMULATION_MODE",
