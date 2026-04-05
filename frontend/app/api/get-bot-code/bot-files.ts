@@ -58,7 +58,6 @@ const INITIA_TSCONFIG = JSON.stringify(
 );
 
 const INITIA_ENV_EXAMPLE = `MCP_GATEWAY_URL=http://localhost:8000/mcp
-INITIA_KEY=replace_me
 INITIA_RPC_URL=
 INITIA_NETWORK=initia-testnet
 # USER_WALLET_ADDRESS accepts either a raw address (init1...) or a .init name
@@ -82,7 +81,7 @@ const INITIA_CONFIG_TS = `import "dotenv/config";
 
 export const config = {
   MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),
-  INITIA_KEY: process.env.INITIA_KEY ?? "",
+  MCP_GATEWAY_UPSTREAM_URL: process.env.MCP_GATEWAY_UPSTREAM_URL ?? "",
   SESSION_KEY_MODE: process.env.SESSION_KEY_MODE ?? "false",
   INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",
   // ONS: USER_WALLET_ADDRESS may be a .init name (e.g. "adarsh.init")
@@ -112,23 +111,36 @@ const INITIA_MCP_BRIDGE_TS = `import * as configModule from "./config.js";
 const CONFIG = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;
 
 function normalizeGatewayBase(raw: string): string {
-  return String(raw || "").trim().replace(/\\/+$/, "");
+  const value = String(raw || "").trim().replace(/\/+$/, "");
+  if (!value) return "http://localhost:8000/mcp";
+  return /\/mcp$/i.test(value) ? value : value + "/mcp";
 }
+
+function isProxyGateway(value: string): boolean {
+  return /\/api\/mcp-proxy\/?$/i.test(String(value || ""));
+}
+
+function deriveRelayBase(): string {
+  const raw = String(CONFIG.MCP_GATEWAY_URL ?? "").trim();
+  if (!raw) return "http://localhost:3000";
+  if (isProxyGateway(raw)) return raw.replace(/\/api\/mcp-proxy\/?$/i, "");
+  try {
+    const url = new URL(raw);
+    return url.origin;
+  } catch {
+    return "http://localhost:3000";
+  }
+}
+
+const RELAY_BASE = deriveRelayBase();
 
 function buildCandidateUrls(base: string, server: string, tool: string): string[] {
-  const withMcp = /\\/mcp$/i.test(base) ? base : base + "/mcp";
-  const withoutMcp = withMcp.replace(/\\/mcp$/i, "");
-  return [
-    withMcp + "/" + server + "/" + tool,
-    withoutMcp + "/" + server + "/" + tool,
-  ];
+  const withMcp = /\/mcp$/i.test(base) ? base : base + "/mcp";
+  const withoutMcp = withMcp.replace(/\/mcp$/i, "");
+  return [withMcp + "/" + server + "/" + tool, withoutMcp + "/" + server + "/" + tool];
 }
 
-export async function callMcpTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
-  const initiaKey = String(CONFIG.INITIA_KEY ?? "").trim();
-  if (server === "initia" && tool === "move_execute" && !initiaKey) {
-    throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");
-  }
+async function callGateway(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
   const base = normalizeGatewayBase(String(CONFIG.MCP_GATEWAY_URL ?? ""));
   const urls = buildCandidateUrls(base, server, tool);
 
@@ -138,9 +150,9 @@ export async function callMcpTool(server: string, tool: string, args: Record<str
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(initiaKey ? { "x-session-key": initiaKey } : {}),
         "ngrok-skip-browser-warning": "true",
         "Bypass-Tunnel-Reminder": "true",
+        ...(CONFIG.MCP_GATEWAY_UPSTREAM_URL ? { "x-mcp-upstream-url": String(CONFIG.MCP_GATEWAY_UPSTREAM_URL) } : {}),
       },
       body: JSON.stringify(args ?? {}),
     });
@@ -155,6 +167,65 @@ export async function callMcpTool(server: string, tool: string, args: Record<str
     return res.json();
   }
   throw new Error(lastError);
+}
+
+const RELAY_POLL_INTERVAL_MS = 600;
+const RELAY_TIMEOUT_MS = 90_000;
+
+async function callSigningRelay(args: Record<string, unknown>): Promise<unknown> {
+  const submitUrl = RELAY_BASE + "/api/signing-relay";
+  const submitRes = await fetch(submitUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      network: args.network ?? "initia-testnet",
+      moduleAddress: args.address,
+      moduleName: args.module,
+      functionName: args.function,
+      typeArgs: args.type_args ?? [],
+      args: args.args ?? [],
+    }),
+  });
+
+  if (!submitRes.ok) {
+    const errText = await submitRes.text().catch(() => "");
+    throw new Error("Signing relay submit failed (" + submitRes.status + "): " + errText.slice(0, 200));
+  }
+
+  const payload = (await submitRes.json()) as { requestId?: string };
+  const requestId = String(payload.requestId ?? "").trim();
+  if (!requestId) throw new Error("Signing relay did not return a requestId.");
+
+  const deadline = Date.now() + RELAY_TIMEOUT_MS;
+  const resultUrl = RELAY_BASE + "/api/signing-relay/" + requestId;
+
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, RELAY_POLL_INTERVAL_MS));
+    const pollRes = await fetch(resultUrl, { headers: { "Cache-Control": "no-store" } });
+    if (!pollRes.ok) {
+      throw new Error("Signing relay poll failed (" + pollRes.status + ").");
+    }
+
+    const data = (await pollRes.json()) as { status: string; result?: { txHash?: string; error?: string } };
+    if (data.status === "signed" && data.result?.txHash) {
+      return { txHash: data.result.txHash, success: true };
+    }
+    if (data.status === "failed") {
+      throw new Error("Signing failed: " + (data.result?.error ?? "unknown error"));
+    }
+    if (data.status === "timeout") {
+      throw new Error("Signing request timed out. Ensure AutoSign is enabled in the browser.");
+    }
+  }
+
+  throw new Error("Signing relay timed out after " + (RELAY_TIMEOUT_MS / 1000) + "s. Check that the browser tab is open with AutoSign enabled.");
+}
+
+export async function callMcpTool(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
+  if (server === "initia" && tool === "move_execute") {
+    return callSigningRelay(args);
+  }
+  return callGateway(server, tool, args);
 }
 `;
 

@@ -6,8 +6,8 @@
  * Bot IDE component. Loads bot files from DB, runs them in a WebContainer.
  *
  * Transaction signing architecture:
- *   - move_view  -> goes through MCP gateway directly (read-only, no key needed)
- *   - move_execute -> routed through /api/signing-relay
+ *   - move_view  → goes through MCP gateway directly (read-only, no key needed)
+ *   - move_execute → routed through /api/signing-relay
  *                    SigningRelayConsumer picks it up and calls submitTxBlock
  *                    using the AutoSign Ghost Wallet (no private key exposure)
  */
@@ -118,6 +118,7 @@ export function WebContainerBotRunner() {
   // ── On mount: load files + env ────────────────────────────────────────────
   useEffect(() => {
     (async () => {
+      // Load shared env defaults from server
       const envDefaultsRes = await fetch("/api/env-defaults").catch(() => null);
       const envDefaultsJson =
         envDefaultsRes?.ok
@@ -135,6 +136,7 @@ export function WebContainerBotRunner() {
         setEnvConfig((prev) => ({
           ...prev,
           ...result.loadedEnvConfig,
+          // Bot signs via relay — no private key needed in env
           INITIA_KEY: "",
           SESSION_KEY_MODE: "true",
           MCP_GATEWAY_URL: pickReachableGateway(
@@ -171,12 +173,21 @@ export function WebContainerBotRunner() {
     shouldAutoLaunchRef.current = false;
     setPhase("booting");
 
+    // The bot uses the signing relay for move_execute — no INITIA_KEY needed.
     void bootAndRun({
       ...envConfig,
       SESSION_KEY_MODE: "true",
-      INITIA_KEY: "",
+      INITIA_KEY: "", // intentionally empty; signing handled by relay
     });
-  }, [generatedFiles.length, envLoaded, bootAndRun, envConfig, autosignEnabled, setPhase, termRef]);
+  }, [
+    generatedFiles.length,
+    envLoaded,
+    bootAndRun,
+    envConfig,
+    autosignEnabled,
+    setPhase,
+    termRef,
+  ]);
 
   // ── Sync .env file edits → envConfig ─────────────────────────────────────
   useEffect(() => {
@@ -197,22 +208,11 @@ export function WebContainerBotRunner() {
 
   const handleEditorChange = useCallback(
     (value: string) => {
-      if (selectedFile) {
+      if (selectedFile)
         setFileEdits((prev) => ({ ...prev, [selectedFile]: value }));
-      }
     },
     [selectedFile]
   );
-
-  const currentFiles = generatedFiles.map((f) => ({
-    ...f,
-    content:
-      fileEdits[f.filepath] !== undefined ? fileEdits[f.filepath] : f.content,
-  }));
-
-  const selectedContent =
-    currentFiles.find((f) => f.filepath === selectedFile)?.content ?? "";
-  const isDryRun = envConfig.SIMULATION_MODE === "true";
 
   const handleLaunch = useCallback(() => {
     if (!userWalletAddress) {
@@ -232,9 +232,27 @@ export function WebContainerBotRunner() {
     void bootAndRun({
       ...envConfig,
       SESSION_KEY_MODE: "true",
-      INITIA_KEY: "",
+      INITIA_KEY: "", // signing relay handles move_execute
     });
-  }, [userWalletAddress, autosignEnabled, bootAndRun, envConfig, setPhase, termRef]);
+  }, [
+    userWalletAddress,
+    autosignEnabled,
+    bootAndRun,
+    envConfig,
+    setPhase,
+    termRef,
+  ]);
+
+  const currentFiles = generatedFiles.map((f) => ({
+    ...f,
+    content:
+      fileEdits[f.filepath] !== undefined ? fileEdits[f.filepath] : f.content,
+  }));
+
+  const selectedContent =
+    currentFiles.find((f) => f.filepath === selectedFile)?.content ?? "";
+
+  const isDryRun = envConfig.SIMULATION_MODE === "true";
 
   return (
     <div
@@ -252,6 +270,7 @@ export function WebContainerBotRunner() {
         position: "relative",
       }}
     >
+      {/* ── Signing relay (invisible background worker) ── */}
       <SigningRelayConsumer
         botRunning={isRunning}
         onLog={(line) => termRef.current?.writeln(`\x1b[35m${line}\x1b[0m`)}
@@ -307,6 +326,7 @@ export function WebContainerBotRunner() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Status pills */}
           <span
             style={{
               fontSize: 10,
@@ -350,6 +370,7 @@ export function WebContainerBotRunner() {
             </span>
           )}
 
+          {/* AutoSign status */}
           <span
             style={{
               fontSize: 10,
@@ -365,12 +386,16 @@ export function WebContainerBotRunner() {
               gap: 4,
             }}
           >
-            {autosignEnabled ? <ShieldCheck size={10} /> : <ShieldOff size={10} />}
-            {autosignEnabled ? "AutoSign Active" : "AutoSign Required"}
+            {autosignEnabled ? (
+              <ShieldCheck size={10} />
+            ) : (
+              <ShieldOff size={10} />
+            )}
+            {autosignEnabled ? "AutoSign ✓ — Relay Active" : "AutoSign Required"}
           </span>
 
-          <button
-            type="button"
+          {/* Bot icon / signing relay indicator */}
+          <div
             style={{
               display: "flex",
               alignItems: "center",
@@ -382,14 +407,14 @@ export function WebContainerBotRunner() {
               color: "#94a3b8",
               fontSize: 11,
               fontWeight: 600,
-              fontFamily: "inherit",
-              cursor: "default",
             }}
-            title={autosignEnabled ? "Bot signs via AutoSign relay in the browser." : "Enable AutoSign to activate relay signing."}
+            title="Bot signs via AutoSign Ghost Wallet — no private key stored."
           >
-            <Bot size={11} /> {autosignEnabled ? "Signing Relay Ready" : "Relay Disabled"}
-          </button>
+            <Bot size={11} />
+            {autosignEnabled ? "Signing Relay Ready" : "Enable AutoSign"}
+          </div>
 
+          {/* Start / Stop */}
           {isRunning ? (
             <button
               onClick={stopProcess}
@@ -439,7 +464,9 @@ export function WebContainerBotRunner() {
                 alignItems: "center",
                 gap: 5,
                 background: autosignEnabled ? "#059669" : "#1e293b",
-                border: autosignEnabled ? "1px solid #10b981" : "1px solid #334155",
+                border: autosignEnabled
+                  ? "1px solid #10b981"
+                  : "1px solid #334155",
                 borderRadius: 6,
                 padding: "5px 12px",
                 color: autosignEnabled ? "#a7f3d0" : "#64748b",

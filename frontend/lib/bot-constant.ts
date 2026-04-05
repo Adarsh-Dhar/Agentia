@@ -128,11 +128,9 @@ export function getRequiredEnvFields(
       key: "INITIA_KEY",
       label: "Initia Private Key",
       type: "password",
-      required: !sessionKeyMode,
+      required: false,
       placeholder: "0x...",
-      helpText: sessionKeyMode
-        ? "Session Key Active: provided automatically by Initia AutoSign at launch."
-        : "Required for move_execute signing via Initia MCP.",
+      helpText: "Not used by the relay flow. move_execute is signed in the browser via AutoSign.",
     },
     {
       key: "INITIA_RPC_URL",

@@ -31,6 +31,7 @@ function normalizeEnvValue(raw: string): string {
 function buildEnvFileContent(cfg: BotEnvConfig): string {
   const merged: Record<string, string> = {};
   for (const [k, v] of Object.entries(cfg)) {
+    if (k === "INITIA_KEY") continue;
     if (typeof v === "string" && v !== "") {
       merged[k] = normalizeEnvValue(v);
     }
@@ -81,6 +82,7 @@ function detectRunStrategy(files: BotFile[]): { needsInstall: boolean; runCmd: s
 function buildProcessEnv(cfg: BotEnvConfig): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(cfg)) {
+    if (k === "INITIA_KEY") continue;
     if (typeof v === "string" && v !== "") env[k] = normalizeEnvValue(v);
   }
   if (!env.SIMULATION_MODE) env.SIMULATION_MODE = "true";

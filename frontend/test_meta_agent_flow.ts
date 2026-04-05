@@ -160,6 +160,10 @@ async function run(): Promise<void> {
       console.log(`[ok] generate-bot success in ${elapsedSec}s`);
       console.log("agentId:", generate.data.agentId);
       console.log("files:", files.length);
+        assert(!loweredIndex.includes("getwalletprivatekey"), "generated index must not try to extract a private key");
+        assert(!loweredIndex.includes("callsigningrelay"), "generated index must not inline signing relay logic into src/index.ts");
+        assert(!loweredIndex.includes("deriverelaybase"), "generated index must not inline relay base helpers into src/index.ts");
+        assert(!loweredIndex.includes("buildcandidateurls"), "generated index must not inline MCP bridge URL helpers into src/index.ts");
       return;
     }
 
