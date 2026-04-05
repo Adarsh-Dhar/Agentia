@@ -97,24 +97,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <StatCard
-            label="Total Allowance"
-            value={`$${totalAllowance.toFixed(2)}`}
-            subvalue="USDC allocated"
-            icon={<DollarSign size={24} />}
-          />
-          <StatCard
-            label="Total PnL"
-            value={`${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`}
-            subvalue="USDC"
-            trend={totalPnl >= 0 ? 'up' : 'down'}
-            trendPercent={
-              totalAllowance > 0
-                ? Math.abs(parseFloat(((totalPnl / totalAllowance) * 100).toFixed(1)))
-                : 0
-            }
-          />
+        <div className="grid grid-cols-1 md:grid-cols-1 gap-6 mb-8">
           <StatCard
             label="Active Agents"
             value={activeCount}

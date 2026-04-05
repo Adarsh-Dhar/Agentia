@@ -245,7 +245,7 @@ export default function BridgePage() {
     const viewModule = values['INITIA_PRICE_VIEW_MODULE'] || ''
     const viewFunction = values['INITIA_PRICE_VIEW_FUNCTION'] || ''
     const typeArgsRaw = values['INITIA_PRICE_VIEW_TYPE_ARGS'] || '0x1::coin::uinit,0x1::coin::uusdc'
-    const viewArgsTemplate = values['INITIA_PRICE_VIEW_ARGS'] || '$endpoint'
+    const viewArgsTemplate = values['INITIA_PRICE_VIEW_ARGS'] || '$endpoint,$amount'
 
     if (!poolAAddress || !poolBAddress || !viewAddress || !viewModule || !viewFunction) {
       return null
