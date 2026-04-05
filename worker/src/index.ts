@@ -17,8 +17,9 @@ import prisma from "./lib/prisma.js";
 import {
   startAgent,
   stopAgent,
+  getAgentLogs,
+  getAgentStatus,
 } from "./engine.js";
-import { isAgentRunning, getLogs } from "./agent-runner.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && startMatch) {
     const agentId = startMatch[1];
 
-    if (isAgentRunning(agentId)) {
+    if (getAgentStatus(agentId).running) {
       return json(res, 409, { error: "Agent is already running" });
     }
 
@@ -145,7 +146,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && stopMatch) {
     const agentId = stopMatch[1];
 
-    if (!isAgentRunning(agentId)) {
+    if (!getAgentStatus(agentId).running) {
       return json(res, 404, { error: "Agent is not running" });
     }
 
@@ -160,7 +161,7 @@ const server = http.createServer(async (req, res) => {
     const agentId = logsMatch[1];
     const since = url.searchParams.get("since");
     const sinceMs = since ? parseInt(since, 10) : undefined;
-    const entries = getLogs(agentId, sinceMs);
+    const entries = getAgentLogs(agentId, sinceMs);
     return json(res, 200, { agentId, entries });
   }
 

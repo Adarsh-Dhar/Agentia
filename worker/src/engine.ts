@@ -122,7 +122,7 @@ export async function startAgent({
     const botProcess = spawn("npx", ["tsx", "src/index.ts"], {
       cwd:   workspaceDir,
       env:   agentEnv,
-      shell: true,
+      shell: false,
     });
 
     runningAgents.set(agentId, botProcess);

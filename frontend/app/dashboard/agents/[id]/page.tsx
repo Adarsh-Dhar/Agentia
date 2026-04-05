@@ -56,7 +56,18 @@ const STATUS_COLOR: Record<string, string> = {
 
 async function callWorker(agentId: string, action: 'start' | 'stop') {
   const res = await fetch(`/api/agents/${agentId}/${action}`, { method: 'POST' })
-  const data = await res.json()
+  const raw = await res.text()
+  let data: { error?: string } = {}
+  try {
+    data = raw ? JSON.parse(raw) as { error?: string } : {}
+  } catch {
+    data = {
+      error: raw
+        ? `Invalid response from ${action} API: ${raw.slice(0, 120)}`
+        : `Empty response from ${action} API`,
+    }
+  }
+
   if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
   return data
 }
