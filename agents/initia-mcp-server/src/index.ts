@@ -15,6 +15,18 @@ app.use(cors());
 const PORT = 8001;
 const HOST = '127.0.0.1';
 
+const DEX_FEE_BPS = (() => {
+  const raw = Number(process.env.INITIA_DEX_FEE_BPS ?? '30');
+  if (!Number.isFinite(raw)) return 30;
+  return Math.max(0, Math.min(3_000, Math.trunc(raw)));
+})();
+
+const QUOTE_SAFETY_BPS = (() => {
+  const raw = Number(process.env.INITIA_QUOTE_SAFETY_BPS ?? '9950');
+  if (!Number.isFinite(raw)) return 9_950;
+  return Math.max(1_000, Math.min(10_000, Math.trunc(raw)));
+})();
+
 function resolveLcdUrl(): string {
   const configuredLcd = String(process.env.INITIA_LCD_URL ?? '').trim();
   if (configuredLcd) return configuredLcd;
@@ -197,6 +209,22 @@ function extractBalanceFromViewResult(payload: unknown): bigint | null {
   return null;
 }
 
+function estimateConstantProductOut(amountIn: bigint, reserveIn: bigint, reserveOut: bigint): bigint | null {
+  if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return null;
+  const bpsDenom = 10_000n;
+  const feeBps = BigInt(DEX_FEE_BPS);
+  const amountInWithFee = amountIn * (bpsDenom - feeBps);
+  const numerator = amountInWithFee * reserveOut;
+  const denominator = reserveIn * bpsDenom + amountInWithFee;
+  if (denominator <= 0n) return null;
+  return numerator / denominator;
+}
+
+function applyQuoteSafety(value: bigint): bigint {
+  if (value <= 0n) return 0n;
+  return (value * BigInt(QUOTE_SAFETY_BPS)) / 10_000n;
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -264,13 +292,18 @@ app.post('/initia/move_view', async (req, res) => {
 
         if (coinA !== null && coinB !== null && coinA > 0n) {
           const inputAmount = legacyAmountArg ?? 1_000_000n;
-          const estimatedOut = (inputAmount * coinB) / coinA;
+          const cpEstimate = estimateConstantProductOut(inputAmount, coinA, coinB);
+          const ratioEstimate = (inputAmount * coinB) / coinA;
+          const estimatedOut = applyQuoteSafety(cpEstimate ?? ratioEstimate);
           const compat = {
             amount: estimatedOut.toString(),
             coin_amount: estimatedOut.toString(),
             coin_a_amount: coinA.toString(),
             coin_b_amount: coinB.toString(),
             source_function: 'dex.get_pool_info',
+            estimation_model: cpEstimate === null ? 'ratio_fallback' : 'constant_product',
+            fee_bps: DEX_FEE_BPS,
+            safety_bps: QUOTE_SAFETY_BPS,
           };
           log('INFO', 'move_view compatibility success', compat);
           return res.json({ result: compat });
@@ -325,9 +358,10 @@ app.post('/initia/move_execute', async (req, res) => {
     const parsedArgs = parseStringArray(args);
 
     if (address === '0x923edc29f60bb73bec89024e17d3710ae92c0bb5' && module === 'arbitrage_router_fa' && funcName === 'execute_cross_chain_trade') {
-      const configuredInputMetadataAddress = normalizeMoveAddress(String(process.env.INITIA_INIT_METADATA_ADDRESS ?? ''));
+      const configuredUsdcMetadataAddress = normalizeMoveAddress(String(process.env.INITIA_USDC_METADATA_ADDRESS ?? ''));
+      const legacyInitMetadataAddress = normalizeMoveAddress(String(process.env.INITIA_INIT_METADATA_ADDRESS ?? ''));
       const argInputMetadataAddress = normalizeMoveAddress(parsedArgs[3] ?? '');
-      const inputMetadataAddress = configuredInputMetadataAddress || argInputMetadataAddress;
+      const inputMetadataAddress = configuredUsdcMetadataAddress || argInputMetadataAddress || legacyInitMetadataAddress;
       const requestedAmount = toBigInt(parsedArgs[2]);
 
       if (!inputMetadataAddress || requestedAmount === null) {
@@ -341,9 +375,9 @@ app.post('/initia/move_execute', async (req, res) => {
 
       try {
         const signerMoveAddress = normalizeMoveAddress(wallet.key.accAddress);
-        if (configuredInputMetadataAddress && argInputMetadataAddress && configuredInputMetadataAddress !== argInputMetadataAddress) {
-          log('WARN', 'Router arg metadata differs from INITIA_INIT_METADATA_ADDRESS; using env metadata', {
-            env: configuredInputMetadataAddress,
+        if (configuredUsdcMetadataAddress && argInputMetadataAddress && configuredUsdcMetadataAddress !== argInputMetadataAddress) {
+          log('WARN', 'Router arg metadata differs from INITIA_USDC_METADATA_ADDRESS; using env metadata', {
+            env: configuredUsdcMetadataAddress,
             arg: argInputMetadataAddress,
           });
         }

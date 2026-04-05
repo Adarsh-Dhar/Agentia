@@ -71,7 +71,7 @@ INITIA_SWAP_ROUTER_ADDRESS=
 INITIA_SWAP_ROUTER_MODULE=
 INITIA_SWAP_ROUTER_FUNCTION=
 INITIA_SWAP_ROUTER_TYPE_ARGS=
-INITIA_SWAP_ROUTER_ARGS=$buyEndpoint,$sellEndpoint,$amount
+INITIA_SWAP_ROUTER_ARGS=$buyEndpoint,$sellEndpoint,$amount,$usdcMetadata
 INITIA_USDC_METADATA_ADDRESS=
 ONS_REGISTRY_ADDRESS=0x1
 SIMULATION_MODE=true
@@ -99,7 +99,7 @@ export const config = {
   INITIA_SWAP_ROUTER_MODULE: process.env.INITIA_SWAP_ROUTER_MODULE ?? process.env.INITIA_SWAP_MODULE ?? "",
   INITIA_SWAP_ROUTER_FUNCTION: process.env.INITIA_SWAP_ROUTER_FUNCTION ?? process.env.INITIA_SWAP_FUNCTION ?? "",
   INITIA_SWAP_ROUTER_TYPE_ARGS: process.env.INITIA_SWAP_ROUTER_TYPE_ARGS ?? process.env.INITIA_SWAP_TYPE_ARGS ?? "",
-  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount",
+  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount,$usdcMetadata",
   INITIA_USDC_METADATA_ADDRESS: process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit",
   SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",
   POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),

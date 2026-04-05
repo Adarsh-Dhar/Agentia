@@ -71,7 +71,7 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   INITIA_SWAP_ROUTER_MODULE: "",
   INITIA_SWAP_ROUTER_FUNCTION: "",
   INITIA_SWAP_ROUTER_TYPE_ARGS: "",
-  INITIA_SWAP_ROUTER_ARGS: "$buyEndpoint,$sellEndpoint,$amount",
+  INITIA_SWAP_ROUTER_ARGS: "$buyEndpoint,$sellEndpoint,$amount,$usdcMetadata",
   INITIA_EXECUTION_AMOUNT_USDC: "1000000",
   ESTIMATED_BRIDGE_FEE_USDC: "5000",
   OPENAI_API_KEY: "",
@@ -290,8 +290,8 @@ export function getRequiredEnvFields(
         label: "Execution Args Template",
         type: "text",
         required: false,
-        placeholder: "$buyEndpoint,$sellEndpoint,$amount",
-        helpText: "Use $buyEndpoint, $sellEndpoint, and $amount placeholders.",
+        placeholder: "$buyEndpoint,$sellEndpoint,$amount,$usdcMetadata",
+        helpText: "Use $buyEndpoint, $sellEndpoint, $amount, and $usdcMetadata placeholders.",
       },
     );
   }

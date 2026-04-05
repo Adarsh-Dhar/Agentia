@@ -161,6 +161,60 @@ sys.exit(1)
 PY
 }
 
+extract_liquidity_token() {
+  local payload="$1"
+  PAYLOAD="$payload" python3 - <<'PY'
+import json
+import os
+import re
+import sys
+
+text = os.environ.get('PAYLOAD', '')
+
+def walk(value):
+  if isinstance(value, dict):
+    candidate = value.get('liquidity_token')
+    if isinstance(candidate, str) and re.fullmatch(r'0x[0-9A-Fa-f]{64}', candidate):
+      print(candidate)
+      return True
+    for child in value.values():
+      if walk(child):
+        return True
+  elif isinstance(value, list):
+    for child in value:
+      if walk(child):
+        return True
+  elif isinstance(value, str):
+    match = re.search(r'"liquidity_token"\s*:\s*"(0x[0-9A-Fa-f]{64})"', value)
+    if match:
+      print(match.group(1))
+      return True
+  return False
+
+try:
+  decoded = json.loads(text)
+  if walk(decoded):
+    sys.exit(0)
+except Exception:
+  pass
+
+match = re.search(r'"liquidity_token"\s*:\s*"(0x[0-9A-Fa-f]{64})"', text)
+if match:
+  print(match.group(1))
+  sys.exit(0)
+
+sys.exit(1)
+PY
+}
+
+query_tx() {
+  local tx_hash="$1"
+
+  run_cmd initiad query tx "$tx_hash" \
+  --node "$NODE" \
+  --output json
+}
+
 query_metadata() {
   local creator_address="$1"
   local coin_symbol="$2"
@@ -306,17 +360,28 @@ ensure_pool() {
 
   log "Creating pool: $pair_name ($pair_symbol)"
   local create_output=""
+  local tx_query_output=""
   create_output="$(create_pair "$pair_name" "$pair_symbol" "$swap_fee_rate" "$coin_a_weight" "$coin_b_weight" "$coin_a_metadata" "$coin_b_metadata" "$coin_a_amount" "$coin_b_amount")"
   if TX_HASH="$(extract_txhash "$create_output")"; then
     log "$pair_symbol create tx hash: $TX_HASH"
+
+    # Fallback: resolve liquidity token directly from tx events when metadata indexing lags.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if tx_query_output="$(query_tx "$TX_HASH" 2>/dev/null)" && pool_address="$(extract_liquidity_token "$tx_query_output")"; then
+        break
+      fi
+      sleep 2
+    done
   fi
 
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-    if raw_output="$(query_metadata "$ACCOUNT_ADDRESS" "$pair_symbol" 2>/dev/null)" && pool_address="$(extract_hex64 "$raw_output")"; then
-      break
-    fi
-    sleep 2
-  done
+  if [[ -z "$pool_address" ]]; then
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+      if raw_output="$(query_metadata "$ACCOUNT_ADDRESS" "$pair_symbol" 2>/dev/null)" && pool_address="$(extract_hex64 "$raw_output")"; then
+        break
+      fi
+      sleep 2
+    done
+  fi
 
   if [[ -z "$pool_address" ]]; then
     log "❌ Failed to resolve pool object address for $pair_symbol"
