@@ -14,9 +14,9 @@ export async function executeTrade(
     `⛓  Preparing ${action} tx for agent "${agent.name}" on pair ${agent.targetPair} @ $${price.toFixed(4)}`
   );
 
-  // Check for missing private key
-  if (!agent.sessionKeyPriv) {
-    const msg = `No private key found for agent ${agent.id}`;
+  const runtimeInitiaKey = String(process.env.INITIA_KEY ?? "").trim();
+  if (!runtimeInitiaKey) {
+    const msg = `INITIA_KEY is missing at runtime for agent ${agent.id}`;
     console.error(`❌ ${msg}`);
     return { txHash: "", success: false, error: msg };
   }
@@ -28,9 +28,8 @@ export async function executeTrade(
         gasAdjustment: "2.0",
       });
 
-      // Trim and convert the hex string to Buffer
-      const hexKey = agent.sessionKeyPriv.trim();
-      const key = new RawKey(Buffer.from(hexKey, "hex"));
+      // Runtime-only key source for signing.
+      const key = new RawKey(Buffer.from(runtimeInitiaKey, "hex"));
       const wallet = new Wallet(rest, key);
 
       // Debug: log the address and check if account exists

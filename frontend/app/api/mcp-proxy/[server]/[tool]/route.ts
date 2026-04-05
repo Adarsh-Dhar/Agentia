@@ -24,6 +24,7 @@ export async function POST(
   ctx: { params: Promise<{ server: string; tool: string }> },
 ) {
   const { server, tool } = await ctx.params;
+  const sessionKeyHeader = String(req.headers.get("x-session-key") || "").trim();
   const gateway = normalizeGatewayBase(
     req.headers.get("x-mcp-upstream-url") ||
     process.env.MCP_GATEWAY_URL ||
@@ -64,6 +65,7 @@ export async function POST(
           "Content-Type": "application/json",
           "ngrok-skip-browser-warning": "true",
           "Bypass-Tunnel-Reminder": "true",
+          ...(sessionKeyHeader ? { "x-session-key": sessionKeyHeader } : {}),
         },
         body: JSON.stringify(payload),
         cache: "no-store",

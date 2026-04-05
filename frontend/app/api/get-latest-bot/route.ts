@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { decryptEnvConfig, encryptEnvConfig } from "@/lib/crypto-env";
-import { RawKey } from "@initia/initia.js";
-import { randomBytes } from "node:crypto";
+import { decryptEnvConfig } from "@/lib/crypto-env";
 
 function parseEnv(content: string): Record<string, string> {
   const parsed: Record<string, string> = {};
@@ -20,7 +18,6 @@ function parseEnv(content: string): Record<string, string> {
 
 function stringifyEnv(values: Record<string, string>): string {
   return Object.entries(values)
-    .filter(([, value]) => value !== "")
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
 }
@@ -49,18 +46,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "No bot found." }, { status: 404 });
     }
 
-    if (!(agent as { walletAddress?: string }).walletAddress) {
-      const key = new RawKey(randomBytes(32));
-      agent = await prisma.agent.update({
-        where: { id: agent.id },
-        data: {
-          walletAddress: key.accAddress,
-          sessionKeyPriv: (agent as { sessionKeyPriv?: string | null }).sessionKeyPriv ?? encryptEnvConfig(key.privateKey.toString("hex")),
-        },
-        include: { files: { orderBy: { createdAt: "asc" } } },
-      });
-    }
-
     const config = agent.configuration as Record<string, unknown> | null;
 
     // 2. Map the standard code files
@@ -75,15 +60,8 @@ export async function GET(req: NextRequest) {
       try {
         const decryptedEnv = decryptEnvConfig(agent.envConfig);
         const envMap = parseEnv(decryptedEnv);
-        const sessionKeyMode = String(envMap.SESSION_KEY_MODE ?? "").toLowerCase() === "true";
-
-        if (sessionKeyMode && !envMap.INITIA_KEY && agent.sessionKeyPriv) {
-          try {
-            envMap.INITIA_KEY = decryptEnvConfig(agent.sessionKeyPriv);
-          } catch {
-            console.error("Failed to decrypt sessionKeyPriv for agent:", agent.id);
-          }
-        }
+        envMap.SESSION_KEY_MODE = "true";
+        envMap.INITIA_KEY = "";
 
         const hydratedEnv = stringifyEnv(envMap);
         mappedFiles.push({

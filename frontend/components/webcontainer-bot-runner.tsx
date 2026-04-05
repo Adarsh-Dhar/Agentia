@@ -15,6 +15,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Zap, Play, Square, Bot, ShieldCheck, ShieldOff } from "lucide-react";
 import { TESTNET, useInterwovenKit } from "@initia/interwovenkit-react";
+import { toHex } from "viem";
 
 import { useTerminal }       from "@/hooks/use-terminal";
 import { useBotCodeGen }     from "@/hooks/use-bot-code-gen";
@@ -31,12 +32,30 @@ function isLocalOrProxyGateway(value?: string | null): boolean {
   return /(^|\/\/)(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.)/i.test(normalized) || /\/api\/mcp-proxy\/?$/i.test(normalized);
 }
 
+function getBrowserProxyGateway(): string {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}/api/mcp-proxy`;
+}
+
 function pickReachableGateway(...candidates: Array<string | null | undefined>): string {
   const cleaned = candidates
     .map((v) => String(v || "").trim())
     .filter(Boolean);
   const publicGateway = cleaned.find((v) => !isLocalOrProxyGateway(v));
-  return publicGateway || cleaned[0] || "";
+  return publicGateway || getBrowserProxyGateway() || cleaned[0] || "";
+}
+
+function normalizeRuntimePrivateKey(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (value instanceof Uint8Array) {
+    return toHex(value);
+  }
+  if (Array.isArray(value)) {
+    return toHex(new Uint8Array(value));
+  }
+  return "";
 }
 
 // ─── Strategy display helpers ─────────────────────────────────────────────────
@@ -78,13 +97,18 @@ export function WebContainerBotRunner() {
   const [envLoaded, setEnvLoaded] = useState(false);
   const [intent,    setIntent]    = useState<BotIntent | null>(null);
   const [showSessionKeyModal, setShowSessionKeyModal] = useState(false);
+  const [runtimeSessionKey, setRuntimeSessionKey] = useState("");
+  const [sessionWalletAddress, setSessionWalletAddress] = useState("");
+  const [sessionKeyHydrating, setSessionKeyHydrating] = useState(false);
   const didAutoLaunchRef = useRef(false);
   const shouldAutoLaunchRef = useRef(false);
+  const autoDeriveAttemptedRef = useRef(false);
+  const autoLaunchInFlightRef = useRef(false);
   const { autoSign, initiaAddress, address } = useInterwovenKit();
 
   const { terminalRef, termRef } = useTerminal();
 
-  const { generateFiles, generatedFiles, selectedFile, setSelectedFile, botWalletAddress } = useBotCodeGen(termRef);
+  const { generateFiles, generatedFiles, selectedFile, setSelectedFile } = useBotCodeGen(termRef);
 
   const isDryRun = envConfig.SIMULATION_MODE === "true";
 
@@ -97,10 +121,109 @@ export function WebContainerBotRunner() {
   const sandbox = useBotSandbox({ generatedFiles: currentFiles, envConfig, termRef });
   const { phase, setPhase, status, stopProcess, bootAndRun } = sandbox;
   const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false;
-  const autosignWalletKey = String((autoSign as { wallet?: { privateKey?: unknown } } | undefined)?.wallet?.privateKey ?? "").trim();
-  const runtimeSessionKey = String(autosignWalletKey || envConfig.INITIA_KEY || "").trim();
-  const sessionKeyActive = autosignEnabled;
+  const autosignLoading = autoSign?.isLoading ?? false;
+  const autosignGrantee = String(autoSign?.granteeByChain?.[TESTNET.defaultChainId] ?? "").trim();
+  const sessionKeyActive = autosignEnabled && runtimeSessionKey.length > 0;
   const userWalletAddress = String(initiaAddress ?? address ?? "").trim();
+
+  const autoSignRuntime = autoSign as unknown as {
+    getWalletPrivateKey?: (chainId?: string) => unknown;
+    getWallet?: (chainId?: string) => { address?: string } | undefined;
+  };
+
+  const ensureRuntimeSessionKey = useCallback(async (opts?: { silent?: boolean }): Promise<{ key: string; address: string } | null> => {
+    if (runtimeSessionKey && sessionWalletAddress) {
+      return { key: runtimeSessionKey, address: sessionWalletAddress };
+    }
+    if (!autosignEnabled || autosignLoading) return null;
+    if (sessionKeyHydrating) return null;
+
+    setSessionKeyHydrating(true);
+    try {
+      const chainId = TESTNET.defaultChainId;
+      const runtimePrivateKey = normalizeRuntimePrivateKey(autoSignRuntime.getWalletPrivateKey?.(chainId));
+      const runtimeAddress = String(autoSignRuntime.getWallet?.(chainId)?.address ?? autosignGrantee ?? "").trim();
+
+      if (!runtimePrivateKey) {
+        if (!opts?.silent) {
+          termRef.current?.writeln(
+            `\x1b[33m[System]\x1b[0m AutoSign session key is still initializing. Waiting for the SDK to finish hydrating the derived wallet...`
+          );
+        }
+        return null;
+      }
+
+      if (autosignGrantee && runtimeAddress && autosignGrantee !== runtimeAddress) {
+        if (!opts?.silent) {
+          termRef.current?.writeln(
+            `\x1b[31m[Error]\x1b[0m AutoSign grantee mismatch. Expected ${autosignGrantee}, derived ${runtimeAddress}. Disable/re-enable AutoSign and retry.`
+          );
+        }
+        return null;
+      }
+
+      setRuntimeSessionKey(runtimePrivateKey);
+      setSessionWalletAddress(runtimeAddress);
+      return { key: runtimePrivateKey, address: runtimeAddress };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!opts?.silent) {
+        termRef.current?.writeln(`\x1b[31m[Error]\x1b[0m Unable to derive session key from AutoSign: ${message}`);
+      }
+      return null;
+    } finally {
+      setSessionKeyHydrating(false);
+    }
+  }, [autoSignRuntime, autosignEnabled, autosignGrantee, autosignLoading, runtimeSessionKey, sessionWalletAddress, sessionKeyHydrating, termRef]);
+
+  useEffect(() => {
+    if (!autosignEnabled) {
+      setRuntimeSessionKey("");
+      setSessionWalletAddress("");
+      setSessionKeyHydrating(false);
+      autoDeriveAttemptedRef.current = false;
+      autoLaunchInFlightRef.current = false;
+      return;
+    }
+    if (autosignGrantee && !sessionWalletAddress) {
+      setSessionWalletAddress(autosignGrantee);
+    }
+  }, [autosignEnabled, autosignGrantee, sessionWalletAddress]);
+
+  // Automatically hydrate runtime session key when AutoSign is enabled.
+  useEffect(() => {
+    if (!autosignEnabled) return;
+    if (autosignLoading) return;
+    if (runtimeSessionKey) return;
+    if (sessionKeyHydrating) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 20;
+
+    const tick = async () => {
+      if (cancelled) return;
+      const runtime = await ensureRuntimeSessionKey({ silent: attempts > 0 });
+      if (cancelled || runtime) {
+        if (runtime) {
+          autoDeriveAttemptedRef.current = true;
+        }
+        return;
+      }
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        window.setTimeout(tick, 500);
+      } else {
+        autoDeriveAttemptedRef.current = false;
+      }
+    };
+
+    void tick();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autosignEnabled, autosignLoading, runtimeSessionKey, sessionKeyHydrating, ensureRuntimeSessionKey]);
 
   // On mount: load files + env + intent from DB
   useEffect(() => {
@@ -148,26 +271,38 @@ export function WebContainerBotRunner() {
     if (!shouldAutoLaunchRef.current) return;
     if (generatedFiles.length === 0) return;
     if (!envLoaded) return;
-    if (!sessionKeyActive) {
+    if (autoLaunchInFlightRef.current) return;
+    if (autosignLoading) return;
+    if (!autosignEnabled) {
       termRef.current?.writeln("\x1b[33m[System]\x1b[0m AutoSign is required before launch. Enable AutoSign in the sidebar.");
       shouldAutoLaunchRef.current = false;
       return;
     }
-    if (!runtimeSessionKey) {
-      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Reload the bot or regenerate to refresh key material.");
-      shouldAutoLaunchRef.current = false;
-      return;
-    }
 
-    didAutoLaunchRef.current = true;
-    shouldAutoLaunchRef.current = false;
-    setPhase("booting");
-    void bootAndRun({
-      ...envConfig,
-      SESSION_KEY_MODE: "true",
-      INITIA_KEY: runtimeSessionKey,
-    });
-  }, [generatedFiles.length, envLoaded, bootAndRun, envConfig, runtimeSessionKey, sessionKeyActive, setPhase, termRef]);
+    autoLaunchInFlightRef.current = true;
+    void (async () => {
+      let key = runtimeSessionKey;
+      if (!key) {
+        const runtime = await ensureRuntimeSessionKey({ silent: true });
+        if (!runtime) {
+          shouldAutoLaunchRef.current = true;
+          autoLaunchInFlightRef.current = false;
+          return;
+        }
+        key = runtime.key;
+      }
+
+      didAutoLaunchRef.current = true;
+      shouldAutoLaunchRef.current = false;
+      setPhase("booting");
+      void bootAndRun({
+        ...envConfig,
+        SESSION_KEY_MODE: "true",
+        INITIA_KEY: key,
+      });
+      autoLaunchInFlightRef.current = false;
+    })();
+  }, [generatedFiles.length, envLoaded, bootAndRun, envConfig, runtimeSessionKey, sessionKeyActive, autosignLoading, setPhase, termRef]);
 
   // Sync .env file edits back to envConfig
   useEffect(() => {
@@ -199,38 +334,40 @@ export function WebContainerBotRunner() {
   const isRunning = phase === "running";
 
   const handleLaunch = useCallback(() => {
-    if (!botWalletAddress) {
-      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Bot wallet not found. Regenerate or redeploy this bot.");
-      return;
-    }
-    if (!userWalletAddress) {
-      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Connect wallet before launching the bot.");
-      return;
-    }
-    if (!autosignEnabled) {
+    void (async () => {
+      if (!userWalletAddress) {
+        termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Connect wallet before launching the bot.");
+        return;
+      }
+      if (!autosignEnabled) {
+        setShowSessionKeyModal(true);
+        return;
+      }
+      const runtime = await ensureRuntimeSessionKey({ silent: true });
+      if (!runtime) {
+        termRef.current?.writeln("\x1b[33m[System]\x1b[0m AutoSign session key is still hydrating. Try launching again in a moment.");
+        return;
+      }
       setShowSessionKeyModal(true);
-      return;
-    }
-    if (!runtimeSessionKey) {
-      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Re-enable AutoSign and retry.");
-      return;
-    }
-    setShowSessionKeyModal(true);
-  }, [autosignEnabled, botWalletAddress, runtimeSessionKey, termRef, userWalletAddress]);
+    })();
+  }, [autosignEnabled, ensureRuntimeSessionKey, termRef, userWalletAddress]);
 
   const handleSessionKeyConfirm = useCallback(() => {
-    setShowSessionKeyModal(false);
-    if (!runtimeSessionKey) {
-      termRef.current?.writeln("\x1b[31m[Error]\x1b[0m Session key unavailable. Re-enable AutoSign and retry.");
-      return;
-    }
-    setPhase("booting");
-    void bootAndRun({
-      ...envConfig,
-      SESSION_KEY_MODE: "true",
-      INITIA_KEY: runtimeSessionKey,
-    });
-  }, [bootAndRun, envConfig, runtimeSessionKey, setPhase, termRef]);
+    void (async () => {
+      setShowSessionKeyModal(false);
+      const runtime = await ensureRuntimeSessionKey({ silent: true });
+      if (!runtime) {
+        termRef.current?.writeln("\x1b[33m[System]\x1b[0m AutoSign session key is still hydrating. Try again once the wallet finishes initializing.");
+        return;
+      }
+      setPhase("booting");
+      void bootAndRun({
+        ...envConfig,
+        SESSION_KEY_MODE: "true",
+        INITIA_KEY: runtime.key,
+      });
+    })();
+  }, [bootAndRun, ensureRuntimeSessionKey, envConfig, setPhase, termRef]);
 
   const handleSessionKeyCancel = useCallback(() => {
     setShowSessionKeyModal(false);
@@ -366,17 +503,17 @@ export function WebContainerBotRunner() {
           ) : (
             <button
               onClick={handleLaunch}
-              disabled={!sessionKeyActive}
+              disabled={!sessionKeyActive || sessionKeyHydrating}
               style={{
                 display: "flex", alignItems: "center", gap: 5,
-                background: sessionKeyActive ? "#059669" : "#1e293b",
-                border: sessionKeyActive ? "1px solid #10b981" : "1px solid #334155",
+                background: sessionKeyActive && !sessionKeyHydrating ? "#059669" : "#1e293b",
+                border: sessionKeyActive && !sessionKeyHydrating ? "1px solid #10b981" : "1px solid #334155",
                 borderRadius: 6, padding: "5px 12px",
-                color: sessionKeyActive ? "#a7f3d0" : "#64748b", fontSize: 11, fontWeight: 700,
-                cursor: sessionKeyActive ? "pointer" : "not-allowed", fontFamily: "inherit",
+                color: sessionKeyActive && !sessionKeyHydrating ? "#a7f3d0" : "#64748b", fontSize: 11, fontWeight: 700,
+                cursor: sessionKeyActive && !sessionKeyHydrating ? "pointer" : "not-allowed", fontFamily: "inherit",
               }}
             >
-              <Play size={11} fill="currentColor" /> Launch Bot
+              <Play size={11} fill="currentColor" /> {sessionKeyHydrating ? "Preparing…" : "Launch Bot"}
             </button>
           )}
         </div>
@@ -405,7 +542,7 @@ export function WebContainerBotRunner() {
       <SessionKeyConfirmModal
         isOpen={showSessionKeyModal}
         isEnabled={autosignEnabled}
-        botAddress={botWalletAddress}
+        sessionAddress={sessionWalletAddress}
         userAddress={userWalletAddress}
         onConfirm={handleSessionKeyConfirm}
         onCancel={handleSessionKeyCancel}

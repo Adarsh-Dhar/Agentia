@@ -181,22 +181,17 @@ export function useDeployChat() {
       return
     }
 
+    const sessionAddress = String(autoSign?.granteeByChain?.[TESTNET.defaultChainId] ?? '').trim()
+    if (!sessionAddress) {
+      pushAssistant('AutoSign session wallet unavailable. Re-enable AutoSign and try again.')
+      return
+    }
+
     setConvState('deploying')
     setChips([])
     setIsTyping(true)
 
     try {
-      const { RawKey }  = await import('@initia/initia.js')
-      const randomBytes = window.crypto.getRandomValues(new Uint8Array(32))
-      const privHex     = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('')
-      const sessionKey  = RawKey.fromHex(privHex)
-
-      if (!sessionKey.publicKey) throw new Error('Failed to derive session key.')
-
-      const derivedAddress = sessionKey.accAddress
-      const sessionKeyPub  = (sessionKey.publicKey as { key: string }).key
-      const sessionKeyPriv = sessionKey.privateKey.toString('hex')
-
       const res  = await fetch('/api/agent-creation', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -206,8 +201,7 @@ export function useDeployChat() {
           spendAllowance:       currentGuardrails.spendAllowance,
           sessionDurationHours: currentGuardrails.sessionDurationHours,
           maxDailyLoss:         currentGuardrails.maxDailyLoss,
-          sessionKeyPub,
-          sessionKeyPriv,
+          sessionAddress,
         }),
       })
       const data = await res.json()
@@ -219,7 +213,7 @@ export function useDeployChat() {
       const agentId = data.agent.id as string
       setDeployedAgentId(agentId)
       setDeployedAgentName(currentPlan.agentName)
-      setAgentAddress(derivedAddress)
+      setAgentAddress(sessionAddress)
 
       await delay(500)
       setIsTyping(false)

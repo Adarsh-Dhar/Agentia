@@ -1,16 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { encryptEnvConfig } from "@/lib/crypto-env";
-import { RawKey } from "@initia/initia.js";
-import { randomBytes } from "node:crypto";
-
-function createBotWallet(): { walletAddress: string; encryptedPrivateKey: string } {
-  const key = new RawKey(randomBytes(32));
-  return {
-    walletAddress: key.accAddress,
-    encryptedPrivateKey: encryptEnvConfig(key.privateKey.toString("hex")),
-  };
-}
 
 // ─── GET: List all agents for a user ─────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -58,7 +47,7 @@ export async function POST(req: NextRequest) {
       userId,
       name,
       configuration,
-      sessionKeyPriv,
+      walletAddress,
     } = body;
 
     if (!userId || !name) {
@@ -70,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     const userExists = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true },
+      select: { id: true, walletAddress: true },
     });
 
     if (!userExists) {
@@ -80,16 +69,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { walletAddress, encryptedPrivateKey } = createBotWallet();
-
     const agent = await prisma.agent.create({
       data: {
         userId,
         name,
         status: "STOPPED",
-        walletAddress,
+        walletAddress:
+          (typeof walletAddress === "string" ? walletAddress.trim() : "") ||
+          String(userExists.walletAddress || "").trim(),
         configuration: configuration ?? null,
-        sessionKeyPriv: sessionKeyPriv ? encryptEnvConfig(String(sessionKeyPriv)) : encryptedPrivateKey,
       },
     });
 

@@ -16,7 +16,6 @@ interface AgentDetail {
   name:          string
   status:        string
   configuration: Record<string, unknown> | null
-  sessionKeyPriv: string | null
   createdAt:     string
   updatedAt:     string
   files:         { id: string; filepath: string; language: string }[]

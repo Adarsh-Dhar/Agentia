@@ -4,8 +4,6 @@ import { encryptEnvConfig } from "@/lib/crypto-env";
 import { assembleBotFiles, assembleInitiaBotFiles } from "../get-bot-code/bot-files";
 import { sanitizeIntentMcpLists, shouldUseInitiaDeterministicFallback } from "@/lib/intent/mcp-sanitizer";
 import type { Prisma } from "@/lib/generated/prisma/client.ts";
-import { RawKey } from "@initia/initia.js";
-import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -1206,15 +1204,6 @@ function loadAgentEnvDefaults(): Record<string, string> {
   return out;
 }
 
-function createBotWallet(): { walletAddress: string; encryptedPrivateKey: string } {
-  const key = new RawKey(randomBytes(32));
-  const privateKeyHex = key.privateKey.toString("hex");
-  return {
-    walletAddress: key.accAddress,
-    encryptedPrivateKey: encryptEnvConfig(privateKeyHex),
-  };
-}
-
 async function ensureAgentWalletAddressColumn(requestId: string): Promise<void> {
   console.warn(`[generate-bot] [${requestId}] Applying fallback schema fix for Agent.walletAddress`);
   await prisma.$executeRawUnsafe(
@@ -1229,6 +1218,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     console.log(`[generate-bot] [${requestId}] Body keys:`, Object.keys(body));
+    const granterWalletAddress = typeof body.walletAddress === "string" ? body.walletAddress.trim() : "";
 
     // Accept both `prompt` (original) and `expandedPrompt` (pre-expanded by classify-intent).
     // Always prefer the expanded prompt — it gives the meta-agent far more context.
@@ -1481,16 +1471,13 @@ export async function POST(req: NextRequest) {
       originalPrompt, // Keep original for display
     };
 
-    const { walletAddress, encryptedPrivateKey } = createBotWallet();
-
     const agentCreateData: Prisma.AgentCreateInput = {
       name:          botName,
       user:          { connect: { id: userId } },
       status:        "STOPPED" as const,
-      walletAddress,
+      walletAddress: granterWalletAddress,
       configuration: configRecord,
       envConfig:     encryptedEnv,
-      sessionKeyPriv: encryptedPrivateKey,
       files: {
         create: files.map((f: GeneratedFile) => ({
           filepath: typeof f.filepath === "string" && f.filepath.trim()

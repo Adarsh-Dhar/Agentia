@@ -106,7 +106,6 @@ export interface CreateAgentRequestBody {
   maxDailyLoss?:        number;
   // optional pre-generated session key (generated client-side or server-side)
   sessionKeyPub?:  string;
-  sessionKeyPriv?: string;
 }
 
 export type RouteContext = {

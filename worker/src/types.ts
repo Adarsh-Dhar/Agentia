@@ -4,7 +4,6 @@ export interface Agent {
   status: string;
   strategy: string;
   targetPair: string;
-  sessionKeyPriv: string;
   userId: string;
   createdAt: Date;
   updatedAt: Date;

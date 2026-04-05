@@ -54,9 +54,8 @@ model Agent {
   walletAddress    String       @default("")
   configuration    Json?
   envConfig        String?      @db.Text // Encrypted .env (AES-256-GCM)
-  sessionKeyPriv   String?      
   tradeLogs        TradeLog[]
-  terminalLogs     TerminalLog[]
+  terminalLogs     TerminalLog[] @relation("terminalLogs")
   files            AgentFile[]  // <-- NEW: Relation to bot code files
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
