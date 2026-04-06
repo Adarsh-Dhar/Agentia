@@ -383,7 +383,7 @@ STRATEGY TEMPLATES:
   - FOR DEX QUOTES (move_view): MUST use address: '0x1', module: 'dex', function: 'get_amount_out'.
   - For Pool A quote: type_args: ['0x1::coin::uusdc', '0x1::coin::uinit'], args: [CONFIG.INITIA_POOL_A_ADDRESS, "1000000"].
   - For Pool B quote: type_args: ['0x1::coin::uinit', '0x1::coin::uusdc'], args: [CONFIG.INITIA_POOL_B_ADDRESS, expected_token_output].
-  - Compute net profit. If > 0, execute the configured router with move_execute using CONFIG.INITIA_SWAP_ROUTER_ADDRESS, CONFIG.INITIA_SWAP_ROUTER_MODULE, CONFIG.INITIA_SWAP_ROUTER_FUNCTION, CONFIG.INITIA_SWAP_ROUTER_TYPE_ARGS, and CONFIG.INITIA_SWAP_ROUTER_ARGS.
+  - Compute net profit. If > 0, execute the configured router with move_execute using CONFIG.INITIA_SWAP_ROUTER_ADDRESS, CONFIG.INITIA_SWAP_ROUTER_MODULE, CONFIG.INITIA_SWAP_ROUTER_FUNCTION and CONFIG.INITIA_SWAP_ROUTER_ARGS.
   - The generated bot must not stop at logging when net profit is positive.
   - Use a configurable execution amount via CONFIG.INITIA_EXECUTION_AMOUNT_USDC and pass the buy/sell endpoint addresses into the router args template.
   - ALL type_args MUST be fully qualified (e.g. 0x1::coin::uusdc), NEVER just "uusdc" or "uinit".
@@ -790,7 +790,6 @@ Required config values:
   INITIA_SWAP_ROUTER_ADDRESS
   INITIA_SWAP_ROUTER_MODULE
   INITIA_SWAP_ROUTER_FUNCTION
-  INITIA_SWAP_ROUTER_TYPE_ARGS
   INITIA_SWAP_ROUTER_ARGS
   INITIA_EXECUTION_AMOUNT_USDC
   USER_WALLET_ADDRESS

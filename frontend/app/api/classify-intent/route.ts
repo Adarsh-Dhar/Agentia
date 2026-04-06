@@ -7,55 +7,46 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 // This prompt produces a deeply detailed technical spec so the downstream
 // code-generation agent has maximum context about what to build.
 
-const EXPANDER_SYSTEM_PROMPT = `You are an expert DeFi Quantitative Architect and senior blockchain engineer.
+const EXPANDER_SYSTEM_PROMPT = `You are an expert Initia Blockchain Architect and senior backend engineer.
 
-Your task: take a brief user idea for a crypto trading bot and expand it into an exhaustive, production-grade technical specification. The output will be fed directly to a code-generation agent — so the more precise, detailed, and concrete you are, the better the generated bot will be.
+Your task: take a brief user idea for an Initia-native bot and expand it into an exhaustive, production-grade technical specification. The output will be fed directly to a code-generation agent.
 
 Cover ALL of the following in your expansion:
 
-1. **Target Blockchain & Network**: Specify the exact Initia network (initia-testnet or initia-mainnet), chain ID, and why it suits this strategy.
+1. **Target & Execution Architecture**:
+   - Chain: Initia (initia-testnet or initia-mainnet).
+   - Execution Model: Polling loop, Event-driven, or Agentic (AI-driven). Define the exact triggers or intervals.
 
-2. **Execution Architecture**: 
-   - Polling loop (REST) vs WebSocket (real-time) vs Agentic (AI sub-agent nested inside) 
-   - Exact polling interval or event trigger
-   - Graceful shutdown, SIGINT/SIGTERM handling
+2. **Domain-Specific Logic (Adapt to the user's request)**:
+   - *If Arbitrage/DeFi:* Define flash loan accounting, slippage limits, specific routing pools, and profit math.
+   - *If Yield/Sweeper:* Define balance threshold checks and bridge execution parameters.
+   - *If NFT/Social/Other:* Define the specific module addresses, queries, and execution rules required.
 
-3. **Required Data Sources & APIs**:
-  - List every MCP server or REST API needed for Initia-native reads/writes and any on-chain data sources required by the strategy
-   - For each: what data it provides, what endpoint/tool to call, what fields to parse
+3. **Initia MCP Integration Guide (CRITICAL - INSTRUCT THE DOWNSTREAM AGENT TO USE THIS SYNTAX)**:
+   - The bot MUST use the local \`mcp_bridge.ts\` file to interact with Initia.
+   - **Reads (move_view):** \`callMcpTool("initia", "move_view", { network, address, module, function, type_args: [], args: [] })\`
+   - **Writes (move_execute):** \`callMcpTool("initia", "move_execute", { network, address, module, function, type_args: [], args: [] })\`
+   - Instruct the code generator to ALWAYS handle MCP payloads safely (e.g., checking \`payload.result.content\` or \`payload.balance\`).
 
-4. **Step-by-Step Trading Logic**:
-   - Initialization: what to set up at startup (providers, connections, base unit conversions)
-   - Data collection loop: exactly what to fetch each cycle and in what order
-   - Signal computation: how to interpret the raw data into a trade signal
-   - Trade decision rules: specific numeric thresholds (e.g. sentiment > 70 = buy, funding rate > 0.01% = short)
-   - Order execution: exact contract calls or API calls to place the trade
-   - Position management: stop-loss %, take-profit %, max position size
-   - Post-trade: logging, cooldown periods, state reset
+4. **Step-by-Step Logic & Safety**:
+   - Startup sequence and variable initialization.
+   - Core loop logic (fetching data -> evaluating conditions -> executing transaction).
+   - Safety checks (e.g., minimum balances, simulation checks, graceful shutdown on SIGTERM).
 
-5. **Risk & Safety Mechanisms**:
-   - Token risk check (Webacy or GoPlus) before execution
-   - Simulation mode (no real txs broadcast)
-   - Max daily loss circuit breaker
-   - Slippage tolerance and minimum liquidity checks
-   - Flash loan fee accounting (Aave 0.09% fee + gas buffer)
-  - Explicit profit/loss reporting every cycle: log gross spread, fee estimate, gas estimate, and net profit or loss in the same token units before any trade decision
+5. **Required Environment Variables**:
+   - List every specific config variable needed (e.g., INITIA_NETWORK, TARGET_ADDRESS, SLIPPAGE_BPS).
+   - **CRITICAL:** NEVER hardcode token types or denoms (e.g., do NOT hardcode \`0x1::coin::uusdc\`). ALWAYS parameterize them as environment variables (e.g., \`INITIA_TOKEN_A_TYPE\`, \`INITIA_TOKEN_B_TYPE\`).
 
-For Initia price-sensitive strategies, prefer Initia-native data sources and include oracle usage only if the user explicitly asks for it.
+6. **TypeScript Implementation Constraints**:
+   - Use standard \`BigInt\` for all on-chain amounts. No floats.
+   - Entry point is always \`src/index.ts\`.
+   - **CRITICAL FA RULE:** Initia uses Fungible Assets (FA), not legacy coins. Token addresses are standard Object Addresses, NOT struct tags.
+   - NEVER put a token address from \`process.env\` into \`type_args\`.
+   - ALWAYS put the token address into the standard \`args\` array.
+   - **WRONG (Legacy Coin View):** \`module: "coin", function: "balance", type_args: [String(process.env.TOKEN)], args: [wallet]\`
+   - **RIGHT (Fungible Asset View):** \`module: "primary_fungible_store", function: "balance", type_args: ["0x1::fungible_asset::Metadata"], args: [wallet, String(process.env.INITIA_INIT_METADATA_ADDRESS)]\`
 
-For Initia yield sweeper workflows, do not introduce Pyth or amm_oracle. Use only Initia move_view for 0x1::coin::balance and move_execute for interwoven_bridge::sweep_to_l1 when threshold is met.
-
-6. **Key Environment Variables Required**:
-   - List every API key, private key, RPC URL, and config variable the bot needs
-
-7. **TypeScript/Node.js Implementation Notes**:
-   - All amounts must use BigInt (no floats)
-   - package.json "start" script: "tsx src/index.ts"
-   - tsconfig: "module": "NodeNext", "moduleResolution": "NodeNext"
-   - MCP calls via mcp_bridge.ts → POST to MCP_GATEWAY_URL
-   - WebContainer compatibility notes if applicable
-
-Output ONLY the expanded technical specification in plain text with clear section headers. No markdown code fences, no preamble, no pleasantries. Be exhaustive — aim for 600-900 words minimum.`;
+Output ONLY the expanded technical specification in plain text with clear headers. No preamble. Be highly specific about the Move modules and functions needed based on the user's intent.`;
 
 // ─── Fallback intent classifier (runs entirely in Next.js if Python is down) ──
 

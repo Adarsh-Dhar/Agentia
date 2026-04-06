@@ -195,7 +195,7 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     'const ARBITRAGE_ROUTER_ADDRESS = String(config.INITIA_SWAP_ROUTER_ADDRESS ?? "").trim();',
     'const ARBITRAGE_ROUTER_MODULE = String(config.INITIA_SWAP_ROUTER_MODULE ?? config.INITIA_SWAP_MODULE ?? "arbitrage_router").trim();',
     'const ARBITRAGE_ROUTER_FUNCTION = String(config.INITIA_SWAP_ROUTER_FUNCTION ?? config.INITIA_SWAP_FUNCTION ?? "execute_cross_chain_trade").trim();',
-    'const ARBITRAGE_ROUTER_TYPE_ARGS = String(config.INITIA_SWAP_ROUTER_TYPE_ARGS ?? config.INITIA_SWAP_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
+    'const ARBITRAGE_ROUTER_TYPE_ARGS = String(config.INITIA_SWAP_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
     'const ARBITRAGE_ROUTER_ARGS_TEMPLATE = String(config.INITIA_SWAP_ROUTER_ARGS ?? config.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount").trim();',
     'const ALLOW_COMPATIBILITY_QUOTES = String(config.ALLOW_COMPATIBILITY_QUOTES ?? process.env.ALLOW_COMPATIBILITY_QUOTES ?? "false").trim().toLowerCase() === "true";',
     '',
@@ -543,78 +543,18 @@ function patchInitiaStrategyBotFiles(
     return files;
   }
 
-  const normalizedPrompt = String(promptText ?? "").toLowerCase();
-  const promptIsCrossChain = /(liquidation sniper|omni-chain liquidat|cross[-. ]chain liquidat|flash[-. ]bridge|spatial arb|cross[-. ]chain arb|yield nomad|auto[-. ]compounder|omni[-. ]chain yield)/.test(normalizedPrompt);
-  const promptIsYieldSweeper = !promptIsCrossChain && /(yield sweeper|auto-consolidator|auto consolidator|consolidate idle funds|sweep_to_l1|bridge back to l1|sweep)/.test(normalizedPrompt);
-  const promptIsSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(normalizedPrompt);
-
-  const isYieldSweeper = promptIsYieldSweeper || isInitiaYieldSweeperIntent(intent);
-  const isSpreadScanner = !isYieldSweeper && (promptIsSpreadScanner || promptIsCrossChain || isInitiaSpreadScannerIntent(intent));
-  const indexAliases = new Set(["src/index.ts", "index.ts", "src/main.ts", "main.ts"]);
-
-  const existingIndex = files.find((file) => indexAliases.has(file.filepath.replace(/^[./]+/, "")));
-  const rawIndexContent = typeof existingIndex?.content === "string" ? existingIndex.content : "";
-  const looksTruncatedIndex =
-    rawIndexContent.length > 0 &&
-    (rawIndexContent.trim() === 'import { CONFIG } from' ||
-      /import\s+\{\s*CONFIG\s*\}\s+from\s*$/.test(rawIndexContent.trim()) ||
-      !rawIndexContent.includes("callMcpTool") ||
-      rawIndexContent.split(/\r?\n/).length < 5);
-
-  const shouldForceSafeTemplate = looksTruncatedIndex;
-
-  if (!isYieldSweeper && !isSpreadScanner && !shouldForceSafeTemplate) {
-    return files;
-  }
-
-  const hasIndex = files.some((file) => indexAliases.has(file.filepath.replace(/^[./]+/, "")));
-  if (!hasIndex && !shouldForceSafeTemplate) {
-    return files;
-  }
-
-  const useYieldTemplate = isYieldSweeper;
-
+  // Only overwrite mcp_bridge.ts — let the LLM's src/index.ts survive
   const patched = files.map((file) => {
     const cleanPath = file.filepath.replace(/^[./]+/, "");
-    if (indexAliases.has(cleanPath)) {
-      return {
-        ...file,
-        filepath: "src/index.ts",
-        content: useYieldTemplate ? buildSafeInitiaYieldSweeperIndexTs() : buildSafeInitiaSpreadScannerIndexTs(),
-      };
-    }
     if (cleanPath === "src/mcp_bridge.ts") {
-      return {
-        ...file,
-        content: buildMcpBridgeTs(),
-      };
-    }
-    if (cleanPath === "src/config.ts") {
-      return {
-        ...file,
-        content: useYieldTemplate ? buildSafeInitiaYieldConfigTs() : buildSafeInitiaSpreadConfigTs(),
-      };
-    }
-    if (cleanPath === "src/ons_resolver.ts") {
-      return {
-        ...file,
-        content: buildSafeInitiaOnsResolverTs(),
-      };
+      return { ...file, content: buildMcpBridgeTs() };
     }
     return file;
   });
 
-  if (!patched.some((file) => file.filepath.replace(/^[./]+/, "") === "src/index.ts")) {
-    patched.push({ filepath: "src/index.ts", content: useYieldTemplate ? buildSafeInitiaYieldSweeperIndexTs() : buildSafeInitiaSpreadScannerIndexTs(), language: "typescript" });
-  }
+  // Ensure mcp_bridge.ts exists even if the LLM forgot it
   if (!patched.some((file) => file.filepath.replace(/^[./]+/, "") === "src/mcp_bridge.ts")) {
     patched.push({ filepath: "src/mcp_bridge.ts", content: buildMcpBridgeTs(), language: "typescript" });
-  }
-  if (!patched.some((file) => file.filepath.replace(/^[./]+/, "") === "src/config.ts")) {
-    patched.push({ filepath: "src/config.ts", content: useYieldTemplate ? buildSafeInitiaYieldConfigTs() : buildSafeInitiaSpreadConfigTs(), language: "typescript" });
-  }
-  if (!patched.some((file) => file.filepath.replace(/^[./]+/, "") === "src/ons_resolver.ts")) {
-    patched.push({ filepath: "src/ons_resolver.ts", content: buildSafeInitiaOnsResolverTs(), language: "typescript" });
   }
 
   return patched;
@@ -972,9 +912,19 @@ function normalizeRuntimeVarNames(files: GeneratedFile[]): GeneratedFile[] {
   return files.map((file) => {
     if (typeof file.content !== "string") return file;
 
-    const patched = file.content
+    let patched = file.content
       .replace(/\bRPC_PROVIDER_URL\b/g, "INITIA_RPC_URL")
       .replace(/\bRPC_URL\b/g, "INITIA_RPC_URL");
+
+    // Map hardcoded tokens directly to your actual .env keys
+    patched = patched.replace(
+      /(["'])0x1::coin::uusdc\1/g, 
+      'String(process.env.INITIA_USDC_METADATA_ADDRESS)'
+    );
+    patched = patched.replace(
+      /(["'])0x1::coin::uinit\1/g, 
+      'String(process.env.INITIA_INIT_METADATA_ADDRESS)'
+    );
 
     return { ...file, content: patched };
   });
@@ -1158,7 +1108,6 @@ function buildSafeInitiaSpreadConfigTs(): string {
     '  INITIA_SWAP_ROUTER_ADDRESS: process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "",',
     '  INITIA_SWAP_ROUTER_MODULE: process.env.INITIA_SWAP_ROUTER_MODULE ?? process.env.INITIA_SWAP_MODULE ?? "arbitrage_router",',
     '  INITIA_SWAP_ROUTER_FUNCTION: process.env.INITIA_SWAP_ROUTER_FUNCTION ?? process.env.INITIA_SWAP_FUNCTION ?? "execute_cross_chain_trade",',
-    '  INITIA_SWAP_ROUTER_TYPE_ARGS: process.env.INITIA_SWAP_ROUTER_TYPE_ARGS ?? process.env.INITIA_SWAP_TYPE_ARGS ?? "",',
     '  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount",',
     '  INITIA_EXECUTION_AMOUNT_USDC: BigInt(process.env.INITIA_EXECUTION_AMOUNT_USDC ?? "1000000"),',
     '  ESTIMATED_BRIDGE_FEE_USDC: BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? "5000"),',
