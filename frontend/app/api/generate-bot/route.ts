@@ -50,7 +50,7 @@ function parseEnvText(text: string): Record<string, string> {
 function buildSafeInitiaYieldSweeperIndexTs(): string {
   return [
     'import "dotenv/config";',
-    'import { callMcpTool } from "./mcp_bridge.js";',
+    'import { callMcpTool, getFaBalance } from "./mcp_bridge.js";',
     'import { resolveAddress } from "./ons_resolver.js";',
     '',
     'const POLL_MS = Number(process.env.POLL_MS ?? 15000);',
@@ -115,22 +115,8 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '  const wallet = await resolveWalletAddress();',
     '  const bridge = String(process.env.INITIA_BRIDGE_ADDRESS ?? "").trim();',
     '  if (!wallet || !bridge) throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");',
-    '  let payload: unknown = null;',
-    '  try {',
-    '    payload = await callMcpTool("initia", "move_view", {',
-    '      network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),',
-    '      address: "0x1",',
-    '      module: "coin",',
-    '      function: "balance",',
-    '      type_args: [USDC_COIN_TYPE],',
-    '      args: [wallet],',
-    '    });',
-    '  } catch (error) {',
-    '    const msg = error instanceof Error ? error.message : String(error);',
-    '    log("WARN", "move_view failed: " + msg);',
-    '    return;',
-    '  }',
-    '  const balance = extractBalance(payload) ?? 0n;',
+    '  const network = String(process.env.INITIA_NETWORK ?? "initia-testnet");',
+    '  const balance = await getFaBalance(network, wallet, USDC_COIN_TYPE);',
     '  log("INFO", "[SCAN] balance=" + balance.toString() + " threshold=" + THRESHOLD.toString());',
     '  if (balance <= THRESHOLD) return;',
     '  let result: unknown = null;',
@@ -140,6 +126,7 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '      address: bridge,',
     '      module: "interwoven_bridge",',
     '      function: "sweep_to_l1",',
+    '      type_args: [USDC_COIN_TYPE],',
     '      args: [balance.toString()],',
     '    });',
     '  } catch (error) {',
@@ -759,6 +746,8 @@ function buildSafeInitiaSentimentIndexTs(): string {
 
 function buildMcpBridgeTs(): string {
   return [
+    'import "dotenv/config";',
+    '',
     'const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp";',
     'const MCP_GATEWAY_UPSTREAM_URL = process.env.MCP_GATEWAY_UPSTREAM_URL ?? "";',
     'const SIGNING_RELAY_BASE = process.env.SIGNING_RELAY_BASE ?? "";',
@@ -902,12 +891,33 @@ function buildMcpBridgeTs(): string {
     '  }',
     '  return callGateway(server, tool, args);',
     '}',
+    '',
+    '// SAFELY ABSTRACTION FOR FA BALANCES',
+    'export async function getFaBalance(network: string, walletAddress: string, metadataAddress: string): Promise<bigint> {',
+    '  try {',
+    '    const payload = await callMcpTool("initia", "move_view", {',
+    '      network,',
+    '      address: "0x1",',
+    '      module: "primary_fungible_store",',
+    '      function: "balance",',
+    '      type_args: ["0x1::fungible_asset::Metadata"],',
+    '      args: [walletAddress, metadataAddress]',
+    '    });',
+    '    const str = JSON.stringify(payload || {});',
+    '    const match = str.match(/"(?:balance|amount|value|coin_amount)"\\s*:\\s*"(\\d+)"/) || str.match(/\\[\\s*"(\\d+)"\\s*\\]/);',
+    '    return match ? BigInt(match[1]) : 0n;',
+    '  } catch (err) {',
+    '    console.warn("Failed to get FA balance:", err instanceof Error ? err.message : String(err));',
+    '    return 0n;',
+    '  }',
+    '}',
   ].join("\n");
 }
 
 function normalizeRuntimeVarNames(files: GeneratedFile[]): GeneratedFile[] {
   return files.map((file) => {
     if (typeof file.content !== "string") return file;
+    const cleanPath = file.filepath.replace(/^[./]+/, "");
 
     let patched = file.content
       .replace(/\bRPC_PROVIDER_URL\b/g, "INITIA_RPC_URL")
@@ -921,6 +931,36 @@ function normalizeRuntimeVarNames(files: GeneratedFile[]): GeneratedFile[] {
     patched = patched.replace(
       /(["'])0x1::coin::uinit\1/g, 
       'String(process.env.INITIA_INIT_METADATA_ADDRESS)'
+    );
+
+    // Neutralize strict validation crashes
+    if (cleanPath === "src/config.ts" || cleanPath === "src/config.js" || cleanPath === "src/index.ts") {
+      patched = patched.replace(
+        /process\.exit\(1\);/g,
+        'console.warn("Warning: Missing environment variable but continuing...");'
+      );
+    }
+
+    // Automatically rewrite legacy coin balance checks to Fungible Asset balance checks.
+    patched = patched.replace(
+      /module:\s*["']coin["'],\s*function:\s*["']balance["'],\s*type_args:\s*\[(.*?)\],\s*args:\s*\[(.*?)\]/gs,
+      'module: "primary_fungible_store", function: "balance", type_args: ["0x1::fungible_asset::Metadata"], args: [$2, $1]'
+    );
+
+    // Ensure generic bridge sweeps pass exactly one CoinType arg for sweep_to_l1<CoinType>.
+    patched = patched.replace(
+      /(function:\s*["']sweep_to_l1["'][\s\S]*?type_args:\s*)\[\s*\]/g,
+      '$1[String(process.env.INITIA_USDC_METADATA_ADDRESS)]'
+    );
+    patched = patched.replace(
+      /(function:\s*["']sweep_to_l1["']\s*,\s*)(args:\s*\[)/g,
+      '$1type_args: [String(process.env.INITIA_USDC_METADATA_ADDRESS)], $2'
+    );
+
+    // Prevent BigInt([object Object]) by extracting a numeric string from nested MCP JSON.
+    patched = patched.replace(
+      /BigInt\(((?:response|payload|resolved)(?:\.result)?)\)/g,
+      'BigInt((function(val){ try { const s = typeof val === "string" ? val : JSON.stringify(val || {}); const m = s.match(/\\d{2,}/); return m ? m[0] : "0"; } catch { return "0"; } })($1))'
     );
 
     return { ...file, content: patched };

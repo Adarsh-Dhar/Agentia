@@ -22,16 +22,21 @@ Cover ALL of the following in your expansion:
    - *If Yield/Sweeper:* Define balance threshold checks and bridge execution parameters.
    - *If NFT/Social/Other:* Define the specific module addresses, queries, and execution rules required.
 
-3. **Initia MCP Integration Guide (CRITICAL - INSTRUCT THE DOWNSTREAM AGENT TO USE THIS SYNTAX)**:
+3. **Initia MCP Integration Guide (CRITICAL)**:
    - The bot MUST use the local \`mcp_bridge.ts\` file to interact with Initia.
-   - **Reads (move_view):** \`callMcpTool("initia", "move_view", { network, address, module, function, type_args: [], args: [] })\`
-   - **Writes (move_execute):** \`callMcpTool("initia", "move_execute", { network, address, module, function, type_args: [], args: [] })\`
-   - Instruct the code generator to ALWAYS handle MCP payloads safely (e.g., checking \`payload.result.content\` or \`payload.balance\`).
+   - **Reads:** \`await callMcpTool("initia", "move_view", { network, address, module, function, type_args: [], args: [] })\`
+  - **Writes:** \`await callMcpTool("initia", "move_execute", { network, address, module, function, type_args: [tokenTypeIfGeneric], args: [] })\`
+  - For generic Move entry functions (for example \`sweep_to_l1<CoinType>\`), you MUST pass exactly one concrete coin/metadata type in \`type_args\`.
+   - **CRITICAL SIGNATURE RULE:** \`callMcpTool\` takes EXACTLY 3 arguments (server, tool, args). NEVER pass a 4th argument.
 
-4. **Step-by-Step Logic & Safety**:
-   - Startup sequence and variable initialization.
-   - Core loop logic (fetching data -> evaluating conditions -> executing transaction).
-   - Safety checks (e.g., minimum balances, simulation checks, graceful shutdown on SIGTERM).
+4. **Fungible Asset (FA) Balance Rule (CRITICAL)**:
+   - Initia uses Fungible Assets, NOT legacy coins. NEVER use \`move_view\` directly to check balances.
+   - You MUST import and use the \`getFaBalance\` helper from \`./mcp_bridge.js\`.
+   - **Example:**
+     \`\`\`typescript
+     import { callMcpTool, getFaBalance } from "./mcp_bridge.js";
+     const balance = await getFaBalance(network, walletAddress, String(process.env.INITIA_USDC_METADATA_ADDRESS));
+     \`\`\`
 
 5. **Required Environment Variables**:
    - List every specific config variable needed (e.g., INITIA_NETWORK, TARGET_ADDRESS, SLIPPAGE_BPS).
@@ -40,11 +45,12 @@ Cover ALL of the following in your expansion:
 6. **TypeScript Implementation Constraints**:
    - Use standard \`BigInt\` for all on-chain amounts. No floats.
    - Entry point is always \`src/index.ts\`.
-   - **CRITICAL FA RULE:** Initia uses Fungible Assets (FA), not legacy coins. Token addresses are standard Object Addresses, NOT struct tags.
-   - NEVER put a token address from \`process.env\` into \`type_args\`.
-   - ALWAYS put the token address into the standard \`args\` array.
-   - **WRONG (Legacy Coin View):** \`module: "coin", function: "balance", type_args: [String(process.env.TOKEN)], args: [wallet]\`
-   - **RIGHT (Fungible Asset View):** \`module: "primary_fungible_store", function: "balance", type_args: ["0x1::fungible_asset::Metadata"], args: [wallet, String(process.env.INITIA_INIT_METADATA_ADDRESS)]\`
+   - **CRITICAL CONFIG RULE:** DO NOT generate a separate \`config.ts\` file. Read all variables directly from \`process.env\`.
+   - **CRITICAL TS RULE:** To satisfy TypeScript without crashing, ALWAYS wrap \`process.env\` variables in \`String(...)\`.
+     WRONG: \`if (!process.env.WALLET) process.exit(1);\`
+     RIGHT: \`const wallet = String(process.env.USER_WALLET_ADDRESS ?? "");\`
+   - **CRITICAL PARSING RULE:** balance payload parsing is owned by \`getFaBalance\` in \`mcp_bridge.ts\`. Do NOT implement custom FA balance regex/parsing in \`src/index.ts\`.
+   - **CRITICAL FA RULE:** for balance checks, always call \`getFaBalance(network, walletAddress, metadataAddress)\` and never construct a direct FA balance \`move_view\` payload inside \`src/index.ts\`.
 
 Output ONLY the expanded technical specification in plain text with clear headers. No preamble. Be highly specific about the Move modules and functions needed based on the user's intent.`;
 
