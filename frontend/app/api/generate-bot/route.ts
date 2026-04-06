@@ -49,14 +49,13 @@ function parseEnvText(text: string): Record<string, string> {
 
 function buildSafeInitiaYieldSweeperIndexTs(): string {
   return [
-    'import * as configModule from "./config.js";',
+    'import "dotenv/config";',
     'import { callMcpTool } from "./mcp_bridge.js";',
     'import { resolveAddress } from "./ons_resolver.js";',
     '',
-    'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
-    'const POLL_MS = Number(config.POLL_MS ?? 15000);',
-    'const THRESHOLD = BigInt(config.SWEEP_THRESHOLD_UUSDC ?? 1000000n);',
-    'const USDC_COIN_TYPE = String(config.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
+    'const POLL_MS = Number(process.env.POLL_MS ?? 15000);',
+    'const THRESHOLD = BigInt(process.env.SWEEP_THRESHOLD_UUSDC ?? 1000000n);',
+    'const USDC_COIN_TYPE = String(process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
     '',
     'function log(level: string, message: string): void {',
     '  console.log("[" + new Date().toISOString() + "] [" + level + "] " + message);',
@@ -107,19 +106,19 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '}',
     '',
     'async function resolveWalletAddress(): Promise<string> {',
-    '  const configured = String(config.USER_WALLET_ADDRESS ?? "").trim();',
+    '  const configured = String(process.env.USER_WALLET_ADDRESS ?? "").trim();',
     '  if (!configured) throw new Error("USER_WALLET_ADDRESS is required");',
     '  return resolveAddress(configured);',
     '}',
     '',
     'async function runCycle(): Promise<void> {',
     '  const wallet = await resolveWalletAddress();',
-    '  const bridge = String(config.INITIA_BRIDGE_ADDRESS ?? "").trim();',
+    '  const bridge = String(process.env.INITIA_BRIDGE_ADDRESS ?? "").trim();',
     '  if (!wallet || !bridge) throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");',
     '  let payload: unknown = null;',
     '  try {',
     '    payload = await callMcpTool("initia", "move_view", {',
-    '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '      network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),',
     '      address: "0x1",',
     '      module: "coin",',
     '      function: "balance",',
@@ -137,7 +136,7 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
     '  let result: unknown = null;',
     '  try {',
     '    result = await callMcpTool("initia", "move_execute", {',
-    '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '      network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),',
     '      address: bridge,',
     '      module: "interwoven_bridge",',
     '      function: "sweep_to_l1",',
@@ -178,26 +177,25 @@ function buildSafeInitiaYieldSweeperIndexTs(): string {
 
 function buildSafeInitiaSpreadScannerIndexTs(): string {
   return [
-    'import * as configModule from "./config.js";',
+    'import "dotenv/config";',
     'import { callMcpTool } from "./mcp_bridge.js";',
     '',
-    'const config = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;',
-    'const POLL_MS = Number(config.POLL_MS ?? 15000);',
-    'const ESTIMATED_BRIDGE_FEE_USDC = BigInt(config.ESTIMATED_BRIDGE_FEE_USDC ?? 5000n);',
-    'const EXECUTION_AMOUNT_USDC = BigInt(config.INITIA_EXECUTION_AMOUNT_USDC ?? 1000000n);',
-    'const PRICE_VIEW_ADDRESS = String(config.INITIA_PRICE_VIEW_ADDRESS ?? "0x1").trim();',
-    'const PRICE_VIEW_MODULE = String(config.INITIA_PRICE_VIEW_MODULE ?? "dex").trim();',
-    'const PRICE_VIEW_FUNCTION = String(config.INITIA_PRICE_VIEW_FUNCTION ?? "get_amount_out").trim();',
-    'const USDC_COIN_TYPE = String(config.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
-    'const typeArgsRaw = String(config.INITIA_PRICE_VIEW_TYPE_ARGS || process.env.INITIA_PRICE_VIEW_TYPE_ARGS || ("0x1::coin::uinit," + USDC_COIN_TYPE));',
+    'const POLL_MS = Number(process.env.POLL_MS ?? 15000);',
+    'const ESTIMATED_BRIDGE_FEE_USDC = BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? 5000n);',
+    'const EXECUTION_AMOUNT_USDC = BigInt(process.env.INITIA_EXECUTION_AMOUNT_USDC ?? 1000000n);',
+    'const PRICE_VIEW_ADDRESS = String(process.env.INITIA_PRICE_VIEW_ADDRESS ?? "0x1").trim();',
+    'const PRICE_VIEW_MODULE = String(process.env.INITIA_PRICE_VIEW_MODULE ?? "dex").trim();',
+    'const PRICE_VIEW_FUNCTION = String(process.env.INITIA_PRICE_VIEW_FUNCTION ?? "get_amount_out").trim();',
+    'const USDC_COIN_TYPE = String(process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
+    'const typeArgsRaw = String(process.env.INITIA_PRICE_VIEW_TYPE_ARGS || ("0x1::coin::uinit," + USDC_COIN_TYPE));',
     'const PRICE_VIEW_TYPE_ARGS = typeArgsRaw.split(",").map((part) => part.trim()).filter(Boolean);',
-    'const PRICE_VIEW_ARGS_TEMPLATE = String(config.INITIA_PRICE_VIEW_ARGS ?? "$endpoint,$amount").trim();',
-    'const ARBITRAGE_ROUTER_ADDRESS = String(config.INITIA_SWAP_ROUTER_ADDRESS ?? "").trim();',
-    'const ARBITRAGE_ROUTER_MODULE = String(config.INITIA_SWAP_ROUTER_MODULE ?? config.INITIA_SWAP_MODULE ?? "arbitrage_router").trim();',
-    'const ARBITRAGE_ROUTER_FUNCTION = String(config.INITIA_SWAP_ROUTER_FUNCTION ?? config.INITIA_SWAP_FUNCTION ?? "execute_cross_chain_trade").trim();',
-    'const ARBITRAGE_ROUTER_TYPE_ARGS = String(config.INITIA_SWAP_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
-    'const ARBITRAGE_ROUTER_ARGS_TEMPLATE = String(config.INITIA_SWAP_ROUTER_ARGS ?? config.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount").trim();',
-    'const ALLOW_COMPATIBILITY_QUOTES = String(config.ALLOW_COMPATIBILITY_QUOTES ?? process.env.ALLOW_COMPATIBILITY_QUOTES ?? "false").trim().toLowerCase() === "true";',
+    'const PRICE_VIEW_ARGS_TEMPLATE = String(process.env.INITIA_PRICE_VIEW_ARGS ?? "$endpoint,$amount").trim();',
+    'const ARBITRAGE_ROUTER_ADDRESS = String(process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "").trim();',
+    'const ARBITRAGE_ROUTER_MODULE = String(process.env.INITIA_SWAP_ROUTER_MODULE ?? process.env.INITIA_SWAP_MODULE ?? "arbitrage_router").trim();',
+    'const ARBITRAGE_ROUTER_FUNCTION = String(process.env.INITIA_SWAP_ROUTER_FUNCTION ?? process.env.INITIA_SWAP_FUNCTION ?? "execute_cross_chain_trade").trim();',
+    'const ARBITRAGE_ROUTER_TYPE_ARGS = String(process.env.INITIA_SWAP_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
+    'const ARBITRAGE_ROUTER_ARGS_TEMPLATE = String(process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount").trim();',
+    'const ALLOW_COMPATIBILITY_QUOTES = String(process.env.ALLOW_COMPATIBILITY_QUOTES ?? "false").trim().toLowerCase() === "true";',
     '',
     'function requireConfiguredAddress(name: string, value: unknown): string {',
     '  const resolved = String(value ?? "").trim();',
@@ -205,8 +203,8 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '  return resolved;',
     '}',
     '',
-    'const poolAAddress = requireConfiguredAddress("INITIA_POOL_A_ADDRESS", config.INITIA_POOL_A_ADDRESS);',
-    'const poolBAddress = requireConfiguredAddress("INITIA_POOL_B_ADDRESS", config.INITIA_POOL_B_ADDRESS);',
+    'const poolAAddress = requireConfiguredAddress("INITIA_POOL_A_ADDRESS", process.env.INITIA_POOL_A_ADDRESS);',
+    'const poolBAddress = requireConfiguredAddress("INITIA_POOL_B_ADDRESS", process.env.INITIA_POOL_B_ADDRESS);',
     'const ENDPOINTS = [',
     '  { id: "minitia-a", address: poolAAddress },',
     '  { id: "minitia-b", address: poolBAddress },',
@@ -322,7 +320,7 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '}',
     '',
     'function buildArbitrageArgs(buyEndpointAddress: string, sellEndpointAddress: string): string[] {',
-    '  const usdcMetadata = String(config.INITIA_USDC_METADATA_ADDRESS ?? "").trim();',
+    '  const usdcMetadata = String(process.env.INITIA_USDC_METADATA_ADDRESS ?? "").trim();',
     '  if (!ARBITRAGE_ROUTER_ARGS_TEMPLATE) return [buyEndpointAddress, sellEndpointAddress, EXECUTION_AMOUNT_USDC.toString(), usdcMetadata].filter(Boolean);',
     '  return ARBITRAGE_ROUTER_ARGS_TEMPLATE',
     '    .split(",")',
@@ -348,7 +346,7 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '  }',
     '  log("INFO", "[EXECUTE] buy=" + buyEndpointAddress + " sell=" + sellEndpointAddress + " amount=" + EXECUTION_AMOUNT_USDC.toString() + " expectedProfit=" + expectedProfit.toString());',
     '  const result = await safeMcp("initia", "move_execute", {',
-    '    network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '    network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),',
     '    address: ARBITRAGE_ROUTER_ADDRESS,',
     '    module: ARBITRAGE_ROUTER_MODULE,',
     '    function: ARBITRAGE_ROUTER_FUNCTION,',
@@ -404,7 +402,7 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '  let usedCompatibilityQuote = false;',
     '  const buyQuotes = await Promise.allSettled(',
     '    ENDPOINTS.map((endpoint) => safeMcp("initia", "move_view", {',
-    '      network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '      network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),',
     '      address: PRICE_VIEW_ADDRESS,',
     '      module: PRICE_VIEW_MODULE,',
     '      function: PRICE_VIEW_FUNCTION,',
@@ -438,14 +436,14 @@ function buildSafeInitiaSpreadScannerIndexTs(): string {
     '',
     '  const bestBuy = buyLegs.reduce((best, current) => (current.amountOut > best.amountOut ? current : best), buyLegs[0]);',
     '  const fallbackSellTypeArgs = PRICE_VIEW_TYPE_ARGS.length >= 2 ? [PRICE_VIEW_TYPE_ARGS[1], PRICE_VIEW_TYPE_ARGS[0]] : PRICE_VIEW_TYPE_ARGS;',
-    '  const sellTypeArgs = String(config.INITIA_SELL_VIEW_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
+    '  const sellTypeArgs = String(process.env.INITIA_SELL_VIEW_TYPE_ARGS ?? "").split(",").map((part) => part.trim()).filter(Boolean);',
     '  const activeSellTypeArgs = sellTypeArgs.length > 0 ? sellTypeArgs : fallbackSellTypeArgs;',
     '',
     '  const sellQuotes = await Promise.allSettled(',
     '    ENDPOINTS',
     '      .filter((endpoint) => endpoint.address !== bestBuy.address)',
     '      .map((endpoint) => safeMcp("initia", "move_view", {',
-    '        network: String(config.INITIA_NETWORK ?? "initia-testnet"),',
+    '        network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),',
     '        address: PRICE_VIEW_ADDRESS,',
     '        module: PRICE_VIEW_MODULE,',
     '        function: PRICE_VIEW_FUNCTION,',
@@ -562,16 +560,15 @@ function patchInitiaStrategyBotFiles(
 
 function buildSafeInitiaSentimentIndexTs(): string {
   return [
-    'import * as configModule from "./config.js";',
+    'import "dotenv/config";',
     'import { callMcpTool } from "./mcp_bridge.js";',
     '',
-    'const config = ((configModule as Record<string, unknown>).config ?? (configModule as Record<string, unknown>).CONFIG ?? {}) as Record<string, unknown>;',
     'const POLL_MS = 15000;',
     'const SENTIMENT_BUY_THRESHOLD = 70;',
     'const SENTIMENT_SELL_THRESHOLD = 30;',
-    'const SIMULATION_MODE = String(process.env.SIMULATION_MODE ?? config.SIMULATION_MODE ?? "true").toLowerCase() !== "false";',
-    'const BASE_COIN_TYPE = String(process.env.INITIA_BASE_COIN_TYPE ?? config.INITIA_BASE_COIN_TYPE ?? "0x1::coin::uinit").trim();',
-    'const USDC_COIN_TYPE = String(process.env.INITIA_USDC_METADATA_ADDRESS ?? config.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
+    'const SIMULATION_MODE = String(process.env.SIMULATION_MODE ?? "true").toLowerCase() !== "false";',
+    'const BASE_COIN_TYPE = String(process.env.INITIA_BASE_COIN_TYPE ?? "0x1::coin::uinit").trim();',
+    'const USDC_COIN_TYPE = String(process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit").trim();',
     '',
     'function log(level: string, message: string): void {',
     '  const ts = new Date().toISOString();',
@@ -681,7 +678,7 @@ function buildSafeInitiaSentimentIndexTs(): string {
     '  if (score > SENTIMENT_BUY_THRESHOLD) {',
     '    log("INFO", "Bullish threshold reached");',
     '    if (!SIMULATION_MODE) {',
-    '      const network = String(config.INITIA_NETWORK ?? "initia-testnet");',
+    '      const network = String(process.env.INITIA_NETWORK ?? "initia-testnet");',
     '      await safeMcp("initia", "move_execute", {',
     '        network,',
     '        address: flashPoolAddress,',
@@ -1028,13 +1025,6 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
       }
     }
 
-    if (cleanPath === "src/config.ts" && typeof file.content === "string" && file.content.includes("export const config =")) {
-      if (file.content.includes("export const CONFIG =") || file.content.includes("export { config as CONFIG }")) {
-        return file;
-      }
-      return { ...file, content: `${file.content}\nexport { config as CONFIG };\n` };
-    }
-
     return file;
   });
 
@@ -1072,123 +1062,6 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
   return [...ensuredMcpBridge, { filepath: "package.json", content: fallbackSentimentPackage, language: "json" }];
 }
 
-function buildSafeInitiaYieldConfigTs(): string {
-  return [
-    'export const config = {',
-    '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "",',
-    '  SIGNING_RELAY_BASE: process.env.SIGNING_RELAY_BASE ?? "",',
-    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
-    '  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",',
-    '  ONS_REGISTRY_ADDRESS: process.env.ONS_REGISTRY_ADDRESS ?? "0x1",',
-    '  INITIA_BRIDGE_ADDRESS: process.env.INITIA_BRIDGE_ADDRESS ?? "",',
-    '  INITIA_USDC_METADATA_ADDRESS: process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit",',
-    '  SWEEP_THRESHOLD_UUSDC: BigInt(process.env.SWEEP_THRESHOLD_UUSDC ?? "1000000"),',
-    '  POLL_MS: Number(process.env.POLL_MS ?? "15000"),',
-    '};',
-    '',
-    'export const CONFIG = config;',
-  ].join("\n");
-}
-
-function buildSafeInitiaSpreadConfigTs(): string {
-  return [
-    'export const config = {',
-    '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "",',
-    '  SIGNING_RELAY_BASE: process.env.SIGNING_RELAY_BASE ?? "",',
-    '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",',
-    '  INITIA_POOL_A_ADDRESS: process.env.INITIA_POOL_A_ADDRESS ?? "",',
-    '  INITIA_POOL_B_ADDRESS: process.env.INITIA_POOL_B_ADDRESS ?? "",',
-    '  INITIA_PRICE_VIEW_ADDRESS: process.env.INITIA_PRICE_VIEW_ADDRESS ?? "0x1",',
-    '  INITIA_PRICE_VIEW_MODULE: process.env.INITIA_PRICE_VIEW_MODULE ?? "dex",',
-    '  INITIA_PRICE_VIEW_FUNCTION: process.env.INITIA_PRICE_VIEW_FUNCTION ?? "get_amount_out",',
-    '  INITIA_PRICE_VIEW_TYPE_ARGS: process.env.INITIA_PRICE_VIEW_TYPE_ARGS ?? "",',
-    '  INITIA_USDC_METADATA_ADDRESS: process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit",',
-    '  INITIA_PRICE_VIEW_ARGS: process.env.INITIA_PRICE_VIEW_ARGS ?? "$endpoint,$amount",',
-    '  INITIA_SELL_VIEW_TYPE_ARGS: process.env.INITIA_SELL_VIEW_TYPE_ARGS ?? "",',
-    '  INITIA_SWAP_ROUTER_ADDRESS: process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "",',
-    '  INITIA_SWAP_ROUTER_MODULE: process.env.INITIA_SWAP_ROUTER_MODULE ?? process.env.INITIA_SWAP_MODULE ?? "arbitrage_router",',
-    '  INITIA_SWAP_ROUTER_FUNCTION: process.env.INITIA_SWAP_ROUTER_FUNCTION ?? process.env.INITIA_SWAP_FUNCTION ?? "execute_cross_chain_trade",',
-    '  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount",',
-    '  INITIA_EXECUTION_AMOUNT_USDC: BigInt(process.env.INITIA_EXECUTION_AMOUNT_USDC ?? "1000000"),',
-    '  ESTIMATED_BRIDGE_FEE_USDC: BigInt(process.env.ESTIMATED_BRIDGE_FEE_USDC ?? "5000"),',
-    '  POLL_MS: Number(process.env.POLL_MS ?? "15000"),',
-    '};',
-    '',
-    'export const CONFIG = config;',
-  ].join("\n");
-}
-
-function buildSafeInitiaOnsResolverTs(): string {
-  return [
-    'import { callMcpTool } from "./mcp_bridge.js";',
-    'import { CONFIG } from "./config.js";',
-    '',
-    'const _resolvedCache = new Map<string, string>();',
-    '',
-    'export function isInitName(value: string): boolean {',
-    '  return /^[a-z0-9_-]+\\.init$/i.test(String(value ?? "").trim());',
-    '}',
-    '',
-    'function extractAddressFromPayload(payload: unknown): string | null {',
-    '  if (!payload || typeof payload !== "object") return null;',
-    '  const root = payload as Record<string, unknown>;',
-    '  for (const field of ["address", "resolved_address", "value", "account"]) {',
-    '    if (typeof root[field] === "string" && (root[field] as string).trim()) {',
-    '      return (root[field] as string).trim();',
-    '    }',
-    '  }',
-    '  const result = root.result;',
-    '  if (result && typeof result === "object") {',
-    '    const content = (result as Record<string, unknown>).content;',
-    '    if (Array.isArray(content) && content.length > 0) {',
-    '      const text = (content[0] as Record<string, unknown>).text;',
-    '      if (typeof text === "string") {',
-    '        const trimmed = text.trim();',
-    '        if (trimmed.startsWith("{")) {',
-    '          try {',
-    '            const inner = JSON.parse(trimmed) as Record<string, unknown>;',
-    '            for (const field of ["address", "resolved_address", "value"]) {',
-    '              if (typeof inner[field] === "string") return (inner[field] as string).trim();',
-    '            }',
-    '          } catch {',
-    '          }',
-    '        }',
-    '        if (trimmed.startsWith("init1") || trimmed.startsWith("0x")) {',
-    '          return trimmed;',
-    '        }',
-    '      }',
-    '    }',
-    '  }',
-    '  return null;',
-    '}',
-    '',
-    'export async function resolveAddress(nameOrAddress: string): Promise<string> {',
-    '  const normalized = String(nameOrAddress ?? "").trim().toLowerCase();',
-    '  if (!isInitName(normalized)) {',
-    '    return String(nameOrAddress ?? "").trim();',
-    '  }',
-    '  const cached = _resolvedCache.get(normalized);',
-    '  if (cached) {',
-    '    return cached;',
-    '  }',
-    '  const response = await callMcpTool("initia", "move_view", {',
-    '    network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),',
-    '    address: String(process.env.ONS_REGISTRY_ADDRESS ?? CONFIG.ONS_REGISTRY_ADDRESS ?? "0x1"),',
-    '    module: "initia_names",',
-    '    function: "resolve",',
-    '    type_args: [],',
-    '    args: [normalized],',
-    '  });',
-    '  const resolved = extractAddressFromPayload(response);',
-    '  if (!resolved) {',
-    '    throw new Error(`ONS registry returned no address for \'${normalized}\'`);',
-    '  }',
-    '  _resolvedCache.set(normalized, resolved);',
-    '  return resolved;',
-    '}',
-    '',
-  ].join("\n");
-}
 
 function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
   const strategy = String(intent.strategy ?? "").toLowerCase();
@@ -1197,14 +1070,6 @@ function isInitiaYieldSweeperIntent(intent: Record<string, unknown>): boolean {
   return strategy === "yield" || strategy === "yield_sweeper" || /sweep|yield/.test(botType);
 }
 
-function isInitiaSpreadScannerIntent(intent: Record<string, unknown>): boolean {
-  const strategy = String(intent.strategy ?? "").toLowerCase();
-  const botType = String(intent.bot_type ?? intent.bot_name ?? "").toLowerCase();
-  return (
-    /spread scanner|market intelligence|arbitrage/.test(botType) ||
-    /arbitrage|cross_chain_arbitrage/.test(strategy)
-  );
-}
 
 function isInitiaSentimentIntent(intent: Record<string, unknown>): boolean {
   const strategy = String(intent.strategy ?? "").toLowerCase();

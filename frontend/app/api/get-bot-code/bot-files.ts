@@ -12,7 +12,6 @@ export function assembleInitiaBotFiles(): BotFile[] {
     { filepath: "package.json", content: INITIA_PACKAGE_JSON },
     { filepath: "tsconfig.json", content: INITIA_TSCONFIG },
     { filepath: ".env.example", content: INITIA_ENV_EXAMPLE },
-    { filepath: "src/config.ts", content: INITIA_CONFIG_TS },
     { filepath: "src/mcp_bridge.ts", content: INITIA_MCP_BRIDGE_TS },
     { filepath: "src/ons_resolver.ts", content: INITIA_ONS_RESOLVER_TS },
     { filepath: "src/index.ts", content: INITIA_INDEX_TS },
@@ -81,43 +80,11 @@ SIMULATION_MODE=true
 POLL_INTERVAL=15
 `;
 
-const INITIA_CONFIG_TS = `import "dotenv/config";
+const INITIA_MCP_BRIDGE_TS = `import "dotenv/config";
 
-export const config = {
-  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? (() => { throw new Error("MCP_GATEWAY_URL not set"); })(),
-  MCP_GATEWAY_UPSTREAM_URL: process.env.MCP_GATEWAY_UPSTREAM_URL ?? "",
-  SIGNING_RELAY_BASE: process.env.SIGNING_RELAY_BASE ?? "",
-  SESSION_KEY_MODE: process.env.SESSION_KEY_MODE ?? "false",
-  INITIA_RPC_URL: process.env.INITIA_RPC_URL ?? "",
-  // ONS: USER_WALLET_ADDRESS may be a .init name (e.g. "adarsh.init")
-  // The bot resolves it automatically at startup via the ONS registry.
-  ONS_REGISTRY_ADDRESS: process.env.ONS_REGISTRY_ADDRESS ?? "0x1",
-  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",
-  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",
-  INITIA_BRIDGE_ADDRESS: process.env.INITIA_BRIDGE_ADDRESS ?? "",
-  INITIA_POOL_A_ADDRESS: process.env.INITIA_POOL_A_ADDRESS ?? "",
-  INITIA_POOL_B_ADDRESS: process.env.INITIA_POOL_B_ADDRESS ?? "",
-  INITIA_FLASH_POOL_ADDRESS: process.env.INITIA_FLASH_POOL_ADDRESS ?? "",
-  INITIA_PRICE_VIEW_ADDRESS: process.env.INITIA_PRICE_VIEW_ADDRESS ?? "0x1",
-  INITIA_PRICE_VIEW_MODULE: process.env.INITIA_PRICE_VIEW_MODULE ?? "dex",
-  INITIA_PRICE_VIEW_FUNCTION: process.env.INITIA_PRICE_VIEW_FUNCTION ?? "get_amount_out",
-  INITIA_PRICE_VIEW_ARGS: process.env.INITIA_PRICE_VIEW_ARGS ?? "$endpoint,$amount",
-  INITIA_SWAP_ROUTER_ADDRESS: process.env.INITIA_SWAP_ROUTER_ADDRESS ?? "",
-  INITIA_SWAP_ROUTER_MODULE: process.env.INITIA_SWAP_ROUTER_MODULE ?? process.env.INITIA_SWAP_MODULE ?? "arbitrage_router",
-  INITIA_SWAP_ROUTER_FUNCTION: process.env.INITIA_SWAP_ROUTER_FUNCTION ?? process.env.INITIA_SWAP_FUNCTION ?? "execute_cross_chain_trade",
-  INITIA_SWAP_ROUTER_ARGS: process.env.INITIA_SWAP_ROUTER_ARGS ?? process.env.INITIA_SWAP_ARGS ?? "$buyEndpoint,$sellEndpoint,$amount",
-  INITIA_USDC_METADATA_ADDRESS: process.env.INITIA_USDC_METADATA_ADDRESS ?? "0x1::coin::uinit",
-  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",
-  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),
-} as const;
-
-export const CONFIG = config;
-`;
-
-const INITIA_MCP_BRIDGE_TS = `import * as configModule from "./config.js";
-
-const CONFIG = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;
-const SIGNING_RELAY_BASE = String(CONFIG.SIGNING_RELAY_BASE ?? process.env.SIGNING_RELAY_BASE ?? "").trim();
+const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "";
+const MCP_GATEWAY_UPSTREAM_URL = process.env.MCP_GATEWAY_UPSTREAM_URL ?? "";
+const SIGNING_RELAY_BASE = String(process.env.SIGNING_RELAY_BASE ?? "").trim();
 
 function normalizeGatewayBase(raw: string): string {
   const value = String(raw || "").trim().replace(/\/+$/, "");
@@ -140,7 +107,7 @@ function deriveRelayBase(): string {
     }
   }
 
-  const raw = String(CONFIG.MCP_GATEWAY_URL ?? "").trim();
+  const raw = String(MCP_GATEWAY_URL ?? "").trim();
   if (!raw) return "http://localhost:3000";
   if (isProxyGateway(raw)) return raw.replace(/\/api\/mcp-proxy\/?$/i, "");
   try {
@@ -160,7 +127,7 @@ function buildCandidateUrls(base: string, server: string, tool: string): string[
 }
 
 async function callGateway(server: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
-  const base = normalizeGatewayBase(String(CONFIG.MCP_GATEWAY_URL ?? ""));
+  const base = normalizeGatewayBase(String(MCP_GATEWAY_URL ?? ""));
   const urls = buildCandidateUrls(base, server, tool);
 
   let lastError = "unknown error";
@@ -171,7 +138,7 @@ async function callGateway(server: string, tool: string, args: Record<string, un
         "Content-Type": "application/json",
         "ngrok-skip-browser-warning": "true",
         "Bypass-Tunnel-Reminder": "true",
-        ...(CONFIG.MCP_GATEWAY_UPSTREAM_URL ? { "x-mcp-upstream-url": String(CONFIG.MCP_GATEWAY_UPSTREAM_URL) } : {}),
+        ...(MCP_GATEWAY_UPSTREAM_URL ? { "x-mcp-upstream-url": String(MCP_GATEWAY_UPSTREAM_URL) } : {}),
       },
       body: JSON.stringify(args ?? {}),
     });
@@ -263,7 +230,7 @@ export async function callMcpTool(server: string, tool: string, args: Record<str
 `;
 
 const INITIA_ONS_RESOLVER_TS = `import { callMcpTool } from "./mcp_bridge.js";
-import { CONFIG } from "./config.js";
+import "dotenv/config";
 
 const _resolvedCache = new Map<string, string>();
 
@@ -323,8 +290,8 @@ export async function resolveAddress(nameOrAddress: string): Promise<string> {
   console.log("[ONS] Resolving " + normalized + "...");
 
   const response = await callMcpTool("initia", "move_view", {
-    network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),
-    address: String(process.env.ONS_REGISTRY_ADDRESS ?? CONFIG.ONS_REGISTRY_ADDRESS ?? "0x1"),
+    network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),
+    address: String(process.env.ONS_REGISTRY_ADDRESS ?? "0x1"),
     module: "initia_names",
     function: "resolve",
     type_args: [],
@@ -342,7 +309,7 @@ export async function resolveAddress(nameOrAddress: string): Promise<string> {
 }
 `;
 
-const INITIA_INDEX_TS = `import { CONFIG } from "./config.js";
+const INITIA_INDEX_TS = `import "dotenv/config";
 import { callMcpTool } from "./mcp_bridge.js";
 import { resolveAddress } from "./ons_resolver.js";
 
@@ -353,7 +320,7 @@ function log(level: "INFO" | "WARN" | "ERROR", message: string): void {
 let inFlight = false;
 
 async function resolveWalletAddress(): Promise<string> {
-  const configured = String(CONFIG.USER_WALLET_ADDRESS ?? "").trim();
+  const configured = String(process.env.USER_WALLET_ADDRESS ?? "").trim();
   if (!configured) {
     throw new Error("USER_WALLET_ADDRESS is required");
   }
@@ -362,14 +329,14 @@ async function resolveWalletAddress(): Promise<string> {
 
 async function runCycle(): Promise<void> {
   const wallet = await resolveWalletAddress();
-  const bridge = CONFIG.INITIA_BRIDGE_ADDRESS;
+  const bridge = process.env.INITIA_BRIDGE_ADDRESS;
   if (!wallet || !bridge) {
     throw new Error("USER_WALLET_ADDRESS and INITIA_BRIDGE_ADDRESS are required");
   }
-  const usdcType = String(CONFIG.INITIA_USDC_METADATA_ADDRESS || "0x1::coin::uinit").trim();
+  const usdcType = String(process.env.INITIA_USDC_METADATA_ADDRESS || "0x1::coin::uinit").trim();
 
   const view = await callMcpTool("initia", "move_view", {
-    network: CONFIG.INITIA_NETWORK,
+    network: process.env.INITIA_NETWORK ?? "initia-testnet",
     address: "0x1",
     module: "coin",
     function: "balance",
@@ -386,7 +353,7 @@ async function runCycle(): Promise<void> {
   if (balance <= 1000000n) return;
 
   const exec = await callMcpTool("initia", "move_execute", {
-    network: CONFIG.INITIA_NETWORK,
+    network: process.env.INITIA_NETWORK ?? "initia-testnet",
     address: bridge,
     module: "interwoven_bridge",
     function: "sweep_to_l1",
@@ -406,7 +373,8 @@ async function tick(): Promise<void> {
     log("ERROR", msg);
   } finally {
     inFlight = false;
-    setTimeout(() => { void tick(); }, CONFIG.POLL_MS);
+    const pollMs = Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000);
+    setTimeout(() => { void tick(); }, pollMs);
   }
 }
 

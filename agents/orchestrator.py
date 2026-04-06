@@ -3,14 +3,13 @@ orchestrator.py
 
 Simplified Meta-Agent.
 Input:  plain-English prompt like "create a sentiment analysis initia bot"
-Output: exactly 3 generated files plus the hardcoded MCP bridge:
+Output: exactly 2 generated files plus the hardcoded MCP bridge:
           1. package.json
-          2. src/config.ts
-          3. src/index.ts
+          2. src/index.ts
 
 Pipeline:
   1. classify_intent()   → detect chain / strategy / MCPs from prompt
-  2. build_bot_logic()   → generate 3 files following Listen→Quantify→Corroborate→Protect→Act
+  2. build_bot_logic()   → generate 2 files following Listen→Quantify→Corroborate→Protect→Act
 """
 
 import os
@@ -41,9 +40,10 @@ def _log(level: str, message: str, trace_id: str | None = None) -> None:
 # ─── MCP Bridge Template (always the same — hardcoded, not generated) ────────
 
 MCP_BRIDGE_CONTENT = '''\
-import * as configModule from "./config.js";
+import "dotenv/config";
 
-const CONFIG = ((configModule as Record<string, unknown>).CONFIG ?? (configModule as Record<string, unknown>).config ?? {}) as Record<string, unknown>;
+const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "";
+const INITIA_KEY = process.env.INITIA_KEY ?? "";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,15 +67,11 @@ export async function callMcpTool(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const initiaKey = String(CONFIG.INITIA_KEY ?? "").trim();
+  const initiaKey = INITIA_KEY.trim();
   if (server === "initia" && tool === "move_execute" && !initiaKey) {
     throw new Error("INITIA_KEY missing for move_execute. Enable AutoSign session key mode and relaunch.");
   }
-  const rawGateway = normalizeGatewayBase(String(
-    CONFIG.MCP_GATEWAY_URL ??
-    process.env.MCP_GATEWAY_URL ??
-    ""
-  ));
+  const rawGateway = normalizeGatewayBase(MCP_GATEWAY_URL);
   if (!rawGateway) {
     throw new Error("MCP_GATEWAY_URL is missing in config/environment");
   }
@@ -139,7 +135,7 @@ export async function callMcpTool(
 
 ONS_RESOLVER_CONTENT = '''\
 import { callMcpTool } from "./mcp_bridge.js";
-import { CONFIG } from "./config.js";
+import "dotenv/config";
 
 const _resolvedCache = new Map<string, string>();
 
@@ -190,8 +186,8 @@ export async function resolveAddress(nameOrAddress: string): Promise<string> {
     return cached;
   }
   const response = await callMcpTool("initia", "move_view", {
-    network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),
-    address: String(process.env.ONS_REGISTRY_ADDRESS ?? CONFIG.ONS_REGISTRY_ADDRESS ?? "0x1"),
+    network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),
+    address: String(process.env.ONS_REGISTRY_ADDRESS ?? "0x1"),
     module: "initia_names",
     function: "resolve",
     args: [normalized],
@@ -272,7 +268,6 @@ def _normalize_generated_filepath(raw_path: object) -> str:
     "package.json": "package.json",
     "index.ts": "src/index.ts",
     "main.ts": "src/index.ts",
-    "config.ts": "src/config.ts",
     "mcp_bridge.ts": "src/mcp_bridge.ts",
     "ons_resolver.ts": "src/ons_resolver.ts",
   }
@@ -306,24 +301,23 @@ Schema:
   "thoughts": "<one paragraph: architecture rationale>",
   "files": [
     {"filepath": "package.json", "content": "..."},
-    {"filepath": "src/config.ts", "content": "..."},
     {"filepath": "src/index.ts", "content": "..."}
   ]
 }
 
-You MUST generate EXACTLY these 3 files in this order:
+You MUST generate EXACTLY these 2 files in this order:
   1. package.json
-  2. src/config.ts
-  3. src/index.ts
+  2. src/index.ts
 
 The file src/mcp_bridge.ts is provided separately - do NOT generate it.
 Import it in src/index.ts as: import { callMcpTool } from "./mcp_bridge.js".
+Do NOT generate src/config.ts. Read all values directly from process.env inside src/index.ts.
 
 CORE CONSTRAINTS:
 1. TypeScript + Node.js only. Never Python.
 2. package.json must use "type": "module" and "start": "tsx src/index.ts".
 3. Keep dependencies minimal: dotenv, tsx, typescript, @types/node. Add only what the requested bot truly needs.
-4. src/config.ts must read all secrets from process.env. INITIA_KEY can be empty at startup when SESSION_KEY_MODE=true and must be validated lazily at first write.
+4. src/index.ts must read all secrets directly from process.env using dotenv. Add `import "dotenv/config";` at the top. INITIA_KEY can be empty at startup when SESSION_KEY_MODE=true and must be validated lazily at first write. Do NOT create a config.ts file.
 5. MCP_GATEWAY_URL must fail fast if unset. No hardcoded IP fallback.
 6. All money and token math must use BigInt only.
 7. SIMULATION_MODE defaults to true unless explicitly set to "false".
@@ -334,7 +328,7 @@ CORE CONSTRAINTS:
 12. Never instantiate OpenAI clients or wallets at module scope.
 13. Every generated file must be complete. No TODOs, stubs, or placeholder comments.
 14. Never use fake placeholder addresses (for example 0xinitia_pool_a/0xinitia_pool_b) or fabricated prices.
-15. Always resolve addresses and runtime inputs from CONFIG/process.env and fail fast when required values are missing.
+15. Always resolve addresses and runtime inputs from process.env and fail fast when required values are missing.
 16. If USER_WALLET_ADDRESS or any configured address ends in '.init', resolve it before first use and cache the resolved address.
 17. Never mention wrapper SDK tooling in generated code/comments/dependency lists.
 18. Use direct MCP payloads for Initia reads/writes (address/module/function/type_args/args) without middleware abstractions.
@@ -381,11 +375,11 @@ STRATEGY TEMPLATES:
 5. Flash-bridge spatial arbitrageur (strategy: cross_chain_arbitrage):
   - Read prices on two endpoints using move_view.
   - FOR DEX QUOTES (move_view): MUST use address: '0x1', module: 'dex', function: 'get_amount_out'.
-  - For Pool A quote: type_args: ['0x1::coin::uusdc', '0x1::coin::uinit'], args: [CONFIG.INITIA_POOL_A_ADDRESS, "1000000"].
-  - For Pool B quote: type_args: ['0x1::coin::uinit', '0x1::coin::uusdc'], args: [CONFIG.INITIA_POOL_B_ADDRESS, expected_token_output].
-  - Compute net profit. If > 0, execute the configured router with move_execute using CONFIG.INITIA_SWAP_ROUTER_ADDRESS, CONFIG.INITIA_SWAP_ROUTER_MODULE, CONFIG.INITIA_SWAP_ROUTER_FUNCTION and CONFIG.INITIA_SWAP_ROUTER_ARGS.
+  - For Pool A quote: type_args: ['0x1::coin::uusdc', '0x1::coin::uinit'], args: [process.env.INITIA_POOL_A_ADDRESS, "1000000"].
+  - For Pool B quote: type_args: ['0x1::coin::uinit', '0x1::coin::uusdc'], args: [process.env.INITIA_POOL_B_ADDRESS, expected_token_output].
+  - Compute net profit. If > 0, execute the configured router with move_execute using process.env.INITIA_SWAP_ROUTER_ADDRESS, process.env.INITIA_SWAP_ROUTER_MODULE, process.env.INITIA_SWAP_ROUTER_FUNCTION and process.env.INITIA_SWAP_ROUTER_ARGS.
   - The generated bot must not stop at logging when net profit is positive.
-  - Use a configurable execution amount via CONFIG.INITIA_EXECUTION_AMOUNT_USDC and pass the buy/sell endpoint addresses into the router args template.
+  - Use a configurable execution amount via process.env.INITIA_EXECUTION_AMOUNT_USDC and pass the buy/sell endpoint addresses into the router args template.
   - ALL type_args MUST be fully qualified (e.g. 0x1::coin::uusdc), NEVER just "uusdc" or "uinit".
   - CRITICAL: move_view returns an object. To get the price, you MUST extract it like this: BigInt((quote as any).result.amount). Never cast the raw result object to BigInt.
 
@@ -626,7 +620,7 @@ class MetaAgent:
 
   {chain_ctx}
 
-  Generate the 3 files now.
+  Generate the 2 files now.
   """.strip()
 
       _log("INFO", f"build_bot: generator_prompt_chars={len(user_msg)} system_chars={len(GENERATOR_SYSTEM)}", trace_id)
@@ -683,37 +677,20 @@ class MetaAgent:
             indent=2,
           ),
         })
-      if "src/config.ts" not in current_paths:
-        files.append({
-          "filepath": "src/config.ts",
-          "content": (
-            'import "dotenv/config";\n\n'
-            'export const config = {\n'
-            '  MCP_GATEWAY_URL: process.env.MCP_GATEWAY_URL ?? "http://localhost:8000/mcp",\n'
-            '  INITIA_KEY: process.env.INITIA_KEY ?? "",\n'
-            '  INITIA_NETWORK: process.env.INITIA_NETWORK ?? "initia-testnet",\n'
-            '  USER_WALLET_ADDRESS: process.env.USER_WALLET_ADDRESS ?? "",\n'
-            '  SIMULATION_MODE: process.env.SIMULATION_MODE !== "false",\n'
-            '  POLL_MS: Math.max(15000, (parseInt(process.env.POLL_INTERVAL ?? "15", 10) || 15) * 1000),\n'
-            '} as const;\n'
-            '\n'
-            'export const CONFIG = config;\n'
-          ),
-        })
       if "src/index.ts" not in current_paths:
         files.append({
           "filepath": "src/index.ts",
           "content": (
-            'import { CONFIG } from "./config.js";\n'
+            'import "dotenv/config";\n'
             'import { callMcpTool } from "./mcp_bridge.js";\n\n'
             'async function main(): Promise<void> {\n'
             '  const payload = await callMcpTool("initia", "move_view", {\n'
-            '    network: String(CONFIG.INITIA_NETWORK ?? "initia-testnet"),\n'
+            '    network: String(process.env.INITIA_NETWORK ?? "initia-testnet"),\n'
             '    address: "0x1",\n'
             '    module: "coin",\n'
             '    function: "balance",\n'
             '    type_args: ["0x1::coin::uinit"],\n'
-            '    args: [String(CONFIG.USER_WALLET_ADDRESS ?? "")],\n'
+            '    args: [String(process.env.USER_WALLET_ADDRESS ?? "")],\n'
             '  });\n'
             '  console.log(JSON.stringify(payload));\n'
             '}\n\n'
@@ -721,7 +698,7 @@ class MetaAgent:
           ),
         })
 
-      wanted = {"package.json", "src/config.ts", "src/index.ts", "src/mcp_bridge.ts", "src/ons_resolver.ts"}
+      wanted = {"package.json", "src/index.ts", "src/mcp_bridge.ts", "src/ons_resolver.ts"}
       final_files = [f for f in files if str(f.get("filepath", "")) in wanted]
 
       _log("INFO", f"build_bot: final_files={[f.get('filepath') for f in final_files]}", trace_id)
