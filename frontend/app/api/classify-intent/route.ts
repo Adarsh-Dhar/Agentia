@@ -38,9 +38,20 @@ Cover ALL of the following in your expansion:
      const balance = await getFaBalance(network, walletAddress, String(process.env.INITIA_USDC_METADATA_ADDRESS));
      \`\`\`
 
-5. **Required Environment Variables**:
-   - List every specific config variable needed (e.g., INITIA_NETWORK, TARGET_ADDRESS, SLIPPAGE_BPS).
-   - **CRITICAL:** NEVER hardcode token types or denoms (e.g., do NOT hardcode \`0x1::coin::uusdc\`). ALWAYS parameterize them as environment variables (e.g., \`INITIA_TOKEN_A_TYPE\`, \`INITIA_TOKEN_B_TYPE\`).
+5. **Mock Bridge Execution Rule (CRITICAL)**:
+   - The \`interwoven_bridge\` requires a valid struct tag for \`type_args\`, NOT a raw FA address.
+   - The \`sweep_to_l1\` function takes EXACTLY ONE argument (the amount).
+   - **CORRECT SWEEP CALL:**
+     \`\`\`typescript
+     await callMcpTool("initia", "move_execute", {
+       network,
+       address: bridgeAddress,
+       module: "interwoven_bridge",
+       function: "sweep_to_l1",
+       type_args: ["0x1::fungible_asset::Metadata"],
+       args: [amount.toString()]
+     });
+     \`\`\`
 
 6. **TypeScript Implementation Constraints**:
    - Use standard \`BigInt\` for all on-chain amounts. No floats.

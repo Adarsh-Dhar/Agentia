@@ -1,379 +1,550 @@
-'use client'
+/**
+ * frontend/hooks/use-bot-config-chat.ts
+ *
+ * Multi-turn Planner Agent chat hook.
+ *
+ * Conversation flow:
+ *   1. User describes their bot strategy.
+ *   2. classify-intent → expandedPrompt + intent (quick client-side pass).
+ *   3. POST /create-bot-chat with full history.
+ *      a. status="clarification_needed" → append question, wait for next user message.
+ *      b. status="ready"                → save bot, show success card.
+ *      c. status="error"                → show error inline.
+ *
+ * All messages are accumulated into `chatHistory` and sent on EVERY turn so
+ * the Python Planner Agent has full context — matching the architecture spec.
+ */
 
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { getRequiredEnvFields, type EnvFieldDef } from '@/lib/bot-constant'
-import { TESTNET, useInterwovenKit } from '@initia/interwovenkit-react'
+"use client";
 
-export interface BotConfigChatMessage {
-  id: string;
-  role: 'assistant' | 'user';
-  content: string;
-  timestamp: Date;
-  card?: 
-    | { type: 'success_card'; agentId: string; botName: string }
-    | { type: 'dynamic_credentials_form'; fields: EnvFieldDef[] };
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  ChangeEvent,
+  KeyboardEvent,
+} from "react";
+import { v4 as uuidv4 } from "uuid";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type MessageRole = "user" | "assistant";
+
+export interface ChatCard {
+  type: "dynamic_credentials_form" | "success_card";
+  // dynamic_credentials_form
+  fields?: CredentialField[];
+  // success_card
+  agentId?: string;
+  botName?: string;
 }
 
-let _msgId = 0
-const uid = () => String(++_msgId)
-const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
+export interface ChatMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  timestamp: Date;
+  card?: ChatCard;
+}
+
+export interface CredentialField {
+  key: string;
+  label: string;
+  placeholder: string;
+  type?: "text" | "password";
+  required?: boolean;
+}
+
+export type Step =
+  | "idle"        // waiting for first message
+  | "classifying" // quick intent classify
+  | "planning"    // Planner loop running
+  | "ask_keys"    // showing credentials form to user
+  | "generating"  // saving bot to DB
+  | "done";       // bot ready
+
+// ─── Credential field schemas per strategy ────────────────────────────────────
+
+const STRATEGY_FIELDS: Record<string, CredentialField[]> = {
+  yield: [
+    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1... or yourname.init", required: true },
+    { key: "INITIA_BRIDGE_ADDRESS", label: "Bridge Contract Address", placeholder: "0x1", required: true },
+    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Object Address", placeholder: "0x...", required: true },
+    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", type: "text", required: true },
+  ],
+  arbitrage: [
+    { key: "INITIA_POOL_A_ADDRESS", label: "Pool A Address", placeholder: "0x...", required: true },
+    { key: "INITIA_POOL_B_ADDRESS", label: "Pool B Address", placeholder: "0x...", required: true },
+    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
+    { key: "INITIA_SWAP_ROUTER_ADDRESS", label: "Swap Router Address", placeholder: "0x...", required: true },
+    { key: "INITIA_EXECUTION_AMOUNT_USDC", label: "Execution Amount (µUSDC)", placeholder: "1000000", required: true },
+    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+  ],
+  cross_chain_liquidation: [
+    { key: "INITIA_POOL_A_ADDRESS", label: "Lending Pool Address", placeholder: "0x...", required: true },
+    { key: "INITIA_BRIDGE_ADDRESS", label: "Bridge Contract Address", placeholder: "0x1", required: true },
+    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: true },
+    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
+    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+  ],
+  cross_chain_arbitrage: [
+    { key: "INITIA_POOL_A_ADDRESS", label: "Pool A Address (buy side)", placeholder: "0x...", required: true },
+    { key: "INITIA_POOL_B_ADDRESS", label: "Pool B Address (sell side)", placeholder: "0x...", required: true },
+    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
+    { key: "INITIA_EXECUTION_AMOUNT_USDC", label: "Execution Amount (µUSDC)", placeholder: "1000000", required: true },
+    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+  ],
+  cross_chain_sweep: [
+    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: true },
+    { key: "INITIA_BRIDGE_ADDRESS", label: "Bridge Contract Address", placeholder: "0x1", required: true },
+    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
+    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+  ],
+  sentiment: [
+    { key: "INITIA_POOL_A_ADDRESS", label: "Pool A Address", placeholder: "0x...", required: true },
+    { key: "INITIA_POOL_B_ADDRESS", label: "Pool B Address", placeholder: "0x...", required: true },
+    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: true },
+    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+  ],
+  custom_utility: [
+    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: false },
+    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+  ],
+};
+
+const FALLBACK_FIELDS: CredentialField[] = [
+  { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: false },
+  { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+];
+
+// ─── Strategy detection chips ─────────────────────────────────────────────────
+
+const INITIAL_CHIPS = [
+  "Yield sweeper bot",
+  "Cross-chain arbitrage bot",
+  "Spread scanner bot",
+  "Custom utility bot",
+];
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+interface ServerMessage {
+  role: string;
+  content: string;
+}
 
 export function useBotConfigChat() {
-  const { autoSign } = useInterwovenKit()
-  const [messages, setMessages]         = useState<BotConfigChatMessage[]>([])
-  const [input, setInput]               = useState('')
-  const [isTyping, setIsTyping]         = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [step, setStep]                 = useState<'idle' | 'ask_keys' | 'generating'>('idle')
+  const [messages,        setMessages]        = useState<ChatMessage[]>([]);
+  const [input,           setInput]           = useState("");
+  const [step,            setStep]            = useState<Step>("idle");
+  const [isTyping,        setIsTyping]        = useState(false);
+  const [isGenerating,    setIsGenerating]    = useState(false);
+  const [chips,           setChips]           = useState<string[]>(INITIAL_CHIPS);
+  const [generatedAgentId,setGeneratedAgentId]= useState<string | null>(null);
+  const [envDefaults,     setEnvDefaults]     = useState<Record<string, string>>({});
 
-  // Store both the original and expanded prompts across steps
-  const [pendingOriginalPrompt,  setPendingOriginalPrompt]  = useState('')
-  const [pendingExpandedPrompt,  setPendingExpandedPrompt]  = useState('')
-  const [pendingRequiredFields,  setPendingRequiredFields]  = useState<EnvFieldDef[]>([])
+  // Full conversation history sent to the Python backend on every turn.
+  // The Planner Agent needs the ENTIRE history to maintain context.
+  const chatHistoryRef = useRef<ServerMessage[]>([]);
 
-  const [generatedAgentId, setGeneratedAgentId] = useState<string | null>(null)
-  const [envDefaults, setEnvDefaults] = useState<Record<string, string>>({})
+  // Intent detected during classify step
+  const detectedStrategyRef = useRef<string>("custom_utility");
+  const expandedPromptRef   = useRef<string>("");
+  const requestIdRef        = useRef<string>(uuidv4());
 
-  const autosignEnabled = autoSign?.isEnabledByChain?.[TESTNET.defaultChainId] ?? false
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  const bottomRef  = useRef<HTMLDivElement>(null)
-  const initialized = useRef(false)
-
-  const defaultChips = [
-    "Initia Yield Sweeper",
-    "Initia Spread Scanner",
-    "Initia Sentiment Bot",
-    "Initia Custom Utility Bot",
-    "Initia Move Action Bot",
-  ]
-  const [chips, setChips] = useState<string[]>(defaultChips)
-
-  const normalizeIntent = useCallback((intent: Record<string, unknown>) => {
-    const chain = String(intent.chain ?? '').trim().toLowerCase()
-    const strategy = String(intent.strategy ?? intent.execution_model ?? '').trim().toLowerCase()
-    const botName = String(intent.bot_name ?? intent.bot_type ?? '').trim().toLowerCase()
-    const isInitiaYield = chain === 'initia' && (strategy === 'yield' || /sweep|consolidator/.test(botName))
-    const isInitiaScanner = chain === 'initia' && (
-      strategy === 'arbitrage' || /spread scanner|read-only scanner|market intelligence/.test(botName)
-    )
-
-    const mcpsRaw = [
-      ...(Array.isArray(intent.mcps) ? intent.mcps : []),
-      ...(Array.isArray(intent.required_mcps) ? intent.required_mcps : []),
-    ]
-    const deduped = mcpsRaw
-      .map((m) => String(m || "").trim())
-      .filter(Boolean)
-    const required = Array.from(new Set(deduped))
-
-    if (isInitiaYield || isInitiaScanner) {
-      return {
-        ...intent,
-        bot_name: String(
-          intent.bot_name ?? intent.bot_type ?? (isInitiaYield ? "Cross-Rollup Yield Sweeper" : "Cross-Rollup Spread Scanner")
-        ),
-        requires_openai: Boolean(intent.requires_openai ?? intent.requires_openai_key),
-        required_mcps: ["initia"],
-        mcps: ["initia"],
-      }
-    }
-
-    return {
-      ...intent,
-      bot_name: String(intent.bot_name ?? intent.bot_type ?? "Trading Bot"),
-      requires_openai: Boolean(intent.requires_openai ?? intent.requires_openai_key),
-      required_mcps: required,
-      mcps: required,
-    }
-  }, [])
+  // ── Scroll ─────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isTyping, chips])
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isTyping]);
 
-  const pushA = useCallback((content: string, card?: BotConfigChatMessage['card']) => {
-    setMessages(prev => [...prev, { id: uid(), role: 'assistant', content, timestamp: new Date(), card }])
-  }, [])
-  const pushU = useCallback((content: string) => {
-    setMessages(prev => [...prev, { id: uid(), role: 'user', content, timestamp: new Date() }])
-  }, [])
+  // ── Load env defaults ───────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (initialized.current) return
-    initialized.current = true
-    ;(async () => {
-      setIsTyping(true)
-      await delay(700)
-      setIsTyping(false)
-      pushA(
-        `Hey! 👋 I'm your **Universal Meta-Agent**.\n\n` +
-        `I can architect and generate Initia-native bots — yield sweepers, spread scanners, sentiment bots, and custom Move utility workflows.\n\n` +
-        `I also support Initia Name Service (.init) addresses — you can type **adarsh.init** instead of a raw wallet address anywhere a wallet is needed.\n\n` +
-        `Just describe your strategy in plain English. I'll expand it into a full technical specification and then generate production-ready TypeScript code.\n\n` +
-        `What kind of bot do you want to build?`
-      )
-    })()
-  }, [pushA])
-
-  useEffect(() => {
-    let cancelled = false
-
-    ;(async () => {
-      try {
-        const res = await fetch('/api/env-defaults')
-        const data = await res.json().catch(() => ({}))
-        if (!cancelled && data?.values && typeof data.values === 'object') {
-          setEnvDefaults(data.values as Record<string, string>)
+    fetch("/api/env-defaults")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.values && typeof data.values === "object") {
+          setEnvDefaults(data.values as Record<string, string>);
         }
-      } catch {
-        if (!cancelled) setEnvDefaults({})
-      }
-    })()
+      })
+      .catch(() => {});
+  }, []);
 
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // ── Greeting ────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const greeting: ChatMessage = {
+      id:        uuidv4(),
+      role:      "assistant",
+      content:   (
+        "👋 Hi! I'm the **Planner Agent** — I'll help you design and generate a production-ready " +
+        "Initia bot.\n\n" +
+        "Tell me what you want your bot to do. I'll verify your addresses on-chain, ask for anything " +
+        "that's missing, and then generate the complete TypeScript code.\n\n" +
+        "What kind of bot are you building?"
+      ),
+      timestamp: new Date(),
+    };
+    setMessages([greeting]);
+  }, []);
+
+  // ── Append message helpers ──────────────────────────────────────────────────
+
+  const appendMessage = useCallback(
+    (role: MessageRole, content: string, card?: ChatCard): ChatMessage => {
+      const msg: ChatMessage = {
+        id:        uuidv4(),
+        role,
+        content,
+        timestamp: new Date(),
+        card,
+      };
+      setMessages((prev) => [...prev, msg]);
+      return msg;
+    },
+    []
+  );
+
+  const appendAssistant = useCallback(
+    (content: string, card?: ChatCard) => appendMessage("assistant", content, card),
+    [appendMessage]
+  );
+
+  // ── Push to persistent history (sent to Python) ────────────────────────────
+
+  const pushHistory = useCallback((role: "user" | "assistant", content: string) => {
+    chatHistoryRef.current = [
+      ...chatHistoryRef.current,
+      { role, content },
+    ];
+  }, []);
+
+  // ── Call /create-bot-chat with full history ─────────────────────────────────
+
+  const callPlannerAgent = useCallback(
+    async (additionalContext?: string): Promise<void> => {
+      setStep("planning");
+      setIsGenerating(true);
+      setChips([]);
+
+      try {
+        const history = chatHistoryRef.current;
+
+        // Inject expanded prompt context as a system message if we have it
+        const fullHistory =
+          expandedPromptRef.current && history.length <= 2
+            ? [
+                ...history,
+                {
+                  role: "system" as const,
+                  content: `Expanded technical specification:\n${expandedPromptRef.current}`,
+                },
+                ...(additionalContext
+                  ? [{ role: "system" as const, content: additionalContext }]
+                  : []),
+              ]
+            : additionalContext
+            ? [...history, { role: "system" as const, content: additionalContext }]
+            : history;
+
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_META_AGENT_URL ?? "http://127.0.0.1:8000"}/create-bot-chat`,
+          {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({
+              messages:   fullHistory,
+              request_id: requestIdRef.current,
+            }),
+          }
+        );
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(`Meta-Agent HTTP ${res.status}: ${errText.slice(0, 300)}`);
+        }
+
+        const data = await res.json();
+
+        // ── clarification_needed ────────────────────────────────────────────
+        if (data.status === "clarification_needed") {
+          const question = String(data.question ?? "Could you provide more details?");
+          setIsTyping(true);
+          await sleep(600);
+          setIsTyping(false);
+          appendAssistant(question);
+          pushHistory("assistant", question);
+          setStep("idle");
+          return;
+        }
+
+        // ── ready ────────────────────────────────────────────────────────────
+        if (data.status === "ready") {
+          const botName = String(data.bot_name ?? "Your Bot");
+          const intent  = data.intent ?? {};
+          const files   = data.files  ?? [];
+
+          // Determine which credential fields to show based on detected strategy
+          const strategy = String(
+            intent.strategy ?? detectedStrategyRef.current ?? "custom_utility"
+          );
+          const fields = STRATEGY_FIELDS[strategy] ?? FALLBACK_FIELDS;
+
+          // Filter out fields whose values are already known from env
+          const filteredFields = fields.filter(
+            (f) => !envDefaults[f.key] || envDefaults[f.key].trim() === ""
+          );
+
+          // If all required values are already in env, skip the form and generate immediately
+          const allPresent = filteredFields.filter((f) => f.required).length === 0;
+
+          if (allPresent) {
+            await finalizeBot({ files, intent, botName, envConfig: envDefaults });
+            return;
+          }
+
+          // Show dynamic credentials form
+          setIsTyping(true);
+          await sleep(500);
+          setIsTyping(false);
+
+          appendAssistant(
+            `✅ **${botName}** is architecturally complete! The Planner has verified your strategy.\n\n` +
+            `I just need a few runtime credentials to finish generating the bot:`,
+            {
+              type:   "dynamic_credentials_form",
+              fields: filteredFields,
+            }
+          );
+
+          // Store files + intent for use after user submits credentials
+          pendingBotRef.current = { files, intent, botName };
+          setStep("ask_keys");
+          return;
+        }
+
+        // ── error ─────────────────────────────────────────────────────────────
+        const errMsg = String(data.message ?? "An unknown error occurred.");
+        appendAssistant(`❌ ${errMsg}`);
+        setStep("idle");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[callPlannerAgent] Error:", msg);
+        setIsTyping(false);
+        appendAssistant(
+          `❌ Could not reach the Meta-Agent. Please ensure it's running:\n\n` +
+          `\`\`\`\ncd agents && uvicorn main:app --reload --port 8000\n\`\`\`\n\n` +
+          `Error: ${msg}`
+        );
+        setStep("idle");
+      } finally {
+        setIsGenerating(false);
+      }
+    },
+    [appendAssistant, envDefaults, pushHistory]
+  );
+
+  // ── Pending bot state (files + intent waiting for credentials) ─────────────
+
+  const pendingBotRef = useRef<{
+    files:   Record<string, unknown>[];
+    intent:  Record<string, unknown>;
+    botName: string;
+  } | null>(null);
+
+  // ── Finalize: save bot to DB, show success card ────────────────────────────
+
+  const finalizeBot = useCallback(
+    async (params: {
+      files:     Record<string, unknown>[];
+      intent:    Record<string, unknown>;
+      botName:   string;
+      envConfig: Record<string, string>;
+    }) => {
+      const { files, intent, botName, envConfig } = params;
+      setStep("generating");
+      setIsTyping(true);
+
+      try {
+        await sleep(400);
+        setIsTyping(false);
+        appendAssistant("⏳ Saving your bot and encrypting credentials…");
+
+        const saveRes = await fetch("/api/generate-bot", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({
+            prompt:         chatHistoryRef.current[0]?.content ?? botName,
+            expandedPrompt: expandedPromptRef.current || chatHistoryRef.current[0]?.content,
+            envConfig,
+            intent,
+          }),
+        });
+
+        if (!saveRes.ok) {
+          const errText = await saveRes.text().catch(() => "");
+          throw new Error(`Save failed (${saveRes.status}): ${errText.slice(0, 300)}`);
+        }
+
+        const saved = await saveRes.json();
+        const agentId = String(saved.agentId ?? "");
+
+        if (!agentId) {
+          throw new Error("No agentId returned from save endpoint.");
+        }
+
+        setGeneratedAgentId(agentId);
+        setStep("done");
+        setChips([]);
+
+        appendAssistant(
+          `🎉 **${botName}** is ready! Your bot has been generated, verified, and saved.`,
+          {
+            type:    "success_card",
+            agentId,
+            botName,
+          }
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[finalizeBot] Error:", msg);
+        setIsTyping(false);
+        appendAssistant(`❌ Failed to save bot: ${msg}`);
+        setStep("idle");
+      }
+    },
+    [appendAssistant]
+  );
+
+  // ── Submit dynamic credentials ─────────────────────────────────────────────
+
+  const submitDynamicKeys = useCallback(
+    async (formData: Record<string, string>) => {
+      if (!pendingBotRef.current) return;
+      const { files, intent, botName } = pendingBotRef.current;
+
+      // Merge form data with env defaults (form data takes priority)
+      const mergedEnv: Record<string, string> = { ...envDefaults, ...formData };
+
+      // Inject verified params as a system context for next Planner call if needed
+      const contextLine = Object.entries(formData)
+        .filter(([, v]) => v.trim())
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ");
+      if (contextLine) {
+        pushHistory("user", `My configuration: ${contextLine}`);
+      }
+
+      await finalizeBot({ files, intent, botName, envConfig: mergedEnv });
+    },
+    [envDefaults, finalizeBot, pushHistory]
+  );
 
   // ── Main send handler ──────────────────────────────────────────────────────
 
-  const handleSend = useCallback(async (rawInput?: string) => {
-    if (step !== 'idle') return
-    const text = (rawInput ?? input).trim()
-    if (!text || isGenerating) return
+  const handleSend = useCallback(
+    async (overrideText?: string) => {
+      const text = (overrideText ?? input).trim();
+      if (!text || isGenerating) return;
 
-    setInput('')
-    setChips([])
-    pushU(text)
-    setIsGenerating(true)
+      setInput("");
+      setChips([]);
 
-    // Show a thinking message
-    setIsTyping(true)
-    await delay(500)
-    setIsTyping(false)
-    pushA(`🔍 Analyzing your strategy and expanding it into a full technical spec...`)
+      // Append user message to UI
+      appendMessage("user", text);
+      // Append to persistent history
+      pushHistory("user", text);
 
-    try {
-      // ── Step 1: Classify intent + expand prompt ───────────────────────────
-      const classRes = await fetch('/api/classify-intent', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ prompt: text }),
-      })
+      setIsTyping(true);
 
-      const classData = await classRes.json()
+      try {
+        // ── First turn: run classify-intent for expanded prompt ──────────────
+        if (chatHistoryRef.current.filter((m) => m.role === "user").length === 1) {
+          let expandedPrompt = text;
 
-      if (!classRes.ok) {
-        throw new Error(classData.error ?? `Classification failed (HTTP ${classRes.status})`)
+          try {
+            const classifyRes = await fetch("/api/classify-intent", {
+              method:  "POST",
+              headers: { "Content-Type": "application/json" },
+              body:    JSON.stringify({ prompt: text }),
+            });
+            if (classifyRes.ok) {
+              const classifyData = await classifyRes.json();
+              expandedPrompt = classifyData.expandedPrompt || text;
+              const detectedStrategy = String(
+                classifyData.intent?.strategy ?? "custom_utility"
+              );
+              detectedStrategyRef.current = detectedStrategy;
+              expandedPromptRef.current   = expandedPrompt;
+            }
+          } catch {
+            // classify-intent failure is non-fatal
+          }
+
+          setIsTyping(false);
+          appendAssistant(
+            "Got it! Let me analyse your request and verify the on-chain parameters…"
+          );
+          pushHistory("assistant", "Analysing your request…");
+
+          await sleep(300);
+          await callPlannerAgent();
+          return;
+        }
+
+        // ── Subsequent turns: push to history and re-run Planner ──────────────
+        setIsTyping(false);
+        await callPlannerAgent();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[handleSend] Error:", msg);
+        setIsTyping(false);
+        appendAssistant(`❌ ${msg}`);
+        setStep("idle");
       }
+    },
+    [input, isGenerating, appendMessage, appendAssistant, pushHistory, callPlannerAgent]
+  );
 
-      const rawIntent: Record<string, unknown> = classData.intent ?? {}
-      const intent: Record<string, unknown> = normalizeIntent(rawIntent)
-      const expandedPrompt: string           = classData.expandedPrompt ?? text
+  // ── Input handlers ─────────────────────────────────────────────────────────
 
-      console.log("[chat] Intent:", JSON.stringify(intent))
-      console.log("[chat] Expanded prompt length:", expandedPrompt.length, "chars")
-
-      // Show the user what was classified
-      const botType    = (intent.bot_name as string) ?? "Trading Bot"
-      const strategy   = (intent.strategy as string) ?? "unknown"
-      const chain      = (intent.chain as string) ?? "initia"
-      const network    = (intent.network as string) ?? "initia-testnet"
-      const execModel  = (intent.execution_model as string) ?? "polling"
-
-      setIsTyping(true)
-      await delay(400)
-      setIsTyping(false)
-      pushA(
-        `✅ **Strategy identified:** ${botType}\n\n` +
-        `📋 **Details:**\n` +
-        `• Chain: ${chain === 'initia' ? `◇ ${network}` : '◇ initia-testnet'}\n` +
-        `• Strategy: ${strategy.replace(/_/g, ' ')}\n` +
-        `• Execution model: ${execModel}\n` +
-        `• Required MCPs: ${((intent.mcps as string[]) ?? []).join(', ') || 'standard'}\n\n` +
-        `I've expanded your idea into a detailed technical specification (${expandedPrompt.length} chars). Checking what credentials are needed...`
-      )
-
-      // ── Step 2: Check which API keys are required ─────────────────────────
-      const sessionKeyMode = autosignEnabled || String(envDefaults.SESSION_KEY_MODE ?? '').toLowerCase() === 'true'
-      const fields = getRequiredEnvFields(intent as Parameters<typeof getRequiredEnvFields>[0], { sessionKeyMode })
-        .filter(f => f.required)
-
-      if (fields.length > 0) {
-        // Store both prompts + intent for when the user submits keys
-        setPendingOriginalPrompt(text)
-        setPendingExpandedPrompt(expandedPrompt)
-        setPendingRequiredFields(fields)
-
-        setIsTyping(true)
-        await delay(400)
-        setIsTyping(false)
-        pushA(
-          `To build this bot I need a few API keys. They'll be **AES-256 encrypted** before being stored — never stored in plaintext.`,
-          { type: 'dynamic_credentials_form', fields }
-        )
-        setStep('ask_keys')
-        setIsGenerating(false)
-      } else {
-        // No keys needed — generate immediately
-        await generateBot(text, expandedPrompt, {
-          ...envDefaults,
-          SESSION_KEY_MODE: sessionKeyMode ? 'true' : String(envDefaults.SESSION_KEY_MODE ?? 'false'),
-        })
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void handleSend();
       }
+    },
+    [handleSend]
+  );
 
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error("[chat] Error during classification:", msg)
-      setIsGenerating(false)
-      setIsTyping(true)
-      await delay(300)
-      setIsTyping(false)
-      pushA(
-        `❌ **Classification failed:** ${msg}\n\n` +
-        `Please try again. If this keeps happening, verify GITHUB_TOKEN is set so the classifier can run.`
-      )
-      setChips(defaultChips)
-    }
-  }, [input, isGenerating, step, pushA, pushU, normalizeIntent, autosignEnabled, envDefaults])
-
-  // ── Submit keys from the credentials form ─────────────────────────────────
-
-  const submitDynamicKeys = async (envData: Record<string, string>) => {
-    const sessionKeyMode = autosignEnabled || String(envDefaults.SESSION_KEY_MODE ?? '').toLowerCase() === 'true'
-    const mergedEnv: Record<string, string> = {
-      ...envDefaults,
-      SESSION_KEY_MODE: sessionKeyMode ? 'true' : String(envDefaults.SESSION_KEY_MODE ?? 'false'),
-      ...envData,
-    }
-
-    const missing = pendingRequiredFields
-      .map(f => f.key)
-      .filter((k) => !(mergedEnv[k] ?? "").trim())
-
-    if (missing.length > 0) {
-      pushA(
-        `❌ Missing required keys: ${missing.join(", ")}.\n\n` +
-        `Please provide all required .env keys before generation can continue.`
-      )
-      setStep('ask_keys')
-      setIsGenerating(false)
-      return
-    }
-
-    setStep('generating')
-    setIsGenerating(true)
-    pushU("API keys provided ✓")
-
-    await generateBot(pendingOriginalPrompt, pendingExpandedPrompt, mergedEnv)
-  }
-
-  // ── Core generation function ───────────────────────────────────────────────
-
-  const generateBot = async (
-    originalPrompt: string,
-    expandedPrompt: string,
-    envConfig: Record<string, string>
-  ) => {
-    setIsTyping(true)
-    await delay(500)
-    setIsTyping(false)
-    pushA(
-      `🔨 **Generating your bot...**\n\n` +
-      `The Meta-Agent is now writing production-ready TypeScript code based on your expanded specification. ` +
-      `This typically takes 20–45 seconds.\n\n` +
-      `_Hang tight while I architect the full bot..._`
-    )
-
-    try {
-      const res = await fetch('/api/generate-bot', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          prompt:         originalPrompt,   // original for display / DB record
-          expandedPrompt,                   // rich spec for the code generator
-          envConfig,
-        }),
-        // Increase timeout to 60 seconds for generation
-        signal: AbortSignal.timeout(600000),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        console.error("[chat] Generation response error:", data)
-        throw new Error(data?.error ?? `Generation failed (HTTP ${res.status})`)
-      }
-
-      console.log("[chat] Generation succeeded:", { agentId: data.agentId, botName: data.botName, files: data.files?.length })
-
-      setGeneratedAgentId(data.agentId)
-
-      const fileCount = (data.files ?? []).length
-      const thoughts  = data.thoughts ?? "Bot generated successfully."
-
-      console.log("[chat] About to push success card:", { agentId: data.agentId, botName: data.botName })
-
-      setIsTyping(true)
-      await delay(400)
-      setIsTyping(false)
-      pushA(
-        `🎉 **${data.botName} is ready!**\n\n` +
-        `${thoughts}\n\n` +
-        `📁 **${fileCount} files generated** and saved to the Bot IDE.\n\n` +
-        `Click **Open in Bot IDE** below to review the code, configure your environment variables, and launch the bot.`,
-        { type: 'success_card', agentId: data.agentId, botName: data.botName }
-      )
-      setChips(["Build another bot", "What strategies are available?"])
-
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error("[chat] Error during generation:", msg, err)
-      setIsTyping(true)
-      await delay(300)
-      setIsTyping(false)
-      pushA(
-        `❌ **Generation failed:** ${msg}\n\n` +
-        (msg.includes("Cannot reach") || msg.includes("503")
-          ? `The Python Meta-Agent server isn't running. Start it with:\n\`cd agents && uvicorn main:app --reload\``
-          : `Please try again. If the error persists, check that all services are running.`)
-      )
-      setChips(defaultChips)
-    } finally {
-      setIsGenerating(false)
-      setStep('idle')
-    }
-  }
-
-  // ── Input event handlers ───────────────────────────────────────────────────
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value)
-    e.target.style.height = 'auto'
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
-  }
+  const handleInputChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+  }, []);
 
   return {
     messages,
     input,
-    setInput,
     isTyping,
-    isGenerating: isGenerating || step === 'ask_keys',
+    isGenerating,
     chips,
     bottomRef,
     generatedAgentId,
+    step,
     envDefaults,
     handleSend,
     handleKeyDown,
     handleInputChange,
     submitDynamicKeys,
-    step,
-  }
+  };
+}
+
+// ─── Utility ──────────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

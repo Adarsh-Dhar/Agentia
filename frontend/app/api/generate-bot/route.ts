@@ -941,26 +941,31 @@ function normalizeRuntimeVarNames(files: GeneratedFile[]): GeneratedFile[] {
       );
     }
 
-    // Automatically rewrite legacy coin balance checks to Fungible Asset balance checks.
+    // Fix the network ID hallucination
+    patched = patched.replace(/\bINITIA_NETWORK_ID\b/g, "INITIA_NETWORK");
+
+    // ====================================================================
+    // THE ULTIMATE FA FIX: Automatically rewrite legacy coin balance checks
+    // Now catches "coin" OR "fungible_asset" and "balance" OR "get_balance"
+    // ====================================================================
     patched = patched.replace(
-      /module:\s*["']coin["'],\s*function:\s*["']balance["'],\s*type_args:\s*\[(.*?)\],\s*args:\s*\[(.*?)\]/gs,
+      /module:\s*["'](?:coin|fungible_asset)["'],\s*function:\s*["'](?:balance|get_balance)["'],\s*type_args:\s*\[(.*?)\],\s*args:\s*\[(.*?)\]/gs,
       'module: "primary_fungible_store", function: "balance", type_args: ["0x1::fungible_asset::Metadata"], args: [$2, $1]'
     );
 
-    // Ensure generic bridge sweeps pass exactly one CoinType arg for sweep_to_l1<CoinType>.
+    // ====================================================================
+    // NUCLEAR BRIDGE EXECUTION FIX: Overwrite the entire sweep payload.
+    // Intercepts move_execute for sweep_to_l1 and preserves only the args array.
+    // ====================================================================
     patched = patched.replace(
-      /(function:\s*["']sweep_to_l1["'][\s\S]*?type_args:\s*)\[\s*\]/g,
-      '$1[String(process.env.INITIA_USDC_METADATA_ADDRESS)]'
-    );
-    patched = patched.replace(
-      /(function:\s*["']sweep_to_l1["']\s*,\s*)(args:\s*\[)/g,
-      '$1type_args: [String(process.env.INITIA_USDC_METADATA_ADDRESS)], $2'
+      /await\s+callMcpTool\(\s*["']initia["']\s*,\s*["']move_execute["']\s*,\s*\{[^\}]*(?:sweep_to_l1|FUNCTION_NAME|FUNCTION|SWEEP_FUNCTION)[^\}]*args:\s*(\[[^\]]+\])[^\}]*\}\s*\)/gs,
+      'await callMcpTool("initia", "move_execute", { network: String(process.env.INITIA_NETWORK ?? "initia-testnet"), address: String(process.env.INITIA_BRIDGE_ADDRESS), module: "interwoven_bridge", function: "sweep_to_l1", type_args: ["0x1::fungible_asset::Metadata"], args: $1 })'
     );
 
     // Prevent BigInt([object Object]) by extracting a numeric string from nested MCP JSON.
     patched = patched.replace(
-      /BigInt\(((?:response|payload|resolved)(?:\.result)?)\)/g,
-      'BigInt((function(val){ try { const s = typeof val === "string" ? val : JSON.stringify(val || {}); const m = s.match(/\\d{2,}/); return m ? m[0] : "0"; } catch { return "0"; } })($1))'
+      /BigInt\(([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\.result)\)/g,
+      'BigInt((function(val){ try { const s = typeof val === "string" ? val : JSON.stringify(val || {}); const m = s.match(/\\d+/); return m ? m[0] : "0"; } catch { return "0"; } })($1))'
     );
 
     return { ...file, content: patched };
