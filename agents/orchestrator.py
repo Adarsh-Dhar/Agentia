@@ -336,7 +336,8 @@ You MUST generate EXACTLY these 2 files in this order:
   2. src/index.ts
 
 The file src/mcp_bridge.ts is provided separately - do NOT generate it.
-Import it in src/index.ts as: import { callMcpTool } from "./mcp_bridge.js".
+"Import tools in src/index.ts as: import { callMcpTool, getFaBalance } from './mcp_bridge.js'.\n"
+"Do NOT write your own balance fetching logic. Always use getFaBalance(network, walletAddress, metadataAddress) for token balances."
 Do NOT generate src/config.ts. Read all values directly from process.env inside src/index.ts.
 
 CORE CONSTRAINTS:
@@ -847,6 +848,7 @@ class MetaAgent:
             "\nRead:  callMcpTool('initia', 'move_view', {network, address, module, function, type_args, args})"
             "\nRule:  type_args must always be explicit (use [] when none)."
             "\nRule:  move_view returns a JSON Object — NEVER use .forEach() on it."
+            "\nCRITICAL RULE FOR FA BALANCES: To check a token balance via 'primary_fungible_store', the module 'address' MUST strictly be '0x1'. NEVER use the token metadata address as the contract address. Instead, pass the user wallet and the metadata address inside the 'args' array."
         )
 
         bridge_schema = ""
@@ -869,7 +871,9 @@ MCP tool signatures:
 Required env vars:
   INITIA_POOL_A_ADDRESS, INITIA_POOL_B_ADDRESS, USER_WALLET_ADDRESS,
   INITIA_BRIDGE_ADDRESS, INITIA_USDC_METADATA_ADDRESS,
-  INITIA_SWAP_ROUTER_ADDRESS, INITIA_EXECUTION_AMOUNT_USDC
+    INITIA_SWAP_ROUTER_ADDRESS, INITIA_EXECUTION_AMOUNT_USDC,
+    INITIA_MOCK_ORACLE_ADDRESS, INITIA_MOCK_LENDING_ADDRESS,
+    INITIA_LIQUIDATION_WATCHLIST
 
 Initia read pattern: move_view only for verified modules/functions.
 Initia write pattern: one move_execute per on-chain action — no batching.

@@ -94,7 +94,7 @@ RULES:
 1. Use TypeScript only.
 2. Only use callMcpTool('initia', 'move_view', ... ) for reads.
 3. Only use callMcpTool('initia', 'move_execute', ... ) for writes.
-4. Every move_execute call must use the standard flat payload shape: {network, address, module, function, type_args, args}.
+4. Every move_execute call must use the standard flat payload shape: {{network, address, module, function, type_args, args}}.
 5. Never wrap multiple actions in a custom transaction object or transaction.calls array.
 6. Keep runtime strictly Initia-native with no external chain SDK/tooling.
 7. For move_view calls, always include type_args explicitly (use [] when none).
@@ -104,6 +104,8 @@ RULES:
 11. For cross-chain arbitrage, use TRADE_CAPITAL_USDC = 1000000n, quote Pool A then Pool B with move_view get_amount_out, compute final_usdc_output - TRADE_CAPITAL_USDC - bridgeFee, and if profitable execute three separate move_execute calls: swap, bridge, swap back.
 12. Never mention wrapper SDK tooling in generated output.
 13. Never add wrapper SDK dependencies; always generate direct MCP payload calls with address/module/function/type_args/args.
+14. For cross_chain_liquidation, read mock_lending::get_health_factor for each address in INITIA_LIQUIDATION_WATCHLIST and call mock_lending::liquidate when value < 1000000.
+15. For simulated price-crash workflows, call mock_oracle::set_price with reduced collateral token price before liquidation checks.
 """.strip()
 
 

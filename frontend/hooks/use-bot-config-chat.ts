@@ -132,21 +132,21 @@ const STRATEGY_FIELDS: Record<string, CredentialField[]> = {
   ],
   cross_chain_liquidation: [
     {
-      key: "INITIA_POOL_A_ADDRESS",
-      label: "Lending Pool Address",
+      key: "INITIA_MOCK_ORACLE_ADDRESS",
+      label: "Mock Oracle Address",
       placeholder: "0x...",
       required: true,
     },
     {
-      key: "INITIA_BRIDGE_ADDRESS",
-      label: "Bridge Contract Address",
-      placeholder: "0x1",
+      key: "INITIA_MOCK_LENDING_ADDRESS",
+      label: "Mock Lending Address",
+      placeholder: "0x...",
       required: true,
     },
     {
-      key: "INITIA_USDC_METADATA_ADDRESS",
-      label: "USDC Metadata Address",
-      placeholder: "0x...",
+      key: "INITIA_LIQUIDATION_WATCHLIST",
+      label: "Liquidation Watchlist",
+      placeholder: "init1...,init1...",
       required: true,
     },
     {

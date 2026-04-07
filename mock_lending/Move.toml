@@ -1,0 +1,13 @@
+[package]
+name = "MockLending"
+version = "0.0.0"
+
+[addresses]
+deployer = "_"
+
+[dev-addresses]
+deployer = "0x42"
+
+[dependencies]
+MockOracle = { local = "../mock_oracle" }
+InitiaStdlib = { local = "/Users/adarsh/.move/https___github_com_initia-labs_move-natives_git_v1.2.0/initia_stdlib" }

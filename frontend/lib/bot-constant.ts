@@ -39,6 +39,11 @@ export interface BotEnvConfig {
   INITIA_SWAP_ROUTER_MODULE: string;
   INITIA_SWAP_ROUTER_FUNCTION: string;
   INITIA_SWAP_ROUTER_ARGS: string;
+  INITIA_MOCK_ORACLE_ADDRESS: string;
+  INITIA_MOCK_LENDING_ADDRESS: string;
+  INITIA_MOCK_ORACLE_MODULE: string;
+  INITIA_MOCK_LENDING_MODULE: string;
+  INITIA_LIQUIDATION_WATCHLIST: string;
   INITIA_EXECUTION_AMOUNT_USDC: string;
   ESTIMATED_BRIDGE_FEE_USDC: string;
   OPENAI_API_KEY: string;
@@ -70,6 +75,11 @@ export const DEFAULT_BOT_ENV_CONFIG: BotEnvConfig = {
   INITIA_SWAP_ROUTER_MODULE: "arbitrage_router",
   INITIA_SWAP_ROUTER_FUNCTION: "execute_cross_chain_trade",
   INITIA_SWAP_ROUTER_ARGS: "$buyEndpoint,$sellEndpoint,$amount",
+  INITIA_MOCK_ORACLE_ADDRESS: "",
+  INITIA_MOCK_LENDING_ADDRESS: "",
+  INITIA_MOCK_ORACLE_MODULE: "mock_oracle",
+  INITIA_MOCK_LENDING_MODULE: "mock_lending",
+  INITIA_LIQUIDATION_WATCHLIST: "",
   INITIA_EXECUTION_AMOUNT_USDC: "1000000",
   ESTIMATED_BRIDGE_FEE_USDC: "5000",
   OPENAI_API_KEY: "",
@@ -230,6 +240,35 @@ export function getRequiredEnvFields(
         required: isArbitrage,
         placeholder: "0x...",
         helpText: "Address of the module that executes the arbitrage transaction.",
+      },
+    );
+  }
+
+  if (strategy.includes("liquidation")) {
+    fields.push(
+      {
+        key: "INITIA_MOCK_ORACLE_ADDRESS",
+        label: "Mock Oracle Address",
+        type: "text",
+        required: true,
+        placeholder: "0x...",
+        helpText: "Published address for mock_oracle module.",
+      },
+      {
+        key: "INITIA_MOCK_LENDING_ADDRESS",
+        label: "Mock Lending Address",
+        type: "text",
+        required: true,
+        placeholder: "0x...",
+        helpText: "Published address for mock_lending module.",
+      },
+      {
+        key: "INITIA_LIQUIDATION_WATCHLIST",
+        label: "Liquidation Watchlist",
+        type: "text",
+        required: true,
+        placeholder: "init1...,init1...",
+        helpText: "Comma-separated addresses to monitor with get_health_factor.",
       },
     );
   }
