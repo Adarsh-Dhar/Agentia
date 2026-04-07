@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 INITIA_MCP_BASE = os.environ.get("INITIA_MCP_URL", "http://127.0.0.1:8001")
 MCP_TIMEOUT     = float(os.environ.get("INITIA_MCP_TIMEOUT_SECONDS", "10"))
+PLANNER_HISTORY_MAX_TURNS = int(os.environ.get("PLANNER_HISTORY_MAX_TURNS", "6"))
+PLANNER_HISTORY_MAX_CHARS = int(os.environ.get("PLANNER_HISTORY_MAX_CHARS", "2800"))
 
 
 # ─── Pydantic Schemas ─────────────────────────────────────────────────────────
@@ -245,6 +247,13 @@ class PlannerAgent:
         """
         # Serialise history for the user turn
         history_text = self._format_history(chat_history)
+        if len(history_text) > PLANNER_HISTORY_MAX_CHARS:
+            logger.info(
+                "Planner history truncated: %s -> %s chars",
+                len(history_text),
+                PLANNER_HISTORY_MAX_CHARS,
+            )
+            history_text = history_text[-PLANNER_HISTORY_MAX_CHARS:]
         raw = self._llm(
             PLANNER_SYSTEM,
             f"Analyse this conversation and return the JSON plan:\n\n{history_text}",
@@ -259,7 +268,8 @@ class PlannerAgent:
     @staticmethod
     def _format_history(history: List[Dict[str, str]]) -> str:
         lines: List[str] = []
-        for msg in history:
+        bounded_history = history[-PLANNER_HISTORY_MAX_TURNS:] if PLANNER_HISTORY_MAX_TURNS > 0 else history
+        for msg in bounded_history:
             role    = str(msg.get("role", "unknown")).upper()
             content = str(msg.get("content", ""))
             lines.append(f"[{role}]: {content}")

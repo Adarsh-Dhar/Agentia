@@ -9,7 +9,7 @@
  *     No API call is made until the user connects.
  *  3. If wallet IS connected → silently prepends a `system` message to the
  *     payload (never shown in the UI) that tells the Planner Agent:
- *       "USER_WALLET_ADDRESS = <initiaAddress>"
+ *       "USER_WALLET_ADDRESS = <hex 0x address>"
  *     The Planner reads this, satisfies the USER_WALLET_ADDRESS requirement,
  *     and never asks the user for it.
  *  4. USER_WALLET_ADDRESS is removed from all credential forms because it is
@@ -30,6 +30,7 @@ import {
 } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useInterwovenKit } from "@initia/interwovenkit-react";
+import { fromBech32, toHex } from "@cosmjs/encoding";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -265,6 +266,22 @@ function truncateAddr(addr: string): string {
   return `${addr.slice(0, 8)}…${addr.slice(-6)}`;
 }
 
+function toHexWalletAddress(addr: string): string {
+  const trimmed = addr.trim();
+  if (!trimmed) return "";
+
+  if (trimmed.startsWith("0x")) {
+    return `0x${trimmed.slice(2).toLowerCase()}`;
+  }
+
+  try {
+    const { data } = fromBech32(trimmed);
+    return `0x${toHex(data)}`;
+  } catch {
+    return "";
+  }
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 interface ServerMessage {
@@ -280,7 +297,9 @@ export function useBotConfigChat() {
   const { address, initiaAddress, openConnect } = useInterwovenKit();
 
   const walletAddress = initiaAddress || address || "";
-  const isWalletConnected = Boolean(walletAddress);
+  const walletHexAddress = toHexWalletAddress(walletAddress);
+  const walletDisplayAddress = walletHexAddress || walletAddress;
+  const isWalletConnected = Boolean(walletAddress) && Boolean(walletHexAddress);
 
   // ── Chat state ───────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -333,7 +352,7 @@ export function useBotConfigChat() {
     greetingShownRef.current = true;
 
     const walletLine = isWalletConnected
-      ? `\n\n✅ **Wallet detected:** \`${truncateAddr(walletAddress)}\` — I'll use this as your bot's wallet address automatically. You won't need to paste it anywhere.`
+      ? `\n\n✅ **Wallet detected:** \`${truncateAddr(walletDisplayAddress)}\` — I'll use this as your bot's wallet address automatically. You won't need to paste it anywhere.`
       : `\n\n⚠️ **No wallet connected.** Please connect your wallet and enable **AutoSign** before generating a bot — I need your address to configure it correctly.`;
 
     setMessages([
@@ -358,7 +377,7 @@ export function useBotConfigChat() {
 
   const prevConnectedRef = useRef(isWalletConnected);
   useEffect(() => {
-    if (!prevConnectedRef.current && isWalletConnected && walletAddress) {
+    if (!prevConnectedRef.current && isWalletConnected && walletDisplayAddress) {
       prevConnectedRef.current = true;
       setMessages((prev) => [
         ...prev,
@@ -366,14 +385,14 @@ export function useBotConfigChat() {
           id: uuidv4(),
           role: "assistant" as MessageRole,
           content:
-            `✅ **Wallet connected:** \`${truncateAddr(walletAddress)}\`\n\n` +
+            `✅ **Wallet connected:** \`${truncateAddr(walletDisplayAddress)}\`\n\n` +
             `Your address is now registered. I'll use it automatically for any bot I generate — no need to paste it. ` +
             `You can now describe the bot you'd like to build!`,
           timestamp: new Date(),
         },
       ]);
     }
-  }, [isWalletConnected, walletAddress]);
+  }, [isWalletConnected, walletDisplayAddress]);
 
   // ── Append helpers ────────────────────────────────────────────────────────
 
@@ -408,15 +427,15 @@ export function useBotConfigChat() {
     (extraContext?: string): ServerMessage[] => {
       const systemMessages: ServerMessage[] = [];
 
-      if (walletAddress) {
+      if (walletHexAddress) {
         systemMessages.push({
           role: "system",
           content:
             `System Context (injected by frontend, not visible to user): ` +
-            `The user's AutoSign wallet address is "${walletAddress}". ` +
+            `The user's AutoSign wallet address in hex format is "${walletHexAddress}". ` +
             `This FULLY SATISFIES the USER_WALLET_ADDRESS parameter requirement. ` +
             `Do NOT ask the user for their wallet address under any circumstances — it is confirmed. ` +
-            `Treat USER_WALLET_ADDRESS="${walletAddress}" as already collected and verified.`,
+            `Treat USER_WALLET_ADDRESS="${walletHexAddress}" as already collected and verified.`,
         });
       }
 
@@ -439,7 +458,7 @@ export function useBotConfigChat() {
       // [wallet context] → [conversation] → [expanded spec] → [extra]
       return [...systemMessages, ...history, ...expandedCtx, ...extraCtx];
     },
-    [walletAddress]
+    [walletHexAddress]
   );
 
   // ── Call /create-bot-chat ─────────────────────────────────────────────────
@@ -498,7 +517,9 @@ export function useBotConfigChat() {
           // Build the base env already containing the wallet address
           const knownValues: Record<string, string> = {
             ...envDefaults,
-            ...(walletAddress ? { USER_WALLET_ADDRESS: walletAddress } : {}),
+            ...(walletHexAddress
+              ? { USER_WALLET_ADDRESS: walletHexAddress }
+              : {}),
           };
 
           // Show only fields not already satisfied by env defaults or wallet
@@ -521,7 +542,7 @@ export function useBotConfigChat() {
 
           appendAssistant(
             `✅ **${botName}** is architecturally complete!\n\n` +
-              `Your wallet \`${truncateAddr(walletAddress)}\` is registered as the bot wallet. ` +
+              `Your wallet \`${truncateAddr(walletDisplayAddress)}\` is registered as the bot wallet. ` +
               `I just need a few more contract details to finish:`,
             {
               type: "dynamic_credentials_form",
@@ -551,7 +572,14 @@ export function useBotConfigChat() {
         setIsGenerating(false);
       }
     },
-    [appendAssistant, buildPayload, envDefaults, pushHistory, walletAddress]
+    [
+      appendAssistant,
+      buildPayload,
+      envDefaults,
+      pushHistory,
+      walletDisplayAddress,
+      walletHexAddress,
+    ]
   );
 
   // ── finalizeBot ───────────────────────────────────────────────────────────
@@ -582,7 +610,7 @@ export function useBotConfigChat() {
               expandedPromptRef.current || chatHistoryRef.current[0]?.content,
             envConfig,
             intent,
-            walletAddress,
+            walletAddress: walletHexAddress,
           }),
         });
 
@@ -610,7 +638,7 @@ export function useBotConfigChat() {
         setStep("idle");
       }
     },
-    [appendAssistant, walletAddress]
+    [appendAssistant, walletHexAddress]
   );
 
   // ── submitDynamicKeys ─────────────────────────────────────────────────────
@@ -622,7 +650,9 @@ export function useBotConfigChat() {
 
       const mergedEnv: Record<string, string> = {
         ...envDefaults,
-        ...(walletAddress ? { USER_WALLET_ADDRESS: walletAddress } : {}),
+        ...(walletHexAddress
+          ? { USER_WALLET_ADDRESS: walletHexAddress }
+          : {}),
         ...formData,
       };
 
@@ -634,7 +664,7 @@ export function useBotConfigChat() {
 
       await finalizeBot({ files, intent, botName, envConfig: mergedEnv });
     },
-    [envDefaults, finalizeBot, pushHistory, walletAddress]
+    [envDefaults, finalizeBot, pushHistory, walletHexAddress]
   );
 
   // ── Main send handler ─────────────────────────────────────────────────────
@@ -696,7 +726,7 @@ export function useBotConfigChat() {
 
           setIsTyping(false);
           appendAssistant(
-            `Analysing your request with wallet \`${truncateAddr(walletAddress)}\` — checking on-chain parameters…`
+            `Analysing your request with wallet \`${truncateAddr(walletDisplayAddress)}\` — checking on-chain parameters…`
           );
           pushHistory("assistant", "Analysing…");
 
@@ -719,7 +749,7 @@ export function useBotConfigChat() {
       input,
       isGenerating,
       isWalletConnected,
-      walletAddress,
+      walletDisplayAddress,
       appendMessage,
       appendAssistant,
       pushHistory,

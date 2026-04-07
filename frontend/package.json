@@ -13,6 +13,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "axios": "^1.7.4",
     "@clerk/nextjs": "^7.0.7",
     "@cosmjs/amino": "0.36.x",
     "@cosmjs/crypto": "0.36.x",

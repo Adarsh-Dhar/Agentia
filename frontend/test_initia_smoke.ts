@@ -1,4 +1,5 @@
 import "dotenv/config";
+import axios from "axios";
 import { shouldUseInitiaDeterministicFallback } from "./lib/intent/mcp-sanitizer.ts";
 
 type Json = Record<string, unknown>;
@@ -27,14 +28,19 @@ function parseJsonText(text: string): Json {
 }
 
 async function fetchJson(url: string, init: RequestInit, timeoutMs: number): Promise<{ status: number; text: string; data: Json }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    const text = await res.text();
+    const res = await axios({
+      url,
+      method: (init.method || 'GET') as any,
+      headers: init.headers,
+      data: init.body,
+      timeout: timeoutMs,
+      validateStatus: () => true // Accept all status codes
+    });
+    const text = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
     return { status: res.status, text, data: parseJsonText(text) };
-  } finally {
-    clearTimeout(timer);
+  } catch (error: any) {
+    throw new Error(`Request failed: ${error.message}`);
   }
 }
 

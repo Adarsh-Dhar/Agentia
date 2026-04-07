@@ -229,6 +229,11 @@ async function callGitHubModels(
       signal: controller.signal,
     });
 
+    console.log(
+      "[classify-intent] GitHub Models response:",
+      JSON.stringify({ model, status: res.status, ok: res.ok })
+    );
+
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       throw new Error(`GitHub Models ${res.status}: ${errText.slice(0, 200)}`);

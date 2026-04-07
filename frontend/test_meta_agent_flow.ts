@@ -1,4 +1,5 @@
 import "dotenv/config";
+import axios from "axios";
 
 type Json = Record<string, unknown>;
 
@@ -28,11 +29,16 @@ async function fetchJsonWithTimeout(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<{ status: number; data: Json; text: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
-    const text = await res.text();
+    const res = await axios({
+      url,
+      method: (init.method || 'GET') as any,
+      headers: init.headers,
+      data: init.body,
+      timeout: timeoutMs,
+      validateStatus: () => true // Accept all status codes
+    });
+    const text = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
     let data: Json = {};
     try {
       data = text ? (JSON.parse(text) as Json) : {};
@@ -40,8 +46,8 @@ async function fetchJsonWithTimeout(
       data = { raw: text };
     }
     return { status: res.status, data, text };
-  } finally {
-    clearTimeout(timer);
+  } catch (error: any) {
+    throw new Error(`Request failed: ${error.message}`);
   }
 }
 

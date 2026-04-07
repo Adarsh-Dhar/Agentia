@@ -43,6 +43,8 @@ load_dotenv(_BASE_DIR / ".env.local", override=True)
 logger = logging.getLogger(__name__)
 
 LLM_TIMEOUT_SECONDS  = int(os.environ.get("META_AGENT_LLM_TIMEOUT_SECONDS", "240"))
+LLM_MAX_RETRIES      = int(os.environ.get("META_AGENT_LLM_MAX_RETRIES", "2"))
+LLM_RETRY_BASE_DELAY = float(os.environ.get("META_AGENT_LLM_RETRY_BASE_DELAY_SECONDS", "0.6"))
 PLANNER_MAX_LOOPS    = int(os.environ.get("PLANNER_MAX_LOOPS", "4"))
 PLANNER_ENABLED      = os.environ.get("PLANNER_ENABLED", "true").lower() != "false"
 
@@ -58,6 +60,7 @@ def _log(level: str, message: str, trace_id: Optional[str] = None) -> None:
 
 MCP_BRIDGE_CONTENT = '''\
 import "dotenv/config";
+import axios from "axios";
 
 const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "";
 const INITIA_KEY = process.env.INITIA_KEY ?? "";
@@ -101,33 +104,19 @@ export async function callMcpTool(
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     for (const url of urls) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
       try {
         console.log(`[MCP] URL: ${url} (attempt ${attempt}/${attempts})`);
-        const response = await fetch(url, {
-          method: "POST",
+        const response = await axios.post(url, args, {
           headers: {
             "Content-Type": "application/json",
             ...(initiaKey ? { "x-session-key": initiaKey } : {}),
             "ngrok-skip-browser-warning": "true",
             "Bypass-Tunnel-Reminder": "true",
           },
-          body: JSON.stringify(args),
-          signal: controller.signal,
+          timeout: 10_000,
         });
-        clearTimeout(timeout);
 
-        if (!response.ok) {
-          const errText = await response.text();
-          lastError = `MCP ${server}/${tool} failed: ${response.status} — ${errText}`;
-          console.error(`[MCP] ✗ Response status: ${response.status}`);
-          if (response.status === 404) {
-            continue;
-          }
-          break;
-        }
-        const data = await response.json();
+        const data = response.data;
         console.log(`[MCP] ✓ Response received:`, JSON.stringify(data).substring(0, 200));
         const result = (data as { result?: { isError?: boolean; content?: unknown } })?.result;
         if (result?.isError) {
@@ -139,9 +128,14 @@ export async function callMcpTool(
         }
         return data;
       } catch (err) {
-        clearTimeout(timeout);
-        lastError = err instanceof Error ? err.message : String(err);
+        const status = (err as any)?.response?.status ?? 0;
+        const errText = (err as any)?.response?.data ?? (err instanceof Error ? err.message : String(err));
+        lastError = `MCP ${server}/${tool} failed: ${status} — ${errText}`;
         console.error(`[MCP] ✗ Error: ${lastError}`);
+        if (status === 404) {
+          continue;
+        }
+        break;
       }
     }
     if (attempt < attempts) await sleep(400 * attempt);
@@ -343,7 +337,7 @@ Do NOT generate src/config.ts. Read all values directly from process.env inside 
 CORE CONSTRAINTS:
 1. TypeScript + Node.js only.
 2. package.json must use "type": "module" and "start": "tsx src/index.ts".
-3. Minimal dependencies: dotenv, tsx, typescript, @types/node only.
+3. Minimal dependencies: axios (for HTTP), dotenv, tsx, typescript, @types/node only.
 4. Import "dotenv/config" at top of src/index.ts. Read all secrets from process.env.
 5. All money math uses BigInt only — no floats.
 6. SIMULATION_MODE defaults to true unless explicitly "false".
@@ -353,6 +347,8 @@ CORE CONSTRAINTS:
 10. Never use fake placeholder addresses.
 11. INITIA_KEY may be injected at runtime; do not fail at startup if missing.
 12. All verified on-chain data injected in the prompt MUST be used directly.
+13. CRITICAL: Use axios for all HTTP/HTTPS requests. Do NOT use fetch. Axios avoids WebContainer sandbox issues.
+14. Include axios: "^1.7.4" in package.json dependencies.
 
 INITIA RULES:
 - All reads: callMcpTool('initia', 'move_view', {network, address, module, function, type_args, args})
@@ -378,6 +374,7 @@ class MetaAgent:
             credential=AzureKeyCredential(token),
         )
         self.model      = os.environ.get("GITHUB_MODEL_NAME", "gpt-4o")
+        self.planner_model = os.environ.get("PLANNER_MODEL_NAME", "gpt-4o-mini")
         self.max_tokens = int(os.environ.get("GENERATION_MAX_TOKENS", "2048"))
         self.mcp_client = InitiaMCPClient()
         self.planner    = PlannerAgent(llm_caller=self._llm)
@@ -395,6 +392,23 @@ class MetaAgent:
         trace_id: Optional[str] = None,
     ) -> str:
         started_at = time.monotonic()
+        model_name = self.planner_model if operation == "planner" else self.model
+
+        def _is_retryable_error(exc: Exception) -> bool:
+            text = str(exc).lower()
+            retryable_markers = (
+                "connection aborted",
+                "remotedisconnected",
+                "remote end closed connection",
+                "service response error",
+                "connection reset",
+                "temporarily unavailable",
+                "read timed out",
+                "timed out",
+                "503",
+                "502",
+            )
+            return any(marker in text for marker in retryable_markers)
 
         def _complete():
             return self.client.complete(
@@ -402,43 +416,59 @@ class MetaAgent:
                     SystemMessage(content=system),
                     UserMessage(content=user),
                 ],
-                model=self.model,
+                model=model_name,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
 
-        executor = ThreadPoolExecutor(max_workers=1)
-        try:
-            _log(
-                "INFO",
-                f"{operation}: model={self.model} system_chars={len(system)} "
-                f"user_chars={len(user)} max_tokens={max_tokens} "
-                f"timeout={LLM_TIMEOUT_SECONDS}s",
-                trace_id,
-            )
-            future   = executor.submit(_complete)
-            response = future.result(timeout=LLM_TIMEOUT_SECONDS)
-        except FuturesTimeoutError:
-            future.cancel()
-            executor.shutdown(wait=False, cancel_futures=True)
-            elapsed = round(time.monotonic() - started_at, 2)
-            msg = (
-                f"LLM timeout after {LLM_TIMEOUT_SECONDS}s for {operation} "
-                f"(model={self.model}, elapsed={elapsed}s)"
-            )
-            _log("ERROR", msg, trace_id)
-            raise TimeoutError(msg)
-        except Exception as exc:
-            executor.shutdown(wait=False, cancel_futures=True)
-            elapsed = round(time.monotonic() - started_at, 2)
-            _log(
-                "ERROR",
-                f"{operation}: failed after {elapsed}s with {exc.__class__.__name__}: {exc}",
-                trace_id,
-            )
-            raise
-        else:
-            executor.shutdown(wait=False, cancel_futures=True)
+        max_attempts = max(1, LLM_MAX_RETRIES + 1)
+        attempt = 1
+        while True:
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = None
+            try:
+                _log(
+                    "INFO",
+                    f"{operation}: attempt={attempt}/{max_attempts} model={model_name} system_chars={len(system)} "
+                    f"user_chars={len(user)} max_tokens={max_tokens} timeout={LLM_TIMEOUT_SECONDS}s",
+                    trace_id,
+                )
+                future = executor.submit(_complete)
+                response = future.result(timeout=LLM_TIMEOUT_SECONDS)
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
+            except FuturesTimeoutError:
+                if future is not None:
+                    future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                elapsed = round(time.monotonic() - started_at, 2)
+                msg = (
+                    f"LLM timeout after {LLM_TIMEOUT_SECONDS}s for {operation} "
+                    f"(model={model_name}, elapsed={elapsed}s)"
+                )
+                _log("ERROR", msg, trace_id)
+                raise TimeoutError(msg)
+            except Exception as exc:
+                executor.shutdown(wait=False, cancel_futures=True)
+                elapsed = round(time.monotonic() - started_at, 2)
+                retryable = _is_retryable_error(exc)
+                if retryable and attempt < max_attempts:
+                    sleep_s = round(LLM_RETRY_BASE_DELAY * attempt, 2)
+                    _log(
+                        "WARN",
+                        f"{operation}: transient failure on attempt {attempt}/{max_attempts} "
+                        f"({exc.__class__.__name__}: {exc}); retrying in {sleep_s}s",
+                        trace_id,
+                    )
+                    time.sleep(sleep_s)
+                    attempt += 1
+                    continue
+                _log(
+                    "ERROR",
+                    f"{operation}: failed after {elapsed}s with {exc.__class__.__name__}: {exc}",
+                    trace_id,
+                )
+                raise
 
         content = response.choices[0].message.content
         elapsed = round(time.monotonic() - started_at, 2)

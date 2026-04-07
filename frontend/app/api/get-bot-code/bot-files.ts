@@ -29,6 +29,7 @@ const INITIA_PACKAGE_JSON = JSON.stringify(
     },
     dependencies: {
       dotenv: "^16.4.0",
+      axios: "^1.7.4",
     },
     devDependencies: {
       typescript: "^5.4.0",
@@ -81,6 +82,7 @@ POLL_INTERVAL=15
 `;
 
 const INITIA_MCP_BRIDGE_TS = `import "dotenv/config";
+import axios from "axios";
 
 const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "";
 const MCP_GATEWAY_UPSTREAM_URL = process.env.MCP_GATEWAY_UPSTREAM_URL ?? "";
@@ -132,25 +134,25 @@ async function callGateway(server: string, tool: string, args: Record<string, un
 
   let lastError = "unknown error";
   for (const url of urls) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true",
-        "Bypass-Tunnel-Reminder": "true",
-        ...(MCP_GATEWAY_UPSTREAM_URL ? { "x-mcp-upstream-url": String(MCP_GATEWAY_UPSTREAM_URL) } : {}),
-      },
-      body: JSON.stringify(args ?? {}),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      lastError = "MCP call failed: " + res.status + " " + body;
-      if (res.status === 404) {
+    try {
+      const res = await axios.post(url, args ?? {}, {
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          "Bypass-Tunnel-Reminder": "true",
+          ...(MCP_GATEWAY_UPSTREAM_URL ? { "x-mcp-upstream-url": String(MCP_GATEWAY_UPSTREAM_URL) } : {}),
+        },
+      });
+      return res.data;
+    } catch (error: any) {
+      const status = error?.response?.status ?? 0;
+      const body = error?.response?.data ?? error?.message ?? "";
+      lastError = "MCP call failed: " + status + " " + String(body).slice(0, 200);
+      if (status === 404) {
         continue;
       }
       throw new Error(lastError);
     }
-    return res.json();
   }
   throw new Error(lastError);
 }
@@ -165,25 +167,25 @@ function isRelayUnavailableError(message: string): boolean {
 
 async function callSigningRelay(args: Record<string, unknown>): Promise<unknown> {
   const submitUrl = RELAY_BASE + "/api/signing-relay";
-  const submitRes = await fetch(submitUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  let submitRes;
+  try {
+    submitRes = await axios.post(submitUrl, {
       network: args.network ?? "initia-testnet",
       moduleAddress: args.address,
       moduleName: args.module,
       functionName: args.function,
       typeArgs: args.type_args ?? [],
       args: args.args ?? [],
-    }),
-  });
-
-  if (!submitRes.ok) {
-    const errText = await submitRes.text().catch(() => "");
-    throw new Error("Signing relay submit failed (" + submitRes.status + "): " + errText.slice(0, 200));
+    }, {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error: any) {
+    const status = error?.response?.status ?? 0;
+    const errText = error?.response?.data ?? error?.message ?? "";
+    throw new Error("Signing relay submit failed (" + status + "): " + String(errText).slice(0, 200));
   }
 
-  const payload = (await submitRes.json()) as { requestId?: string };
+  const payload = submitRes.data as { requestId?: string };
   const requestId = String(payload.requestId ?? "").trim();
   if (!requestId) throw new Error("Signing relay did not return a requestId.");
 
@@ -192,12 +194,15 @@ async function callSigningRelay(args: Record<string, unknown>): Promise<unknown>
 
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, RELAY_POLL_INTERVAL_MS));
-    const pollRes = await fetch(resultUrl, { headers: { "Cache-Control": "no-store" } });
-    if (!pollRes.ok) {
-      throw new Error("Signing relay poll failed (" + pollRes.status + ").");
+    let pollRes;
+    try {
+      pollRes = await axios.get(resultUrl, { headers: { "Cache-Control": "no-store" } });
+    } catch (error: any) {
+      const status = error?.response?.status ?? 0;
+      throw new Error("Signing relay poll failed (" + status + ").");
     }
 
-    const data = (await pollRes.json()) as { status: string; result?: { txHash?: string; error?: string } };
+    const data = pollRes.data as { status: string; result?: { txHash?: string; error?: string } };
     if (data.status === "signed" && data.result?.txHash) {
       return { txHash: data.result.txHash, success: true };
     }

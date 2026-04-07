@@ -1046,6 +1046,7 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
 
         const dependencies = {
           ...(parsed.dependencies ?? {}),
+          axios: "^1.7.4",
           dotenv: "^16.4.0",
         };
 
@@ -1092,6 +1093,7 @@ function patchSentimentBotFiles(files: GeneratedFile[], intent: Record<string, u
         dev: "tsx src/index.ts",
       },
       dependencies: {
+        axios: "^1.7.4",
         dotenv: "^16.4.0",
       },
       devDependencies: {
