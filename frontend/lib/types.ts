@@ -127,7 +127,6 @@ export interface AgentsTableProps {
 
 export const SUPPORTED_CHAINS = {
   "initia-testnet": { label: "Initia Testnet", chainId: "initiation-2", rpcHint: "https://rpc.testnet.initia.xyz/" },
-  "initia-mainnet": { label: "Initia Mainnet", chainId: "interwoven-1", rpcHint: "https://rpc.initia.xyz/" },
 } as const;
 
 export type ChainKey = keyof typeof SUPPORTED_CHAINS;
@@ -137,7 +136,6 @@ export const SUPPORTED_BASE_TOKENS: Record<string, { label: string; address: Rec
     label:    "USDC",
     address:  {
       "initia-testnet": "uusdc",
-      "initia-mainnet": "uusdc",
     },
     decimals: 6,
   },
@@ -145,7 +143,6 @@ export const SUPPORTED_BASE_TOKENS: Record<string, { label: string; address: Rec
     label:    "INIT",
     address:  {
       "initia-testnet": "uinit",
-      "initia-mainnet": "uinit",
     },
     decimals: 6,
   },
@@ -156,7 +153,6 @@ export const SUPPORTED_TARGET_TOKENS: Record<string, { label: string; address: R
     label: "USDC",
     address: {
       "initia-testnet": "uusdc",
-      "initia-mainnet": "uusdc",
     },
     decimals: 6,
   },
@@ -164,7 +160,6 @@ export const SUPPORTED_TARGET_TOKENS: Record<string, { label: string; address: R
     label: "INIT",
     address: {
       "initia-testnet": "uinit",
-      "initia-mainnet": "uinit",
     },
     decimals: 6,
   },

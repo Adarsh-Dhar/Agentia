@@ -1,5 +1,5 @@
 const INITIA_ALLOWED_MCPS = new Set(["initia"]);
-const INITIA_NETWORKS = new Set(["initia-mainnet", "initia-testnet"]);
+const INITIA_NETWORKS = new Set(["initia-testnet"]);
 
 function defaultInitiaNetwork(): string {
   const envNetwork = normalizeMcp(process.env.DEFAULT_INITIA_NETWORK ?? process.env.INITIA_NETWORK);

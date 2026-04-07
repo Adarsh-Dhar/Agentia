@@ -87,7 +87,6 @@ function chainBadge(intent?: BotIntent | null): string {
   if (!intent) return "◇ Initia";
   const nets: Record<string, string> = {
     "initia-testnet": "◇ Initia Testnet",
-    "initia-mainnet": "◇ Initia Mainnet",
   };
   return nets[intent.network ?? ""] ?? "◇ Initia";
 }

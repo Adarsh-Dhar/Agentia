@@ -32,13 +32,12 @@ DEFAULT_CONFIG = {
 }
 
 CHAIN_IDS = {
-    "initia-mainnet": "interwoven-1",
     "initia-testnet": "initiation-2",
 }
 
 TOKEN_DENOMS = {
-    "INIT": {"initia-mainnet": "uinit", "initia-testnet": "uinit"},
-    "USDC": {"initia-mainnet": "uusdc", "initia-testnet": "uusdc"},
+    "INIT": {"initia-testnet": "uinit"},
+    "USDC": {"initia-testnet": "uusdc"},
 }
 
 

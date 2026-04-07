@@ -47,5 +47,4 @@ export const TOKEN_ADDRESSES = {
 
 export const SUPPORTED_NETWORKS = [
   { id: 'initia-testnet', name: 'Initia Testnet', icon: '◇' },
-  { id: 'initia-mainnet', name: 'Initia Mainnet', icon: '◇' },
 ]

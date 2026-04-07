@@ -73,7 +73,6 @@ function chainLabel(intent?: BotIntent | null): { label: string; color: string }
   if (!intent) return { label: "◇ Initia", color: "text-cyan-400" };
   const nets: Record<string, { label: string; color: string }> = {
     "initia-testnet": { label: "◇ Initia Testnet", color: "text-blue-400" },
-    "initia-mainnet": { label: "◇ Initia Mainnet", color: "text-blue-400" },
   };
   return nets[intent.network ?? ""] ?? { label: "◇ Initia", color: "text-cyan-400" };
 }

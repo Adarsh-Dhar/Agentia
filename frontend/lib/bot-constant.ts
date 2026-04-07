@@ -154,7 +154,7 @@ export function getRequiredEnvFields(
       type: "text",
       required: false,
       placeholder: "initia-testnet",
-      helpText: "initia-testnet or initia-mainnet.",
+      helpText: "initia-testnet.",
     },
   ];
 

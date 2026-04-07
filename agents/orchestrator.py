@@ -247,7 +247,7 @@ Analyze the prompt and return ONLY valid JSON — no markdown, no preamble.
 Schema:
 {
   "chain": "initia",
-  "network": "initia-mainnet" | "initia-testnet",
+    "network": "initia-testnet",
   "strategy": "arbitrage" | "sentiment" | "sniping" | "dca" | "grid" | "whale_mirror" | "yield" | "yield_sweeper" | "cross_chain_liquidation" | "cross_chain_arbitrage" | "cross_chain_sweep" | "custom_utility" | "perp" | "unknown",
   "mcps": ["list of MCP server names to use"],
   "bot_name": "human-readable name",
@@ -630,8 +630,7 @@ class MetaAgent:
         intent["strategy"] = strategy
         intent["mcps"]     = ["initia"]
 
-        network = str(intent.get("network", "")).strip().lower()
-        intent["network"] = network if network in {"initia-mainnet", "initia-testnet"} else "initia-testnet"
+        intent["network"] = "initia-testnet"
         return intent
 
     def build_bot(self, prompt: str, trace_id: Optional[str] = None) -> Dict[str, Any]:
@@ -862,7 +861,7 @@ Interwoven Bridge schema:
 
         return f"""
 CHAIN CONTEXT — INITIA ({network})
-Network IDs: initia-mainnet=interwoven-1  initia-testnet=initiation-2
+Network IDs: initia-testnet=initiation-2
 
 MCP tool signatures:
 {mcp_hints}

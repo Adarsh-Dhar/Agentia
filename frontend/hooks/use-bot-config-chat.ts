@@ -3,16 +3,19 @@
  *
  * Multi-turn Planner Agent chat hook.
  *
- * Conversation flow:
- *   1. User describes their bot strategy.
- *   2. classify-intent → expandedPrompt + intent (quick client-side pass).
- *   3. POST /create-bot-chat with full history.
- *      a. status="clarification_needed" → append question, wait for next user message.
- *      b. status="ready"                → save bot, show success card.
- *      c. status="error"                → show error inline.
- *
- * All messages are accumulated into `chatHistory` and sent on EVERY turn so
- * the Python Planner Agent has full context — matching the architecture spec.
+ * KEY ADDITIONS (AutoSign wallet integration):
+ *  1. Reads `address` / `initiaAddress` from InterwovenKit on every send.
+ *  2. If wallet NOT connected → shows an inline blocking message and returns early.
+ *     No API call is made until the user connects.
+ *  3. If wallet IS connected → silently prepends a `system` message to the
+ *     payload (never shown in the UI) that tells the Planner Agent:
+ *       "USER_WALLET_ADDRESS = <initiaAddress>"
+ *     The Planner reads this, satisfies the USER_WALLET_ADDRESS requirement,
+ *     and never asks the user for it.
+ *  4. USER_WALLET_ADDRESS is removed from all credential forms because it is
+ *     already known from the session.
+ *  5. The greeting shows a live wallet badge so the user knows their address
+ *     has been detected.
  */
 
 "use client";
@@ -26,6 +29,7 @@ import {
   KeyboardEvent,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { useInterwovenKit } from "@initia/interwovenkit-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,9 +37,7 @@ export type MessageRole = "user" | "assistant";
 
 export interface ChatCard {
   type: "dynamic_credentials_form" | "success_card";
-  // dynamic_credentials_form
   fields?: CredentialField[];
-  // success_card
   agentId?: string;
   botName?: string;
 }
@@ -57,68 +59,193 @@ export interface CredentialField {
 }
 
 export type Step =
-  | "idle"        // waiting for first message
-  | "classifying" // quick intent classify
-  | "planning"    // Planner loop running
-  | "ask_keys"    // showing credentials form to user
-  | "generating"  // saving bot to DB
-  | "done";       // bot ready
+  | "idle"
+  | "classifying"
+  | "planning"
+  | "ask_keys"
+  | "generating"
+  | "done";
 
-// ─── Credential field schemas per strategy ────────────────────────────────────
+// ─── Credential field schemas
+// USER_WALLET_ADDRESS intentionally excluded from ALL schemas —
+// it is always resolved from the connected AutoSign wallet session.
+// ─────────────────────────────────────────────────────────────────────────────
 
 const STRATEGY_FIELDS: Record<string, CredentialField[]> = {
   yield: [
-    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1... or yourname.init", required: true },
-    { key: "INITIA_BRIDGE_ADDRESS", label: "Bridge Contract Address", placeholder: "0x1", required: true },
-    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Object Address", placeholder: "0x...", required: true },
-    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", type: "text", required: true },
+    {
+      key: "INITIA_BRIDGE_ADDRESS",
+      label: "Bridge Contract Address",
+      placeholder: "0x1",
+      required: true,
+    },
+    {
+      key: "INITIA_USDC_METADATA_ADDRESS",
+      label: "USDC Metadata Object Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "MCP_GATEWAY_URL",
+      label: "MCP Gateway URL",
+      placeholder: "http://localhost:8000/mcp",
+      required: true,
+    },
   ],
   arbitrage: [
-    { key: "INITIA_POOL_A_ADDRESS", label: "Pool A Address", placeholder: "0x...", required: true },
-    { key: "INITIA_POOL_B_ADDRESS", label: "Pool B Address", placeholder: "0x...", required: true },
-    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
-    { key: "INITIA_SWAP_ROUTER_ADDRESS", label: "Swap Router Address", placeholder: "0x...", required: true },
-    { key: "INITIA_EXECUTION_AMOUNT_USDC", label: "Execution Amount (µUSDC)", placeholder: "1000000", required: true },
-    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+    {
+      key: "INITIA_POOL_A_ADDRESS",
+      label: "Pool A Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_POOL_B_ADDRESS",
+      label: "Pool B Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_USDC_METADATA_ADDRESS",
+      label: "USDC Metadata Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_SWAP_ROUTER_ADDRESS",
+      label: "Swap Router Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_EXECUTION_AMOUNT_USDC",
+      label: "Execution Amount (µUSDC)",
+      placeholder: "1000000",
+      required: true,
+    },
+    {
+      key: "MCP_GATEWAY_URL",
+      label: "MCP Gateway URL",
+      placeholder: "http://localhost:8000/mcp",
+      required: true,
+    },
   ],
   cross_chain_liquidation: [
-    { key: "INITIA_POOL_A_ADDRESS", label: "Lending Pool Address", placeholder: "0x...", required: true },
-    { key: "INITIA_BRIDGE_ADDRESS", label: "Bridge Contract Address", placeholder: "0x1", required: true },
-    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: true },
-    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
-    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+    {
+      key: "INITIA_POOL_A_ADDRESS",
+      label: "Lending Pool Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_BRIDGE_ADDRESS",
+      label: "Bridge Contract Address",
+      placeholder: "0x1",
+      required: true,
+    },
+    {
+      key: "INITIA_USDC_METADATA_ADDRESS",
+      label: "USDC Metadata Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "MCP_GATEWAY_URL",
+      label: "MCP Gateway URL",
+      placeholder: "http://localhost:8000/mcp",
+      required: true,
+    },
   ],
   cross_chain_arbitrage: [
-    { key: "INITIA_POOL_A_ADDRESS", label: "Pool A Address (buy side)", placeholder: "0x...", required: true },
-    { key: "INITIA_POOL_B_ADDRESS", label: "Pool B Address (sell side)", placeholder: "0x...", required: true },
-    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
-    { key: "INITIA_EXECUTION_AMOUNT_USDC", label: "Execution Amount (µUSDC)", placeholder: "1000000", required: true },
-    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+    {
+      key: "INITIA_POOL_A_ADDRESS",
+      label: "Pool A Address (buy side)",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_POOL_B_ADDRESS",
+      label: "Pool B Address (sell side)",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_USDC_METADATA_ADDRESS",
+      label: "USDC Metadata Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_EXECUTION_AMOUNT_USDC",
+      label: "Execution Amount (µUSDC)",
+      placeholder: "1000000",
+      required: true,
+    },
+    {
+      key: "MCP_GATEWAY_URL",
+      label: "MCP Gateway URL",
+      placeholder: "http://localhost:8000/mcp",
+      required: true,
+    },
   ],
   cross_chain_sweep: [
-    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: true },
-    { key: "INITIA_BRIDGE_ADDRESS", label: "Bridge Contract Address", placeholder: "0x1", required: true },
-    { key: "INITIA_USDC_METADATA_ADDRESS", label: "USDC Metadata Address", placeholder: "0x...", required: true },
-    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+    {
+      key: "INITIA_BRIDGE_ADDRESS",
+      label: "Bridge Contract Address",
+      placeholder: "0x1",
+      required: true,
+    },
+    {
+      key: "INITIA_USDC_METADATA_ADDRESS",
+      label: "USDC Metadata Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "MCP_GATEWAY_URL",
+      label: "MCP Gateway URL",
+      placeholder: "http://localhost:8000/mcp",
+      required: true,
+    },
   ],
   sentiment: [
-    { key: "INITIA_POOL_A_ADDRESS", label: "Pool A Address", placeholder: "0x...", required: true },
-    { key: "INITIA_POOL_B_ADDRESS", label: "Pool B Address", placeholder: "0x...", required: true },
-    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: true },
-    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+    {
+      key: "INITIA_POOL_A_ADDRESS",
+      label: "Pool A Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "INITIA_POOL_B_ADDRESS",
+      label: "Pool B Address",
+      placeholder: "0x...",
+      required: true,
+    },
+    {
+      key: "MCP_GATEWAY_URL",
+      label: "MCP Gateway URL",
+      placeholder: "http://localhost:8000/mcp",
+      required: true,
+    },
   ],
   custom_utility: [
-    { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: false },
-    { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+    {
+      key: "MCP_GATEWAY_URL",
+      label: "MCP Gateway URL",
+      placeholder: "http://localhost:8000/mcp",
+      required: true,
+    },
   ],
 };
 
 const FALLBACK_FIELDS: CredentialField[] = [
-  { key: "USER_WALLET_ADDRESS", label: "Wallet Address", placeholder: "init1...", required: false },
-  { key: "MCP_GATEWAY_URL", label: "MCP Gateway URL", placeholder: "http://localhost:8000/mcp", required: true },
+  {
+    key: "MCP_GATEWAY_URL",
+    label: "MCP Gateway URL",
+    placeholder: "http://localhost:8000/mcp",
+    required: true,
+  },
 ];
-
-// ─── Strategy detection chips ─────────────────────────────────────────────────
 
 const INITIAL_CHIPS = [
   "Yield sweeper bot",
@@ -127,41 +254,66 @@ const INITIAL_CHIPS = [
   "Custom utility bot",
 ];
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function truncateAddr(addr: string): string {
+  if (addr.length <= 16) return addr;
+  return `${addr.slice(0, 8)}…${addr.slice(-6)}`;
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 interface ServerMessage {
-  role: string;
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
 export function useBotConfigChat() {
-  const [messages,        setMessages]        = useState<ChatMessage[]>([]);
-  const [input,           setInput]           = useState("");
-  const [step,            setStep]            = useState<Step>("idle");
-  const [isTyping,        setIsTyping]        = useState(false);
-  const [isGenerating,    setIsGenerating]    = useState(false);
-  const [chips,           setChips]           = useState<string[]>(INITIAL_CHIPS);
-  const [generatedAgentId,setGeneratedAgentId]= useState<string | null>(null);
-  const [envDefaults,     setEnvDefaults]     = useState<Record<string, string>>({});
+  // ── AutoSign / InterwovenKit wallet ──────────────────────────────────────
+  //
+  // initiaAddress → bech32 "init1..."  (preferred for Initia Move calls)
+  // address       → hex/EVM "0x..."   (fallback)
+  const { address, initiaAddress, openConnect } = useInterwovenKit();
 
-  // Full conversation history sent to the Python backend on every turn.
-  // The Planner Agent needs the ENTIRE history to maintain context.
+  const walletAddress = initiaAddress || address || "";
+  const isWalletConnected = Boolean(walletAddress);
+
+  // ── Chat state ───────────────────────────────────────────────────────────
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [step, setStep] = useState<Step>("idle");
+  const [isTyping, setIsTyping] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [chips, setChips] = useState<string[]>(INITIAL_CHIPS);
+  const [generatedAgentId, setGeneratedAgentId] = useState<string | null>(null);
+  const [envDefaults, setEnvDefaults] = useState<Record<string, string>>({});
+
+  // Full conversation history forwarded to Python on every turn
   const chatHistoryRef = useRef<ServerMessage[]>([]);
-
-  // Intent detected during classify step
   const detectedStrategyRef = useRef<string>("custom_utility");
-  const expandedPromptRef   = useRef<string>("");
-  const requestIdRef        = useRef<string>(uuidv4());
+  const expandedPromptRef = useRef<string>("");
+  const requestIdRef = useRef<string>(uuidv4());
+  const greetingShownRef = useRef(false);
+
+  const pendingBotRef = useRef<{
+    files: Record<string, unknown>[];
+    intent: Record<string, unknown>;
+    botName: string;
+  } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // ── Scroll ─────────────────────────────────────────────────────────────────
+  // ── Auto-scroll ───────────────────────────────────────────────────────────
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
-  // ── Load env defaults ───────────────────────────────────────────────────────
+  // ── Load env defaults ─────────────────────────────────────────────────────
 
   useEffect(() => {
     fetch("/api/env-defaults")
@@ -174,35 +326,60 @@ export function useBotConfigChat() {
       .catch(() => {});
   }, []);
 
-  // ── Greeting ────────────────────────────────────────────────────────────────
+  // ── Greeting (once, wallet-aware) ─────────────────────────────────────────
 
   useEffect(() => {
-    const greeting: ChatMessage = {
-      id:        uuidv4(),
-      role:      "assistant",
-      content:   (
-        "👋 Hi! I'm the **Planner Agent** — I'll help you design and generate a production-ready " +
-        "Initia bot.\n\n" +
-        "Tell me what you want your bot to do. I'll verify your addresses on-chain, ask for anything " +
-        "that's missing, and then generate the complete TypeScript code.\n\n" +
-        "What kind of bot are you building?"
-      ),
-      timestamp: new Date(),
-    };
-    setMessages([greeting]);
+    if (greetingShownRef.current) return;
+    greetingShownRef.current = true;
+
+    const walletLine = isWalletConnected
+      ? `\n\n✅ **Wallet detected:** \`${truncateAddr(walletAddress)}\` — I'll use this as your bot's wallet address automatically. You won't need to paste it anywhere.`
+      : `\n\n⚠️ **No wallet connected.** Please connect your wallet and enable **AutoSign** before generating a bot — I need your address to configure it correctly.`;
+
+    setMessages([
+      {
+        id: uuidv4(),
+        role: "assistant",
+        content:
+          "👋 Hi! I'm the **Planner Agent** — I'll help you design and generate a production-ready " +
+          "Initia bot.\n\n" +
+          "Tell me what you want your bot to do. I'll verify your addresses on-chain, ask for anything " +
+          "that's missing, and then generate the complete TypeScript code." +
+          walletLine +
+          "\n\nWhat kind of bot are you building?",
+        timestamp: new Date(),
+      },
+    ]);
+    // Run only on mount — wallet state is handled by the mid-session effect below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Append message helpers ──────────────────────────────────────────────────
+  // ── Mid-session wallet connect notification ───────────────────────────────
+
+  const prevConnectedRef = useRef(isWalletConnected);
+  useEffect(() => {
+    if (!prevConnectedRef.current && isWalletConnected && walletAddress) {
+      prevConnectedRef.current = true;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uuidv4(),
+          role: "assistant" as MessageRole,
+          content:
+            `✅ **Wallet connected:** \`${truncateAddr(walletAddress)}\`\n\n` +
+            `Your address is now registered. I'll use it automatically for any bot I generate — no need to paste it. ` +
+            `You can now describe the bot you'd like to build!`,
+          timestamp: new Date(),
+        },
+      ]);
+    }
+  }, [isWalletConnected, walletAddress]);
+
+  // ── Append helpers ────────────────────────────────────────────────────────
 
   const appendMessage = useCallback(
     (role: MessageRole, content: string, card?: ChatCard): ChatMessage => {
-      const msg: ChatMessage = {
-        id:        uuidv4(),
-        role,
-        content,
-        timestamp: new Date(),
-        card,
-      };
+      const msg: ChatMessage = { id: uuidv4(), role, content, timestamp: new Date(), card };
       setMessages((prev) => [...prev, msg]);
       return msg;
     },
@@ -214,16 +391,58 @@ export function useBotConfigChat() {
     [appendMessage]
   );
 
-  // ── Push to persistent history (sent to Python) ────────────────────────────
+  const pushHistory = useCallback(
+    (role: "user" | "assistant", content: string) => {
+      chatHistoryRef.current = [...chatHistoryRef.current, { role, content }];
+    },
+    []
+  );
 
-  const pushHistory = useCallback((role: "user" | "assistant", content: string) => {
-    chatHistoryRef.current = [
-      ...chatHistoryRef.current,
-      { role, content },
-    ];
-  }, []);
+  // ── Build enriched payload with SILENT wallet system message ─────────────
+  //
+  // This system message is injected at the top of every payload sent to Python.
+  // It is never rendered in the chat UI. The Planner reads it, satisfies
+  // USER_WALLET_ADDRESS from missing_parameters, and moves on.
 
-  // ── Call /create-bot-chat with full history ─────────────────────────────────
+  const buildPayload = useCallback(
+    (extraContext?: string): ServerMessage[] => {
+      const systemMessages: ServerMessage[] = [];
+
+      if (walletAddress) {
+        systemMessages.push({
+          role: "system",
+          content:
+            `System Context (injected by frontend, not visible to user): ` +
+            `The user's AutoSign wallet address is "${walletAddress}". ` +
+            `This FULLY SATISFIES the USER_WALLET_ADDRESS parameter requirement. ` +
+            `Do NOT ask the user for their wallet address under any circumstances — it is confirmed. ` +
+            `Treat USER_WALLET_ADDRESS="${walletAddress}" as already collected and verified.`,
+        });
+      }
+
+      const history = chatHistoryRef.current;
+
+      const expandedCtx: ServerMessage[] =
+        expandedPromptRef.current && history.length <= 2
+          ? [
+              {
+                role: "system",
+                content: `Expanded technical specification:\n${expandedPromptRef.current}`,
+              },
+            ]
+          : [];
+
+      const extraCtx: ServerMessage[] = extraContext
+        ? [{ role: "system", content: extraContext }]
+        : [];
+
+      // [wallet context] → [conversation] → [expanded spec] → [extra]
+      return [...systemMessages, ...history, ...expandedCtx, ...extraCtx];
+    },
+    [walletAddress]
+  );
+
+  // ── Call /create-bot-chat ─────────────────────────────────────────────────
 
   const callPlannerAgent = useCallback(
     async (additionalContext?: string): Promise<void> => {
@@ -232,32 +451,15 @@ export function useBotConfigChat() {
       setChips([]);
 
       try {
-        const history = chatHistoryRef.current;
-
-        // Inject expanded prompt context as a system message if we have it
-        const fullHistory =
-          expandedPromptRef.current && history.length <= 2
-            ? [
-                ...history,
-                {
-                  role: "system" as const,
-                  content: `Expanded technical specification:\n${expandedPromptRef.current}`,
-                },
-                ...(additionalContext
-                  ? [{ role: "system" as const, content: additionalContext }]
-                  : []),
-              ]
-            : additionalContext
-            ? [...history, { role: "system" as const, content: additionalContext }]
-            : history;
+        const payload = buildPayload(additionalContext);
 
         const res = await fetch(
           `${process.env.NEXT_PUBLIC_META_AGENT_URL ?? "http://127.0.0.1:8000"}/create-bot-chat`,
           {
-            method:  "POST",
+            method: "POST",
             headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({
-              messages:   fullHistory,
+            body: JSON.stringify({
+              messages: payload,
               request_id: requestIdRef.current,
             }),
           }
@@ -270,7 +472,7 @@ export function useBotConfigChat() {
 
         const data = await res.json();
 
-        // ── clarification_needed ────────────────────────────────────────────
+        // ── clarification_needed ─────────────────────────────────────────────
         if (data.status === "clarification_needed") {
           const question = String(data.question ?? "Could you provide more details?");
           setIsTyping(true);
@@ -282,87 +484,84 @@ export function useBotConfigChat() {
           return;
         }
 
-        // ── ready ────────────────────────────────────────────────────────────
+        // ── ready ─────────────────────────────────────────────────────────────
         if (data.status === "ready") {
           const botName = String(data.bot_name ?? "Your Bot");
-          const intent  = data.intent ?? {};
-          const files   = data.files  ?? [];
+          const intent = data.intent ?? {};
+          const files = data.files ?? [];
 
-          // Determine which credential fields to show based on detected strategy
           const strategy = String(
             intent.strategy ?? detectedStrategyRef.current ?? "custom_utility"
           );
           const fields = STRATEGY_FIELDS[strategy] ?? FALLBACK_FIELDS;
 
-          // Filter out fields whose values are already known from env
+          // Build the base env already containing the wallet address
+          const knownValues: Record<string, string> = {
+            ...envDefaults,
+            ...(walletAddress ? { USER_WALLET_ADDRESS: walletAddress } : {}),
+          };
+
+          // Show only fields not already satisfied by env defaults or wallet
           const filteredFields = fields.filter(
-            (f) => !envDefaults[f.key] || envDefaults[f.key].trim() === ""
+            (f) =>
+              f.key !== "USER_WALLET_ADDRESS" && // always pre-filled from wallet
+              (!knownValues[f.key] || knownValues[f.key].trim() === "")
           );
 
-          // If all required values are already in env, skip the form and generate immediately
           const allPresent = filteredFields.filter((f) => f.required).length === 0;
 
           if (allPresent) {
-            await finalizeBot({ files, intent, botName, envConfig: envDefaults });
+            await finalizeBot({ files, intent, botName, envConfig: knownValues });
             return;
           }
 
-          // Show dynamic credentials form
           setIsTyping(true);
           await sleep(500);
           setIsTyping(false);
 
           appendAssistant(
-            `✅ **${botName}** is architecturally complete! The Planner has verified your strategy.\n\n` +
-            `I just need a few runtime credentials to finish generating the bot:`,
+            `✅ **${botName}** is architecturally complete!\n\n` +
+              `Your wallet \`${truncateAddr(walletAddress)}\` is registered as the bot wallet. ` +
+              `I just need a few more contract details to finish:`,
             {
-              type:   "dynamic_credentials_form",
+              type: "dynamic_credentials_form",
               fields: filteredFields,
             }
           );
 
-          // Store files + intent for use after user submits credentials
           pendingBotRef.current = { files, intent, botName };
           setStep("ask_keys");
           return;
         }
 
         // ── error ─────────────────────────────────────────────────────────────
-        const errMsg = String(data.message ?? "An unknown error occurred.");
-        appendAssistant(`❌ ${errMsg}`);
+        appendAssistant(`❌ ${String(data.message ?? "An unknown error occurred.")}`);
         setStep("idle");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error("[callPlannerAgent] Error:", msg);
+        console.error("[callPlannerAgent]", msg);
         setIsTyping(false);
         appendAssistant(
-          `❌ Could not reach the Meta-Agent. Please ensure it's running:\n\n` +
-          `\`\`\`\ncd agents && uvicorn main:app --reload --port 8000\n\`\`\`\n\n` +
-          `Error: ${msg}`
+          `❌ Could not reach the Meta-Agent. Ensure it's running:\n\n` +
+            "```\ncd agents && uvicorn main:app --reload --port 8000\n```\n\n" +
+            `Error: ${msg}`
         );
         setStep("idle");
       } finally {
         setIsGenerating(false);
       }
     },
-    [appendAssistant, envDefaults, pushHistory]
+    [appendAssistant, buildPayload, envDefaults, pushHistory, walletAddress]
   );
 
-  // ── Pending bot state (files + intent waiting for credentials) ─────────────
+  // ── finalizeBot ───────────────────────────────────────────────────────────
 
-  const pendingBotRef = useRef<{
-    files:   Record<string, unknown>[];
-    intent:  Record<string, unknown>;
-    botName: string;
-  } | null>(null);
-
-  // ── Finalize: save bot to DB, show success card ────────────────────────────
-
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const finalizeBot = useCallback(
     async (params: {
-      files:     Record<string, unknown>[];
-      intent:    Record<string, unknown>;
-      botName:   string;
+      files: Record<string, unknown>[];
+      intent: Record<string, unknown>;
+      botName: string;
       envConfig: Record<string, string>;
     }) => {
       const { files, intent, botName, envConfig } = params;
@@ -375,13 +574,15 @@ export function useBotConfigChat() {
         appendAssistant("⏳ Saving your bot and encrypting credentials…");
 
         const saveRes = await fetch("/api/generate-bot", {
-          method:  "POST",
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({
-            prompt:         chatHistoryRef.current[0]?.content ?? botName,
-            expandedPrompt: expandedPromptRef.current || chatHistoryRef.current[0]?.content,
+          body: JSON.stringify({
+            prompt: chatHistoryRef.current[0]?.content ?? botName,
+            expandedPrompt:
+              expandedPromptRef.current || chatHistoryRef.current[0]?.content,
             envConfig,
             intent,
+            walletAddress,
           }),
         });
 
@@ -392,59 +593,51 @@ export function useBotConfigChat() {
 
         const saved = await saveRes.json();
         const agentId = String(saved.agentId ?? "");
-
-        if (!agentId) {
-          throw new Error("No agentId returned from save endpoint.");
-        }
+        if (!agentId) throw new Error("No agentId returned from save endpoint.");
 
         setGeneratedAgentId(agentId);
         setStep("done");
         setChips([]);
 
         appendAssistant(
-          `🎉 **${botName}** is ready! Your bot has been generated, verified, and saved.`,
-          {
-            type:    "success_card",
-            agentId,
-            botName,
-          }
+          `🎉 **${botName}** is ready! Generated, verified, and saved.`,
+          { type: "success_card", agentId, botName }
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error("[finalizeBot] Error:", msg);
         setIsTyping(false);
         appendAssistant(`❌ Failed to save bot: ${msg}`);
         setStep("idle");
       }
     },
-    [appendAssistant]
+    [appendAssistant, walletAddress]
   );
 
-  // ── Submit dynamic credentials ─────────────────────────────────────────────
+  // ── submitDynamicKeys ─────────────────────────────────────────────────────
 
   const submitDynamicKeys = useCallback(
     async (formData: Record<string, string>) => {
       if (!pendingBotRef.current) return;
       const { files, intent, botName } = pendingBotRef.current;
 
-      // Merge form data with env defaults (form data takes priority)
-      const mergedEnv: Record<string, string> = { ...envDefaults, ...formData };
+      const mergedEnv: Record<string, string> = {
+        ...envDefaults,
+        ...(walletAddress ? { USER_WALLET_ADDRESS: walletAddress } : {}),
+        ...formData,
+      };
 
-      // Inject verified params as a system context for next Planner call if needed
       const contextLine = Object.entries(formData)
-        .filter(([, v]) => v.trim())
+        .filter(([k, v]) => k !== "USER_WALLET_ADDRESS" && v.trim())
         .map(([k, v]) => `${k}=${v}`)
         .join(", ");
-      if (contextLine) {
-        pushHistory("user", `My configuration: ${contextLine}`);
-      }
+      if (contextLine) pushHistory("user", `My configuration: ${contextLine}`);
 
       await finalizeBot({ files, intent, botName, envConfig: mergedEnv });
     },
-    [envDefaults, finalizeBot, pushHistory]
+    [envDefaults, finalizeBot, pushHistory, walletAddress]
   );
 
-  // ── Main send handler ──────────────────────────────────────────────────────
+  // ── Main send handler ─────────────────────────────────────────────────────
 
   const handleSend = useCallback(
     async (overrideText?: string) => {
@@ -454,63 +647,85 @@ export function useBotConfigChat() {
       setInput("");
       setChips([]);
 
-      // Append user message to UI
-      appendMessage("user", text);
-      // Append to persistent history
-      pushHistory("user", text);
+      // ── GATE: block backend calls until wallet is connected ─────────────
+      if (!isWalletConnected) {
+        appendMessage("user", text);
+        await sleep(300);
+        setIsTyping(true);
+        await sleep(600);
+        setIsTyping(false);
+        appendAssistant(
+          "⚠️ **Wallet not connected.**\n\n" +
+            "I need your wallet address to configure the bot correctly. " +
+            "Please connect your wallet and enable **AutoSign** using the button in the header, " +
+            "then send your message again.\n\n" +
+            "Once connected, I'll automatically detect your address — you won't need to paste it anywhere."
+        );
+        return; // ← no API call made
+      }
 
+      // Append to UI and persistent history
+      appendMessage("user", text);
+      pushHistory("user", text);
       setIsTyping(true);
 
       try {
-        // ── First turn: run classify-intent for expanded prompt ──────────────
-        if (chatHistoryRef.current.filter((m) => m.role === "user").length === 1) {
-          let expandedPrompt = text;
+        const isFirstUserMessage =
+          chatHistoryRef.current.filter((m) => m.role === "user").length === 1;
 
+        if (isFirstUserMessage) {
+          // Expand the prompt via classify-intent (non-fatal if it fails)
+          let expandedPrompt = text;
           try {
             const classifyRes = await fetch("/api/classify-intent", {
-              method:  "POST",
+              method: "POST",
               headers: { "Content-Type": "application/json" },
-              body:    JSON.stringify({ prompt: text }),
+              body: JSON.stringify({ prompt: text }),
             });
             if (classifyRes.ok) {
               const classifyData = await classifyRes.json();
               expandedPrompt = classifyData.expandedPrompt || text;
-              const detectedStrategy = String(
+              detectedStrategyRef.current = String(
                 classifyData.intent?.strategy ?? "custom_utility"
               );
-              detectedStrategyRef.current = detectedStrategy;
-              expandedPromptRef.current   = expandedPrompt;
+              expandedPromptRef.current = expandedPrompt;
             }
           } catch {
-            // classify-intent failure is non-fatal
+            /* non-fatal */
           }
 
           setIsTyping(false);
           appendAssistant(
-            "Got it! Let me analyse your request and verify the on-chain parameters…"
+            `Analysing your request with wallet \`${truncateAddr(walletAddress)}\` — checking on-chain parameters…`
           );
-          pushHistory("assistant", "Analysing your request…");
+          pushHistory("assistant", "Analysing…");
 
           await sleep(300);
           await callPlannerAgent();
           return;
         }
 
-        // ── Subsequent turns: push to history and re-run Planner ──────────────
+        // Subsequent turns: re-run planner with updated history
         setIsTyping(false);
         await callPlannerAgent();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error("[handleSend] Error:", msg);
         setIsTyping(false);
         appendAssistant(`❌ ${msg}`);
         setStep("idle");
       }
     },
-    [input, isGenerating, appendMessage, appendAssistant, pushHistory, callPlannerAgent]
+    [
+      input,
+      isGenerating,
+      isWalletConnected,
+      walletAddress,
+      appendMessage,
+      appendAssistant,
+      pushHistory,
+      callPlannerAgent,
+    ]
   );
-
-  // ── Input handlers ─────────────────────────────────────────────────────────
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -522,9 +737,10 @@ export function useBotConfigChat() {
     [handleSend]
   );
 
-  const handleInputChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-  }, []);
+  const handleInputChange = useCallback(
+    (e: ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value),
+    []
+  );
 
   return {
     messages,
@@ -536,15 +752,14 @@ export function useBotConfigChat() {
     generatedAgentId,
     step,
     envDefaults,
+    // Wallet — useful for UI badges/indicators
+    walletAddress,
+    isWalletConnected,
+    openConnect,
+    // Handlers
     handleSend,
     handleKeyDown,
     handleInputChange,
     submitDynamicKeys,
   };
-}
-
-// ─── Utility ──────────────────────────────────────────────────────────────────
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -174,7 +174,7 @@ async function testInitiaMoveViewContract(): Promise<void> {
         accept: "application/json",
       },
       body: JSON.stringify({
-        network: "initia-mainnet",
+        network: "initia-testnet",
         address: "0x1",
         module: "coin",
         function: "balance",
@@ -213,7 +213,7 @@ async function testInitiaMoveExecuteContract(): Promise<void> {
         accept: "application/json",
       },
       body: JSON.stringify({
-        network: "initia-mainnet",
+        network: "initia-testnet",
         address: bridgeAddress,
         module: "interwoven_bridge",
         function: "sweep_to_l1",

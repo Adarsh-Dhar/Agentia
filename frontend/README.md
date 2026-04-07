@@ -47,7 +47,7 @@ Agentia is a comprehensive platform for deploying and managing autonomous AI tra
 
 ### Bridge/Wallet (/dashboard/bridge)
 - Cross-chain deposit interface
-- Network selection (Initia Testnet, Initia Mainnet)
+- Network selection (Initia Testnet)
 - Amount input with fee calculation
 - Security highlights and asset information
 

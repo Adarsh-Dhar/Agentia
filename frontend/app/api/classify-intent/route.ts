@@ -14,7 +14,7 @@ Your task: take a brief user idea for an Initia-native bot and expand it into an
 Cover ALL of the following in your expansion:
 
 1. **Target & Execution Architecture**:
-   - Chain: Initia (initia-testnet or initia-mainnet).
+  - Chain: Initia (initia-testnet only).
    - Execution Model: Polling loop, Event-driven, or Agentic (AI-driven). Define the exact triggers or intervals.
 
 2. **Domain-Specific Logic (Adapt to the user's request)**:
@@ -72,7 +72,7 @@ const FALLBACK_CLASSIFIER_PROMPT = `You are a DeFi bot intent classifier. Analyz
 Required schema:
 {
   "chain": "initia",
-  "network": "initia-mainnet" | "initia-testnet",
+  "network": "initia-testnet",
   "execution_model": "polling" | "websocket" | "agentic",
   "strategy": "arbitrage" | "sniping" | "dca" | "grid" | "sentiment" | "whale_mirror" | "news_reactive" | "yield" | "yield_sweeper" | "cross_chain_liquidation" | "cross_chain_arbitrage" | "cross_chain_sweep" | "custom_utility" | "perp" | "mev_intent" | "scalper" | "rebalancing" | "ta_scripter" | "unknown",
   "required_mcps": ["initia"],
@@ -109,7 +109,7 @@ function normalizeIntentFromPrompt(intent: Record<string, unknown>, prompt: stri
   const normalized: Record<string, unknown> = {
     ...intent,
     chain: "initia",
-    network: String(intent.network ?? "").toLowerCase().includes("mainnet") ? "initia-mainnet" : "initia-testnet",
+    network: "initia-testnet",
   };
 
   if (isCustomUtility) {
@@ -367,7 +367,7 @@ function deriveDefaultIntent(prompt: string): Record<string, unknown> {
   const isSpreadScanner = /(spread scanner|read-only scanner|read only scanner|market intelligence)/.test(lower);
   const isInitiaSentiment = lower.includes("sentiment") || lower.includes("social");
   const isCustomUtility = /(custom utility|custom bot|custom workflow|intent:\s*custom|strategy:\s*custom)/.test(lower);
-  const initiaNetwork = lower.includes("mainnet") ? "initia-mainnet" : "initia-testnet";
+  const initiaNetwork = "initia-testnet";
   let strategy = "unknown";
   let botName = "Initia Move Bot";
 

@@ -173,7 +173,7 @@ FLOW:
 4. If all parameters collected and verified → set is_ready_for_code_generation=true,
    build enriched_prompt with all verified values inline.
 
-NETWORK: default INITIA_NETWORK to "initia-testnet" unless user specifies mainnet.
+NETWORK: set INITIA_NETWORK to "initia-testnet".
 """
 
 
